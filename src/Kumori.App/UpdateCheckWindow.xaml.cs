@@ -9,8 +9,8 @@ namespace Kumori.App;
 
 public partial class UpdateCheckWindow : Window
 {
-    private const string ReleasesUrl = "https://github.com/Lorenzo0111/Kumori/releases";
-    private const string LatestApiUrl = "https://api.github.com/repos/Lorenzo0111/Kumori/releases/latest";
+    private const string ReleasesUrl = "https://github.com/Lorenso0/Kumori/releases";
+    private const string LatestApiUrl = "https://api.github.com/repos/Lorenso0/Kumori/releases/latest";
     private static readonly HttpClient Http = new();
 
     static UpdateCheckWindow()
