@@ -1,0 +1,183 @@
+diff --git a/osu.Game.Rulesets.Osu/UI/DrawableOsuRuleset.cs b/osu.Game.Rulesets.Osu/UI/DrawableOsuRuleset.cs
+index 12d5363..e1b5f9c 100644
+--- a/osu.Game.Rulesets.Osu/UI/DrawableOsuRuleset.cs
++++ b/osu.Game.Rulesets.Osu/UI/DrawableOsuRuleset.cs
+@@ -34,6 +34,8 @@ public partial class DrawableOsuRuleset : DrawableRuleset<OsuHitObject>
+ 
+         protected new OsuRulesetConfigManager Config => (OsuRulesetConfigManager)base.Config;
+ 
++        public Bindable<bool> ReplayClickMarkersEnabled => Config.GetBindable<bool>(OsuRulesetSetting.ReplayClickMarkersEnabled);
++
+         public DrawableOsuRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList<Mod>? mods = null)
+             : base(ruleset, beatmap, mods)
+         {
+diff --git a/osu.Game/Screens/Play/HUD/ReplayOverlay.cs b/osu.Game/Screens/Play/HUD/ReplayOverlay.cs
+index b59cd5f..583d65a 100644
+--- a/osu.Game/Screens/Play/HUD/ReplayOverlay.cs
++++ b/osu.Game/Screens/Play/HUD/ReplayOverlay.cs
+@@ -21,6 +21,7 @@ public partial class ReplayOverlay : CompositeDrawable, IKeyBindingHandler<Globa
+         private Bindable<bool> configSettingsOverlay = null!;
+         private Container messageContainer = null!;
+         private Container content = null!;
++        private bool forceSettingsVisible;
+ 
+         [BackgroundDependencyLoader]
+         private void load(OsuConfigManager config)
+@@ -53,7 +54,7 @@ protected override void LoadComplete()
+ 
+         private void updateVisibility()
+         {
+-            if (configSettingsOverlay.Value)
++            if (configSettingsOverlay.Value || forceSettingsVisible)
+                 content.FadeIn(fade_duration, Easing.OutQuint);
+             else
+                 content.FadeOut(fade_duration, Easing.OutQuint);
+@@ -67,6 +68,8 @@ public bool OnPressed(KeyBindingPressEvent<GlobalAction> e)
+             switch (e.Action)
+             {
+                 case GlobalAction.ToggleReplaySettings:
++                    if (forceSettingsVisible)
++                        return true;
+                     configSettingsOverlay.Value = !configSettingsOverlay.Value;
+                     return true;
+             }
+@@ -81,6 +84,13 @@ public void OnReleased(KeyBindingReleaseEvent<GlobalAction> e)
+         public override void Show() => this.FadeIn(fade_duration, Easing.OutQuint);
+         public override void Hide() => this.FadeOut(fade_duration, Easing.OutQuint);
+ 
++        public void SetSettingsForced(bool forced)
++        {
++            forceSettingsVisible = forced;
++            Settings.ForceExpanded = forced;
++            updateVisibility();
++        }
++
+         public void SetMessage(ScrollingMessage scrollingMessage) => messageContainer.Child = scrollingMessage;
+     }
+ }
+diff --git a/osu.Game/Screens/Play/HUD/ReplaySettingsOverlay.cs b/osu.Game/Screens/Play/HUD/ReplaySettingsOverlay.cs
+index 272bd59..5d38df7 100644
+--- a/osu.Game/Screens/Play/HUD/ReplaySettingsOverlay.cs
++++ b/osu.Game/Screens/Play/HUD/ReplaySettingsOverlay.cs
+@@ -1,6 +1,8 @@
+ // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+ // See the LICENCE file in the repository root for full licence text.
+ 
++using System.Collections.Generic;
++using System.Linq;
+ using osu.Framework.Allocation;
+ using osu.Framework.Extensions.Color4Extensions;
+ using osu.Framework.Graphics;
+@@ -35,8 +37,30 @@ public partial class ReplaySettingsOverlay : ExpandingContainer
+         private readonly FillFlowContainer content;
+ 
+         private readonly IconButton button;
++        private readonly bool anchorLeft;
+ 
+         private InputManager inputManager = null!;
++        private bool forceExpanded;
++
++        public IReadOnlyList<PlayerSettingsGroup> Groups => content.Children.OfType<PlayerSettingsGroup>().ToArray();
++
++        public bool ForceExpanded
++        {
++            get => forceExpanded;
++            set
++            {
++                forceExpanded = value;
++                button.Alpha = value ? 0 : 1;
++                if (value)
++                    Expanded.Value = true;
++            }
++        }
++
++        public void SetGroups(IEnumerable<PlayerSettingsGroup> groups)
++        {
++            content.Clear(false);
++            content.AddRange(groups);
++        }
+ 
+         [Resolved]
+         private HUDOverlay? hudOverlay { get; set; }
+@@ -47,11 +71,12 @@ public partial class ReplaySettingsOverlay : ExpandingContainer
+         // while collapsed down, so let's avoid that.
+         protected override bool ComputeIsMaskedAway(RectangleF maskingBounds) => false;
+ 
+-        public ReplaySettingsOverlay()
++        public ReplaySettingsOverlay(bool anchorLeft = false)
+             : base(0, EXPANDED_WIDTH)
+         {
+-            Origin = Anchor.TopRight;
+-            Anchor = Anchor.TopRight;
++            this.anchorLeft = anchorLeft;
++            Origin = anchorLeft ? Anchor.TopLeft : Anchor.TopRight;
++            Anchor = anchorLeft ? Anchor.TopLeft : Anchor.TopRight;
+ 
+             base.Content.Add(content = new FillFlowContainer
+             {
+@@ -70,8 +95,8 @@ public ReplaySettingsOverlay()
+             AddInternal(button = new IconButton
+             {
+                 Icon = FontAwesome.Solid.Cog,
+-                Origin = Anchor.TopRight,
+-                Anchor = Anchor.TopLeft,
++                Origin = anchorLeft ? Anchor.TopLeft : Anchor.TopRight,
++                Anchor = anchorLeft ? Anchor.TopRight : Anchor.TopLeft,
+                 Margin = new MarginPadding(5),
+                 Action = () => Expanded.Toggle()
+             });
+@@ -80,7 +105,9 @@ public ReplaySettingsOverlay()
+             {
+                 new Box
+                 {
+-                    Colour = ColourInfo.GradientHorizontal(Color4.Black.Opacity(0), Color4.Black.Opacity(0.8f)),
++                    Colour = anchorLeft
++                        ? ColourInfo.GradientHorizontal(Color4.Black.Opacity(0.8f), Color4.Black.Opacity(0))
++                        : ColourInfo.GradientHorizontal(Color4.Black.Opacity(0), Color4.Black.Opacity(0.8f)),
+                     Depth = float.MaxValue,
+                     RelativeSizeAxes = Axes.Both,
+                 },
+@@ -94,8 +121,15 @@ protected override void LoadComplete()
+             inputManager = GetContainingInputManager()!;
+         }
+ 
+-        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =>
+-            screenSpacePos.X > button.ScreenSpaceDrawQuad.TopLeft.X;
++        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
++        {
++            if (forceExpanded)
++                return base.ReceivePositionalInputAt(screenSpacePos);
++
++            return anchorLeft
++                ? screenSpacePos.X < button.ScreenSpaceDrawQuad.TopRight.X
++                : screenSpacePos.X > button.ScreenSpaceDrawQuad.TopLeft.X;
++        }
+ 
+         protected override bool OnMouseMove(MouseMoveEvent e)
+         {
+@@ -107,6 +141,12 @@ protected override void Update()
+         {
+             base.Update();
+ 
++            if (forceExpanded)
++            {
++                Expanded.Value = true;
++                return;
++            }
++
+             if (hudOverlay != null)
+                 button.Y = ToLocalSpace(hudOverlay.TopRightElements.ScreenSpaceDrawQuad.BottomRight).Y;
+ 
+@@ -119,6 +159,12 @@ protected override void Update()
+ 
+         private void checkExpanded()
+         {
++            if (forceExpanded)
++            {
++                Expanded.Value = true;
++                return;
++            }
++
+             float screenMouseX = inputManager.CurrentState.Mouse.Position.X;
+ 
+             Expanded.Value =

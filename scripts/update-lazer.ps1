@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Checkout = [IO.Path]::GetFullPath($Checkout)
 $PinnedCommit = "acf314f4ed7eccdd1de42bff81ffef97621125c9"
+$Patch = Join-Path $PSScriptRoot "..\patches\osu-replay-viewer-api.patch"
 
 if (-not (Test-Path (Join-Path $Checkout ".git"))) {
     git init $Checkout
@@ -25,5 +26,13 @@ if (-not [string]::Equals($commit, $PinnedCommit, [StringComparison]::OrdinalIgn
 if (-not [string]::Equals($commit, $PinnedCommit, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Could not check out the required osu!lazer revision $PinnedCommit."
 }
+
+if (-not (Test-Path $Patch)) {
+    throw "The required osu!lazer compatibility patch is missing: $Patch"
+}
+
+git -C $Checkout reset --hard $PinnedCommit
+git -C $Checkout apply --check $Patch
+git -C $Checkout apply $Patch
 
 Write-Output "Using pinned osu!lazer revision $commit"

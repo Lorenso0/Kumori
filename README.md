@@ -59,7 +59,7 @@ tosu is maintained by its own project and is licensed under LGPL-3.0-only. See [
 
 ## Replay viewer and osu!lazer dependency
 
-The replay viewer is a separate executable shipped beside Kumori in a published build. It is compiled against a tested, pinned revision of the official [ppy/osu](https://github.com/ppy/osu) source tree and osu.Framework. A source build obtains that dependency in `third_party\osu\`; the checkout is intentionally excluded from Git because it is upstream code and large.
+The replay viewer is a separate executable shipped beside Kumori in a published build. It is compiled against a tested, pinned revision of the official [ppy/osu](https://github.com/ppy/osu) source tree and osu.Framework. A source build obtains that dependency in `third_party\osu\`; the checkout is intentionally excluded from Git because it is upstream code and large. Kumori's tracked compatibility patch in `patches\osu-replay-viewer-api.patch` is applied automatically after that checkout is restored.
 
 The viewer’s exact upstream revision is reported by its `--probe` command and maintained in `replay_viewer\Program.cs`. See [replay_viewer/THIRD-PARTY-NOTICES.md](replay_viewer/THIRD-PARTY-NOTICES.md) for licence information.
 
