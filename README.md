@@ -94,3 +94,14 @@ The command window prompts for the repository URL, branch, commit message, andâ€
 The push script is intentionally ignored by Git because it is a personal helper that you may customise with repository-specific details. Authenticate through Git Credential Manager/browser sign-in or a personal access token when Git asks; GitHub does not accept account passwords for HTTPS Git operations.
 
 The `.gitignore` excludes build output, generated lazer runtime data, replay-viewer publishes, verification artifacts, the local `ppy/osu` checkout, and common Visual Studio/test files.
+
+## Creating a GitHub Release
+
+Pushing a version tag such as `v0.1.0` runs the GitHub Actions release workflow. It builds a self-contained Windows x64 publish and creates a GitHub Release containing `Kumori-win-x64.zip`.
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Extract the ZIP and run `Kumori.exe`. The ZIP contains the executable and its `Kumori.ReplayViewer` companion folder; keep that folder beside `Kumori.exe` for advanced replay analysis to work. You can also run the workflow manually from GitHub's **Actions** tab to download a test build as an artifact without creating a Release.
