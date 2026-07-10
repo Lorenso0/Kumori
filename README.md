@@ -83,11 +83,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\update-lazer.ps1
 
 ## Creating a GitHub Release
 
-Pushing a version tag such as `v0.1.0` runs the GitHub Actions release workflow. It builds a self-contained Windows x64 publish and creates a GitHub Release containing `Kumori-win-x64.zip`.
+Pushing a version tag such as `v0.1.0` runs the GitHub Actions release workflow. It builds a self-contained Windows x64 publish and creates a GitHub Release containing one file: `Kumori.exe`.
 
 ```powershell
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Extract the ZIP and run `Kumori.exe`. The ZIP contains the executable and its `Kumori.ReplayViewer` companion folder; keep that folder beside `Kumori.exe` for advanced replay analysis to work. You can also run the workflow manually from GitHub's **Actions** tab to download a test build as an artifact without creating a Release.
+Run the downloaded `Kumori.exe` directly. The replay viewer is embedded in the executable and is extracted automatically into Kumori's private runtime storage when advanced replay analysis is used; users do not need to manage a companion folder. You can also run the workflow manually from GitHub's **Actions** tab to download a test build as an artifact without creating a Release.

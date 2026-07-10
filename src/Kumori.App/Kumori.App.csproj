@@ -32,19 +32,18 @@
     <Content Include="Assets\logo.ico"
              Link="assets\logo.ico"
              CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest"
-             ExcludeFromSingleFile="true" />
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\ModIcons\*.png" />
   </ItemGroup>
   <ItemGroup Condition="Exists('..\..\THIRD-PARTY-NOTICES.md')">
-    <Content Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\THIRD-PARTY-NOTICES.md"
+             Link="THIRD-PARTY-NOTICES.md"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-
-  <Target Name="PublishReplayAnalyzer" AfterTargets="Publish">
-    <MSBuild Projects="..\..\replay_viewer\Kumori.ReplayViewer.csproj"
-             Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=$(SelfContained);PublishDir=$(PublishDir)Kumori.ReplayViewer\;PublishReadyToRun=false" />
-  </Target>
+  <ItemGroup Condition="'$(ReplayViewerBundlePath)' != '' and Exists('$(ReplayViewerBundlePath)')">
+    <EmbeddedResource Include="$(ReplayViewerBundlePath)" LogicalName="Kumori.ReplayViewer.Bundle.zip" />
+  </ItemGroup>
 </Project>

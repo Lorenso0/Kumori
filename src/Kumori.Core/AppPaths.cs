@@ -37,6 +37,8 @@ public static class AppPaths
 
     public static string ViewerContractsDir => Path.Combine(RuntimeDir, "viewer-contracts");
 
+    public static string ViewerRuntimeDir => Path.Combine(RuntimeDir, "replay-viewer");
+
     public static string FixturesDir => Path.Combine(RuntimeDir, "fixtures");
 
     public static string ReportsDir => Path.Combine(AppDataDir, "reports");

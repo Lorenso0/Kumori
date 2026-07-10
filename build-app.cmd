@@ -39,15 +39,39 @@ echo Build + tests OK.
 exit /b 0
 
 :publish
+if exist artifacts\viewer-release rmdir /S /Q artifacts\viewer-release
+if exist artifacts\Kumori.ReplayViewer.zip del /Q artifacts\Kumori.ReplayViewer.zip
+if exist artifacts\app-publish rmdir /S /Q artifacts\app-publish
+if exist dist\app rmdir /S /Q dist\app
+
+dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Release -r win-x64 ^
+  --self-contained true ^
+  -p:PublishSingleFile=false ^
+  -p:PublishReadyToRun=false ^
+  -o artifacts\viewer-release
+if errorlevel 1 exit /b %errorlevel%
+
+powershell -NoProfile -NonInteractive -Command "Compress-Archive -Path 'artifacts\viewer-release\*' -DestinationPath 'artifacts\Kumori.ReplayViewer.zip' -CompressionLevel Optimal"
+if errorlevel 1 exit /b %errorlevel%
+
 dotnet publish src\Kumori.App\Kumori.App.csproj -c Release -r win-x64 ^
   --self-contained true ^
   -p:PublishSingleFile=true ^
   -p:PublishReadyToRun=true ^
+  -p:EnableCompressionInSingleFile=true ^
+  -p:IncludeAllContentForSelfExtract=true ^
   -p:IncludeNativeLibrariesForSelfExtract=true ^
-  -o dist\app
+  -p:DebugType=None ^
+  -p:DebugSymbols=false ^
+  -p:ReplayViewerBundlePath="%CD%\artifacts\Kumori.ReplayViewer.zip" ^
+  -o artifacts\app-publish
+if errorlevel 1 exit /b %errorlevel%
+
+mkdir dist\app
+copy /Y artifacts\app-publish\Kumori.exe dist\app\Kumori.exe >nul
 if errorlevel 1 exit /b %errorlevel%
 
 echo.
 echo Published to dist\app\Kumori.exe
-echo Bundled replay viewer: dist\app\Kumori.ReplayViewer\Kumori.ReplayViewer.exe
+echo The replay viewer is embedded in Kumori.exe and extracts to %%APPDATA%%\Kumori\runtime when required.
 exit /b 0
