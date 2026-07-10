@@ -68,10 +68,8 @@ The viewer’s exact upstream revision is reported by its `--probe` command and 
 Requirements: Windows 10/11 x64, Git, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-# Obtain/update the ppy/osu source required by the replay viewer.
-powershell -ExecutionPolicy Bypass -File .\scripts\update-lazer.ps1
-
-# Build Kumori, the replay viewer, and the tests.
+# On a fresh clone, this automatically downloads the ignored ppy/osu source
+# needed by the replay viewer, then builds Kumori, the viewer, and the tests.
 .\build-app.cmd
 
 # Build and start Kumori.
@@ -80,6 +78,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\update-lazer.ps1
 # Create a distributable build in dist\app\.
 .\build-app.cmd publish
 ```
+
+To deliberately refresh the local ppy/osu dependency later, run `powershell -ExecutionPolicy Bypass -File .\scripts\update-lazer.ps1` before rebuilding.
 
 ## Creating a GitHub Release
 
