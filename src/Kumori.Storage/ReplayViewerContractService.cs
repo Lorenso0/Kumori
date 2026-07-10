@@ -208,6 +208,12 @@ public sealed class ReplayViewerContractService
 
     public static string ResolveViewerExecutable(string baseDirectory)
     {
+        var embeddedViewer = ReplayViewerPayload.TryEnsureExtracted();
+        if (embeddedViewer is not null)
+        {
+            return embeddedViewer;
+        }
+
         var repoRoot = Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "..", "..", ".."));
         var candidates = new[]
         {

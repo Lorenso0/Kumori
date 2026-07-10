@@ -1,0 +1,78 @@
+using System.IO.Compression;
+using Kumori.Core;
+using Serilog;
+
+namespace Kumori.Storage;
+
+/// <summary>
+/// Materialises the replay viewer embedded in a single-file Kumori publish.
+/// Development builds do not carry the resource and continue to use the
+/// adjacent viewer output instead.
+/// </summary>
+internal static class ReplayViewerPayload
+{
+    private const string ResourceName = "Kumori.ReplayViewer.Bundle.zip";
+    private static readonly object ExtractionGate = new();
+
+    public static string? TryEnsureExtracted()
+    {
+        var assembly = System.Reflection.Assembly.GetEntryAssembly() ?? typeof(ReplayViewerPayload).Assembly;
+        if (assembly.GetManifestResourceInfo(ResourceName) is null)
+        {
+            return null;
+        }
+
+        var versionDirectory = Path.Combine(
+            AppPaths.ViewerRuntimeDir,
+            assembly.ManifestModule.ModuleVersionId.ToString("N"));
+        var executable = Path.Combine(versionDirectory, "Kumori.ReplayViewer.exe");
+        if (File.Exists(executable))
+        {
+            return executable;
+        }
+
+        lock (ExtractionGate)
+        {
+            if (File.Exists(executable))
+            {
+                return executable;
+            }
+
+            var temporaryDirectory = versionDirectory + ".extract-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                Directory.CreateDirectory(AppPaths.ViewerRuntimeDir);
+                using var stream = assembly.GetManifestResourceStream(ResourceName)
+                    ?? throw new InvalidOperationException("The embedded replay viewer payload is unavailable.");
+                ZipFile.ExtractToDirectory(stream, temporaryDirectory, overwriteFiles: true);
+
+                if (Directory.Exists(versionDirectory))
+                {
+                    Directory.Delete(temporaryDirectory, recursive: true);
+                }
+                else
+                {
+                    Directory.Move(temporaryDirectory, versionDirectory);
+                }
+
+                return File.Exists(executable) ? executable : null;
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    if (Directory.Exists(temporaryDirectory))
+                    {
+                        Directory.Delete(temporaryDirectory, recursive: true);
+                    }
+                }
+                catch
+                {
+                }
+
+                Log.Warning(ex, "Could not extract the embedded replay viewer");
+                return null;
+            }
+        }
+    }
+}
