@@ -81,20 +81,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\update-lazer.ps1
 .\build-app.cmd publish
 ```
 
-## Push this project to GitHub
-
-Create an empty **private** GitHub repository—without GitHub's starter README, `.gitignore`, or licence—then double-click `push-to-github.bat` or run it from PowerShell:
-
-```powershell
-.\push-to-github.bat
-```
-
-The command window prompts for the repository URL, branch, commit message, and—only if Git has not already been configured—your commit author name and email. It initializes the repository if necessary, stages non-ignored files, creates a commit when needed, and pushes to `origin`.
-
-The push script is intentionally ignored by Git because it is a personal helper that you may customise with repository-specific details. Authenticate through Git Credential Manager/browser sign-in or a personal access token when Git asks; GitHub does not accept account passwords for HTTPS Git operations.
-
-The `.gitignore` excludes build output, generated lazer runtime data, replay-viewer publishes, verification artifacts, the local `ppy/osu` checkout, and common Visual Studio/test files.
-
 ## Creating a GitHub Release
 
 Pushing a version tag such as `v0.1.0` runs the GitHub Actions release workflow. It builds a self-contained Windows x64 publish and creates a GitHub Release containing `Kumori-win-x64.zip`.
