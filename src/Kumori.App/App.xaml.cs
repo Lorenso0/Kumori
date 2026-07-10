@@ -115,6 +115,7 @@ public partial class App : Application
         };
         _companionMonitorCts = new CancellationTokenSource();
         _companionMonitorTask = Task.Run(() => CompanionMonitorLoopAsync(store, settings, _companionMonitorCts.Token));
+        _ = CheckForTosuUpdatesOnLaunchAsync();
 
         // Background services start only after the shell is visible
         // (no-flicker startup plan: shell first, services second).
@@ -181,6 +182,30 @@ public partial class App : Application
 
         // Hydrate asynchronously after the shell is visible.
         _ = viewModel.HydrateAsync();
+    }
+
+    private async Task CheckForTosuUpdatesOnLaunchAsync()
+    {
+        try
+        {
+            var wasInstalled = File.Exists(AppPaths.TosuExecutable);
+            var result = await TosuManager.CheckForUpdatesAsync();
+            if (result is { InstalledOrUpdated: true })
+            {
+                var action = wasInstalled ? "updated" : "installed";
+                Log.Information("{Action} managed tosu to {Version} during Kumori startup", action, result.Version);
+                KumoriDialog.Show(
+                    _mainWindow,
+                    $"tosu was {action} successfully.\n\nVersion: {result.Version}",
+                    "tosu ready",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Managed tosu update check failed during Kumori startup");
+        }
     }
 
     private void ShowMainWindow()

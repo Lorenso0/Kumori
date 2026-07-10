@@ -20,6 +20,7 @@ public static class TosuManager
         Timeout = TimeSpan.FromMinutes(3),
     };
     private static readonly object ProcessGate = new();
+    private static readonly SemaphoreSlim InstallGate = new(1, 1);
     private static Process? _ownedProcess;
 
     static TosuManager()
@@ -30,6 +31,27 @@ public static class TosuManager
     public static async Task<TosuInstallResult> EnsureInstalledAsync(
         bool forceCheck = false,
         CancellationToken cancellationToken = default)
+    {
+        await InstallGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await EnsureInstalledCoreAsync(forceCheck, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            InstallGate.Release();
+        }
+    }
+
+    public static async Task<TosuInstallResult> CheckForUpdatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await EnsureInstalledAsync(forceCheck: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<TosuInstallResult> EnsureInstalledCoreAsync(
+        bool forceCheck,
+        CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(AppPaths.TosuDir);
         var local = ReadLocalVersion();

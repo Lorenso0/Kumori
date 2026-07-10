@@ -50,7 +50,7 @@ All user data is stored beneath `%APPDATA%\Kumori\`, including settings, local h
 
 Kumori manages an installation of the upstream, unmodified `tosu.exe`; tosu is neither bundled with nor committed to this project.
 
-- On first launch, Kumori downloads the latest compatible Windows release from [tosu GitHub releases](https://github.com/tosuapp/tosu/releases). It then checks for updates no more than once every 24 hours, unless you choose **Install or update** in the app’s **tosu Setup** window.
+- On every launch, Kumori checks for and installs the latest compatible Windows release from [tosu GitHub releases](https://github.com/tosuapp/tosu/releases). This includes installing tosu automatically on a clean first launch.
 - The managed executable and configuration live in `%APPDATA%\Kumori\tools\tosu\`.
 - Kumori configures tosu to keep its dashboard closed and listen only on `127.0.0.1:24051`.
 - GitHub access is needed for the initial download and future updates. Kumori checks that a downloaded file is a Windows executable and attempts Authenticode signature verification before replacing its managed copy.

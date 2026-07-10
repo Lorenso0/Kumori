@@ -30,7 +30,7 @@ dotnet test Kumori.sln -c Debug --no-build
 if errorlevel 1 exit /b %errorlevel%
 
 if /i "%~1"=="run" (
-    dotnet run --project src\Kumori.App -c Debug --no-build
+    dotnet run --project src\Kumori.App\Kumori.App.csproj -c Debug --no-build
     exit /b %errorlevel%
 )
 
