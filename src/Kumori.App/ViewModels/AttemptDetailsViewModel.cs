@@ -555,6 +555,10 @@ public partial class AttemptDetailsViewModel : ObservableObject
             return;
         }
 
+        // Do not keep the last play visible while the next one is loading.
+        // Apart from being misleading, this made a newly highlighted history row
+        // appear to have the previous row's title and score in the inspector.
+        Details = null;
         var cts = new CancellationTokenSource();
         _loadCts = cts;
         IsLoading = true;
