@@ -5,6 +5,7 @@ namespace Kumori.ReplayViewer;
 
 public sealed record ViewerContract
 {
+    private const int paused_sample_flag = 0x02;
     public const int CurrentVersion = 1;
 
     [JsonPropertyName("contract_version")]
@@ -33,6 +34,34 @@ public sealed record ViewerContract
 
     [JsonPropertyName("final_hits")]
     public FinalHitsContract? FinalHits { get; init; }
+
+    /// <summary>
+    /// Last map time backed by real capture evidence for an unfinished play.
+    /// Completed plays intentionally return null so their full judgement pass
+    /// remains available. Replay rendering may append a synthetic tail frame,
+    /// which must never be used as analysis evidence.
+    /// </summary>
+    public double? AnalysisCoverageEnd
+    {
+        get
+        {
+            if (Attempt.Progress >= 0.99
+                || Attempt.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            double lastSample = Samples
+                .Where(sample => (sample.Flags & paused_sample_flag) == 0)
+                .Select(sample => sample.MapTimeMs)
+                .DefaultIfEmpty(double.NegativeInfinity)
+                .Max();
+            double lastJudgement = JudgementEvents
+                .Select(judgement => (double)judgement.MapTimeMs)
+                .DefaultIfEmpty(double.NegativeInfinity)
+                .Max();
+            double cutoff = Math.Max(lastSample, lastJudgement);
+            return double.IsFinite(cutoff) ? cutoff : null;
+        }
+    }
 
     public static ViewerContract Load(string path)
     {
@@ -88,6 +117,12 @@ public sealed record AttemptContract
 
     [JsonPropertyName("grade")]
     public string Grade { get; init; } = "";
+
+    [JsonPropertyName("outcome")]
+    public string Outcome { get; init; } = "";
+
+    [JsonPropertyName("progress")]
+    public double Progress { get; init; }
 }
 
 public sealed record ModContract

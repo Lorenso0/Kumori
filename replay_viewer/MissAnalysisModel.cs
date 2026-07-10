@@ -179,14 +179,17 @@ internal static class MissAnalysisBuilder
     public static MissAnalysisModel BuildFromJudgements(
         IReadOnlyList<HitObject> hitObjects,
         IEnumerable<OsuReplayFrame> replayFrames,
-        IEnumerable<ReplayJudgementSnapshot> judgements)
+        IEnumerable<ReplayJudgementSnapshot> judgements,
+        double? analysisCoverageEnd = null)
     {
         PreparedReplay prepared = prepareReplay(hitObjects, replayFrames);
         List<MissAnalysisEntry> entries = [];
         Dictionary<KumoriTimelineMarkerKind, int> ordinals = [];
         HashSet<(HitObject Object, KumoriTimelineMarkerKind Kind, int Time)> seen = [];
 
-        foreach (ReplayJudgementSnapshot judgement in judgements.OrderBy(j => j.EventTime))
+        foreach (ReplayJudgementSnapshot judgement in judgements
+                     .Where(j => analysisCoverageEnd == null || j.HitObject.StartTime <= analysisCoverageEnd.Value)
+                     .OrderBy(j => j.EventTime))
         {
             if (!seen.Add((judgement.HitObject, judgement.Kind, (int)Math.Round(judgement.EventTime))))
                 continue;
@@ -204,7 +207,8 @@ internal static class MissAnalysisBuilder
         BeatmapAnalysis analysis,
         IEnumerable<OsuReplayFrame> replayFrames,
         IEnumerable<PreparedReplayJudgement> judgements,
-        IEnumerable<PreparedReplayFrame>? preparedFrames = null)
+        IEnumerable<PreparedReplayFrame>? preparedFrames = null,
+        double? analysisCoverageEnd = null)
     {
         PreparedReplay prepared = prepareReplay([], replayFrames);
         MissReplayFrameSample[] canonicalFrames = preparedFrames?.Select(frame => new MissReplayFrameSample(
@@ -216,7 +220,9 @@ internal static class MissAnalysisBuilder
         HitObjectAnalysis[] objects = analysis.Objects.OrderBy(o => o.StartTime).ToArray();
         List<MissAnalysisEntry> entries = [];
 
-        foreach (PreparedReplayJudgement judgement in judgements.OrderBy(j => j.ObjectStartTime))
+        foreach (PreparedReplayJudgement judgement in judgements
+                     .Where(j => analysisCoverageEnd == null || j.ObjectStartTime <= analysisCoverageEnd.Value)
+                     .OrderBy(j => j.ObjectStartTime))
         {
             HitObjectAnalysis? root = objects.MinBy(o => Math.Abs(o.StartTime - judgement.RootStartTime));
             int rootIndex = root == null ? -1 : Array.IndexOf(objects, root);

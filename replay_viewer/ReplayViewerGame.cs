@@ -172,7 +172,8 @@ public partial class ReplayViewerGame : OsuGameBase
                 analysis,
                 score.Replay.Frames.OfType<OsuReplayFrame>(),
                 preparedAnalysis.Judgements,
-                preparedAnalysis.Frames)
+                preparedAnalysis.Frames,
+                contract.AnalysisCoverageEnd)
             : MissAnalysisBuilder.Build(
                 contract,
                 analysis,
@@ -209,7 +210,8 @@ public partial class ReplayViewerGame : OsuGameBase
             MissAnalysisModel exactModel = MissAnalysisBuilder.BuildFromJudgements(
                 workingBeatmap.Beatmap.HitObjects,
                 score.Replay.Frames.OfType<OsuReplayFrame>(),
-                snapshots);
+                snapshots,
+                contract.AnalysisCoverageEnd);
             advancedAnalyzerViewModel.ReplaceModel(exactModel);
             seekBar.SetMarkers(exactModel.Markers);
             Logger.Log($"Kumori: analyzer and seek bar now use {exactModel.Entries.Count} exact lazer results.");

@@ -38,6 +38,8 @@ public class ReplayViewerContractServiceTests : IDisposable
         Assert.Equal(_beatmapPath, root.GetProperty("beatmap_path").GetString());
         Assert.Equal("Song", root.GetProperty("attempt").GetProperty("title").GetString());
         Assert.Equal("live", root.GetProperty("attempt").GetProperty("movement_source").GetString());
+        Assert.Equal("completed", root.GetProperty("attempt").GetProperty("outcome").GetString());
+        Assert.Equal(1, root.GetProperty("attempt").GetProperty("progress").GetDouble());
         Assert.Equal(2, root.GetProperty("samples").GetArrayLength());
         Assert.Equal(2, root.GetProperty("judgement_events").GetArrayLength());
         Assert.Equal(500, root.GetProperty("final_hits").GetProperty("n300").GetInt32());

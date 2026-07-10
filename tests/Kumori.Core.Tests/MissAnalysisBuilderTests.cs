@@ -131,6 +131,24 @@ public class MissAnalysisBuilderTests
     }
 
     [Fact]
+    public void BuildFromJudgements_ExcludesSyntheticMissesBeyondCaptureCoverage()
+    {
+        HitCircle captured = Circle(1000, 120, 80);
+        HitCircle syntheticTail = Circle(5000, 300, 200);
+
+        var model = MissAnalysisBuilder.BuildFromJudgements(
+            Objects(captured, syntheticTail),
+            Frames(Frame(1000, 120, 80)),
+            [
+                new ReplayJudgementSnapshot(captured, KumoriTimelineMarkerKind.Miss, 1100, 100, 1, 0),
+                new ReplayJudgementSnapshot(syntheticTail, KumoriTimelineMarkerKind.Miss, 5100, 100, 1, 0),
+            ],
+            analysisCoverageEnd: 1200);
+
+        Assert.Equal(1000, Assert.Single(model.Entries).TargetStartTime);
+    }
+
+    [Fact]
     public void Build_MarksContractEventsAsInferred()
     {
         var model = MissAnalysisBuilder.Build(
@@ -215,6 +233,33 @@ public class MissAnalysisBuilderTests
         Assert.Equal("Circle", entry.ObjectType);
         Assert.Equal(new Vector2(159, 274), entry.TargetPosition);
         Assert.Equal(60, entry.ComboBefore);
+    }
+
+    [Fact]
+    public void BuildFromPrepared_ExcludesJudgementsBeyondCaptureCoverage()
+    {
+        var analysis = new BeatmapAnalysis("", "", "", 9, 8, 4, [], new HitWindowAnalysis(20, 50, 100, 150));
+        PreparedReplayJudgement judgement(double time) => new(
+            KumoriTimelineMarkerKind.Miss,
+            time + 100,
+            time,
+            time,
+            time,
+            "Circle",
+            256,
+            192,
+            31,
+            100,
+            1,
+            0);
+
+        var model = MissAnalysisBuilder.BuildFromPrepared(
+            analysis,
+            Frames(Frame(1000, 256, 192)),
+            [judgement(1000), judgement(5000)],
+            analysisCoverageEnd: 1200);
+
+        Assert.Equal(1000, Assert.Single(model.Entries).TargetStartTime);
     }
 
     [Fact]

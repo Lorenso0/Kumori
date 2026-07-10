@@ -64,6 +64,8 @@ public sealed class ReplayViewerContractService
                 movement_source = metadata?.Source ?? "live",
                 accuracy = details.Summary.Accuracy,
                 grade = details.Summary.Grade ?? "",
+                outcome = details.Summary.Outcome,
+                progress = details.Summary.Progress,
             },
             beatmap_path = Path.GetFullPath(beatmapPath),
             media_directory = Path.GetFullPath(mediaDirectory ?? Path.GetDirectoryName(beatmapPath)!),
