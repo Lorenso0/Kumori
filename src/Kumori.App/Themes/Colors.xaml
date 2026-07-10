@@ -1,0 +1,47 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Color x:Key="Color.AppBackground">#10000A</Color>
+    <Color x:Key="Color.PanelBackground">#1A0611</Color>
+    <Color x:Key="Color.CardBackground">#20101A</Color>
+    <Color x:Key="Color.CardHoverBackground">#351027</Color>
+    <Color x:Key="Color.CardSelectedBackground">#27121D</Color>
+    <Color x:Key="Color.ControlBackground">#1A0611</Color>
+    <Color x:Key="Color.ControlHoverBackground">#2C1020</Color>
+    <Color x:Key="Color.SubtleBorder">#5C1640</Color>
+    <Color x:Key="Color.StrongBorder">#FF2DA8</Color>
+    <Color x:Key="Color.AccentPink">#FF2DA8</Color>
+    <Color x:Key="Color.AccentPurple">#B85BFF</Color>
+    <Color x:Key="Color.TextPrimary">#FFFFFF</Color>
+    <Color x:Key="Color.TextSecondary">#E3A0C9</Color>
+    <Color x:Key="Color.TextMuted">#BE8AAD</Color>
+    <Color x:Key="Color.Success">#00FF7B</Color>
+    <Color x:Key="Color.Warning">#FFE044</Color>
+    <Color x:Key="Color.Danger">#FF477F</Color>
+    <Color x:Key="Color.Cyan">#00D5FF</Color>
+
+    <SolidColorBrush x:Key="Brush.AppBackground" Color="{StaticResource Color.AppBackground}" />
+    <SolidColorBrush x:Key="Brush.PanelBackground" Color="{StaticResource Color.PanelBackground}" />
+    <SolidColorBrush x:Key="Brush.CardBackground" Color="{StaticResource Color.CardBackground}" />
+    <SolidColorBrush x:Key="Brush.CardHoverBackground" Color="{StaticResource Color.CardHoverBackground}" />
+    <SolidColorBrush x:Key="Brush.CardSelectedBackground" Color="{StaticResource Color.CardSelectedBackground}" />
+    <SolidColorBrush x:Key="Brush.ControlBackground" Color="{StaticResource Color.ControlBackground}" />
+    <SolidColorBrush x:Key="Brush.ControlHoverBackground" Color="{StaticResource Color.ControlHoverBackground}" />
+    <SolidColorBrush x:Key="Brush.SubtleBorder" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.StrongBorder" Color="{StaticResource Color.StrongBorder}" />
+    <SolidColorBrush x:Key="Brush.AccentPink" Color="{StaticResource Color.AccentPink}" />
+    <SolidColorBrush x:Key="Brush.AccentPurple" Color="{StaticResource Color.AccentPurple}" />
+    <SolidColorBrush x:Key="Brush.TextPrimary" Color="{StaticResource Color.TextPrimary}" />
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="{StaticResource Color.TextSecondary}" />
+    <SolidColorBrush x:Key="Brush.TextMuted" Color="{StaticResource Color.TextMuted}" />
+    <SolidColorBrush x:Key="Brush.Success" Color="{StaticResource Color.Success}" />
+    <SolidColorBrush x:Key="Brush.Warning" Color="{StaticResource Color.Warning}" />
+    <SolidColorBrush x:Key="Brush.Danger" Color="{StaticResource Color.Danger}" />
+    <SolidColorBrush x:Key="Brush.Cyan" Color="{StaticResource Color.Cyan}" />
+
+    <!-- Compatibility aliases for secondary utility windows. -->
+    <SolidColorBrush x:Key="Brush.BackgroundPrimary" Color="{StaticResource Color.AppBackground}" />
+    <SolidColorBrush x:Key="Brush.BackgroundSecondary" Color="{StaticResource Color.PanelBackground}" />
+    <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.Negative" Color="{StaticResource Color.Danger}" />
+</ResourceDictionary>

@@ -1,0 +1,71 @@
+<Window x:Class="Kumori.App.TosuSetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="tosu Setup"
+        Width="540" Height="350"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Brush.AppBackground}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
+    <Window.Resources>
+        <Style x:Key="SetupPanel" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Brush.CardBackground}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Brush.SubtleBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+        </Style>
+        <Style TargetType="Button" BasedOn="{StaticResource Button.Chrome}">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="10,0" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Style="{StaticResource SetupPanel}" Padding="14">
+            <StackPanel>
+                <TextBlock Text="Managed tosu" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Brush.TextPrimary}" />
+                <TextBlock Text="Kumori manages a local tosu installation for play metadata on 127.0.0.1:24051."
+                           Foreground="{StaticResource Brush.TextSecondary}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+            </StackPanel>
+        </Border>
+
+        <ProgressBar x:Name="Progress" Grid.Row="1" Height="4" Minimum="0" Maximum="100" Value="0" Margin="0,12" />
+
+        <Border Grid.Row="2" Style="{StaticResource SetupPanel}" Padding="12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="STATUS" Style="{StaticResource Text.Metadata}" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,7" />
+                <TextBox x:Name="StatusText"
+                         Grid.Row="1"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         FontSize="11"
+                         Padding="0"
+                         Background="Transparent"
+                         Foreground="{StaticResource Brush.TextPrimary}"
+                         BorderThickness="0" />
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="InstallButton" Content="Install or update" Style="{StaticResource Button.Primary}" Click="Install_Click" Margin="0,0,8,0" />
+            <Button x:Name="LaunchButton" Content="Launch" Click="Launch_Click" Margin="0,0,8,0" />
+            <Button Content="Close" Click="Close_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

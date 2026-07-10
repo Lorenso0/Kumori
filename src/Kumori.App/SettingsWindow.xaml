@@ -1,0 +1,217 @@
+<Window x:Class="Kumori.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Kumori Settings"
+        Width="720" Height="680"
+        MinWidth="640" MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Brush.AppBackground}"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
+    <Window.Resources>
+        <Style x:Key="SettingsCard" TargetType="Border">
+            <Setter Property="Background" Value="#170712" />
+            <Setter Property="BorderBrush" Value="#321528" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="SettingsTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <Style x:Key="SettingsHint" TargetType="TextBlock" BasedOn="{StaticResource Text.Metadata}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="SettingsLabel" TargetType="TextBlock" BasedOn="{StaticResource Text.Metadata}">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="8,4" />
+        </Style>
+
+        <Style TargetType="Button" BasedOn="{StaticResource Button.Chrome}">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Border x:Name="Box"
+                                    Width="11"
+                                    Height="11"
+                                    Background="{StaticResource Brush.ControlBackground}"
+                                    BorderBrush="{StaticResource Brush.SubtleBorder}"
+                                    BorderThickness="1"
+                                    Margin="0,0,5,0">
+                                <Path x:Name="Check"
+                                      Width="7"
+                                      Height="6"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Data="M 0.5 3 L 2.7 5.2 L 6.5 0.8"
+                                      Stroke="{StaticResource Brush.TextPrimary}"
+                                      StrokeThickness="1.25"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Visibility="Collapsed" />
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource Brush.AccentPink}" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Brush.AccentPink}" />
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Brush.AccentPurple}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" BorderBrush="{StaticResource Brush.SubtleBorder}" BorderThickness="0,0,0,1" Padding="18,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource Brush.TextPrimary}" />
+                    <TextBlock Text="Companion automation, replay viewer, tracking, media, and startup." Style="{StaticResource Text.Metadata}" FontSize="12" Margin="0,3,0,0" />
+                </StackPanel>
+                <TextBlock Grid.Column="1" Text="Saved to settings.v2.json" Style="{StaticResource Text.Muted}" FontSize="11" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="18">
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Companion Automation" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Controls helpers Kumori can run when osu! is detected." Style="{StaticResource SettingsHint}" />
+
+                        <CheckBox x:Name="OtdAutoLaunch" Content="Launch OpenTabletDriver when osu! starts" />
+                        <TextBlock Text="OpenTabletDriver executable" Style="{StaticResource SettingsLabel}" />
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="OtdPath" />
+                            <Button Grid.Column="1" Content="Browse" Click="BrowseOtd_Click" Margin="8,0,0,0" />
+                            <Button Grid.Column="2" Content="Detect" Click="DetectOtd_Click" Margin="8,0,0,0" />
+                        </Grid>
+
+                        <CheckBox x:Name="DualModeEnabled" Content="Switch LG monitor dual mode automatically" />
+                        <TextBlock Text="Uses Kumori's built-in DDC/CI command. This option works only with compatible LG monitors." Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Replay Viewer" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Native replay playback, skins, audio mix, and visual timing durations." Style="{StaticResource SettingsHint}" />
+                        <UniformGrid Columns="2" Margin="0,0,0,4">
+                            <CheckBox x:Name="ReplayEnabled" Content="Enable native replay viewer" />
+                            <CheckBox x:Name="DisableHidden" Content="Disable Hidden mod in viewer" />
+                        </UniformGrid>
+
+                        <TextBlock Text="Skin path" Style="{StaticResource SettingsLabel}" />
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="SkinPath" />
+                            <Button Grid.Column="1" Content="Browse" Click="BrowseSkin_Click" Margin="8,0,0,0" />
+                            <Button Grid.Column="2" Content="Clear" Click="ClearSkin_Click" Margin="8,0,0,0" />
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Button Content="Skin library" Click="SkinLibrary_Click" Margin="0,0,8,0" />
+                            <Button Content="Delete imported skin" Click="DeleteSkin_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Tracking And Capture" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Controls what Kumori stores while you play." Style="{StaticResource SettingsHint}" />
+                        <UniformGrid Columns="2">
+                            <CheckBox x:Name="TrackingEnabled" Content="Log plays with tosu metadata" />
+                            <CheckBox x:Name="PacketRecordingEnabled" Content="Record raw tosu packet fixtures" />
+                            <CheckBox x:Name="LazerReplayFrameEnabled" Content="Capture osu!lazer replay frames" />
+                            <CheckBox x:Name="RunAtLogin" Content="Run Kumori when Windows starts" />
+                        </UniformGrid>
+                        <TextBlock Text="Retention days" Style="{StaticResource SettingsLabel}" />
+                        <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Media" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Beatmap media mirror used for cached artwork and map files." Style="{StaticResource SettingsHint}" />
+                        <TextBlock Text="Primary mirror" Style="{StaticResource SettingsLabel}" />
+                        <TextBox x:Name="PrimaryMirror" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" BorderBrush="{StaticResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="18,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="ErrorText"
+                           Foreground="{StaticResource Brush.Negative}"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           Margin="0,0,14,0" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="Cancel" IsCancel="True" Margin="0,0,8,0" />
+                    <Button Content="Save" Click="Save_Click" IsDefault="True" Style="{StaticResource Button.Primary}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

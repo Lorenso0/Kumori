@@ -1,0 +1,87 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.App", "src\Kumori.App\Kumori.App.csproj", "{A1000000-0000-4000-8000-000000000001}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.Core", "src\Kumori.Core\Kumori.Core.csproj", "{A1000000-0000-4000-8000-000000000002}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.Storage", "src\Kumori.Storage\Kumori.Storage.csproj", "{A1000000-0000-4000-8000-000000000003}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.Tracking", "src\Kumori.Tracking\Kumori.Tracking.csproj", "{A1000000-0000-4000-8000-000000000004}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.Native", "src\Kumori.Native\Kumori.Native.csproj", "{A1000000-0000-4000-8000-000000000005}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.Core.Tests", "tests\Kumori.Core.Tests\Kumori.Core.Tests.csproj", "{A1000000-0000-4000-8000-000000000011}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.Storage.Tests", "tests\Kumori.Storage.Tests\Kumori.Storage.Tests.csproj", "{A1000000-0000-4000-8000-000000000012}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kumori.Tracking.Tests", "tests\Kumori.Tracking.Tests\Kumori.Tracking.Tests.csproj", "{A1000000-0000-4000-8000-000000000013}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{03D161BE-62EF-4B54-BE6F-0074D90EE034}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.FixtureDiff", "src\Kumori.FixtureDiff\Kumori.FixtureDiff.csproj", "{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{5D151702-08F2-47E9-8D11-88E72F1DCF65}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.App.Tests", "tests\Kumori.App.Tests\Kumori.App.Tests.csproj", "{1A698E2A-F727-449F-AE85-B2EEE7CB1161}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.ReplayFrameTool", "src\Kumori.ReplayFrameTool\Kumori.ReplayFrameTool.csproj", "{08E575E5-865B-40EF-BE73-F5E8CE53A727}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A1000000-0000-4000-8000-000000000001}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000001}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000001}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000001}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000002}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000002}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000002}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000002}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000003}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000003}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000003}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000003}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000004}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000004}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000004}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000004}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000005}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000005}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000005}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000005}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000011}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000011}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000011}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000011}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000012}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000012}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000012}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000012}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000013}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000013}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000000-0000-4000-8000-000000000013}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000000-0000-4000-8000-000000000013}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A698E2A-F727-449F-AE85-B2EEE7CB1161}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A698E2A-F727-449F-AE85-B2EEE7CB1161}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A698E2A-F727-449F-AE85-B2EEE7CB1161}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A698E2A-F727-449F-AE85-B2EEE7CB1161}.Release|Any CPU.Build.0 = Release|Any CPU
+		{08E575E5-865B-40EF-BE73-F5E8CE53A727}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{08E575E5-865B-40EF-BE73-F5E8CE53A727}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{08E575E5-865B-40EF-BE73-F5E8CE53A727}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{08E575E5-865B-40EF-BE73-F5E8CE53A727}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8} = {03D161BE-62EF-4B54-BE6F-0074D90EE034}
+		{1A698E2A-F727-449F-AE85-B2EEE7CB1161} = {5D151702-08F2-47E9-8D11-88E72F1DCF65}
+		{08E575E5-865B-40EF-BE73-F5E8CE53A727} = {03D161BE-62EF-4B54-BE6F-0074D90EE034}
+	EndGlobalSection
+EndGlobal

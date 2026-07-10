@@ -1,0 +1,90 @@
+<Window x:Class="Kumori.App.SkinLibraryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Skin Library"
+        Width="620" Height="440"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Brush.AppBackground}"
+        BorderBrush="{StaticResource Brush.StrongBorder}"
+        BorderThickness="1"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+    <Border Background="{StaticResource Brush.AppBackground}"
+            BorderBrush="{StaticResource Brush.SubtleBorder}"
+            BorderThickness="1"
+            Padding="16">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Import .osk" Click="ImportFile_Click" Margin="0,0,8,0" Padding="8,4" />
+            <Button Content="Import folder" Click="ImportFolder_Click" Margin="0,0,8,0" Padding="8,4" />
+            <Button Content="Use selected" Click="Use_Click" Margin="0,0,8,0" Padding="8,4" />
+            <Button Content="Delete" Click="Delete_Click" Margin="0,0,8,0" Padding="8,4" />
+            <Button Content="Close" Click="Close_Click" Padding="8,4" />
+        </StackPanel>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <StackPanel Margin="0,0,0,10">
+                <TextBlock Text="Imported replay skins" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="Replay skins use osu!lazer layouts. Add overlays such as pp counters in osu!lazer's skin editor before importing."
+                           Style="{StaticResource Text.Metadata}"
+                           TextWrapping="Wrap"
+                           Margin="0,5,0,0" />
+            </StackPanel>
+            <ListView x:Name="SkinList"
+                      Grid.Row="1"
+                      Background="{StaticResource Brush.BackgroundSecondary}"
+                      BorderBrush="{StaticResource Brush.Border}"
+                      SelectionChanged="SkinList_SelectionChanged"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="Name" Width="210">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border Width="194" ClipToBounds="True">
+                                        <TextBlock Text="{Binding Name}"
+                                                   ToolTip="{Binding Name}"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Border>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Type" Width="58" DisplayMemberBinding="{Binding TypeText}" />
+                        <GridViewColumn Header="Size" Width="78" DisplayMemberBinding="{Binding SizeText}" />
+                        <GridViewColumn Header="Path" Width="230">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border Width="214" ClipToBounds="True">
+                                        <TextBlock Text="{Binding Path}"
+                                                   ToolTip="{Binding Path}"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Border>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+            <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                <TextBlock x:Name="StatusText" Foreground="{StaticResource Brush.TextSecondary}" TextWrapping="Wrap" />
+                <TextBox x:Name="ActivePathText"
+                         Margin="0,8,0,0"
+                         IsReadOnly="True"
+                         IsTabStop="True"
+                         TextWrapping="NoWrap"
+                         HorizontalScrollBarVisibility="Auto"
+                         VerticalScrollBarVisibility="Disabled"
+                         Tag="Selected skin path" />
+            </StackPanel>
+        </Grid>
+    </DockPanel>
+    </Border>
+</Window>

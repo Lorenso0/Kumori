@@ -1,0 +1,215 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Palette: matches the Python app's default "purple" theme (core/themes.py) -->
+    <Color x:Key="Color.BackgroundPrimary">#13102A</Color>
+    <Color x:Key="Color.BackgroundSecondary">#1A1735</Color>
+    <Color x:Key="Color.BackgroundPanel">#221E45</Color>
+    <Color x:Key="Color.BackgroundToolbar">#181535</Color>
+    <Color x:Key="Color.BorderSubtle">#2E2960</Color>
+    <Color x:Key="Color.TextPrimary">#F2F0FF</Color>
+    <Color x:Key="Color.TextSecondary">#A8A3C7</Color>
+    <Color x:Key="Color.Accent">#8B5CF6</Color>
+    <Color x:Key="Color.AccentHover">#6D28D9</Color>
+    <Color x:Key="Color.AccentLight">#C4B5FD</Color>
+    <Color x:Key="Color.Positive">#9BDC28</Color>
+    <Color x:Key="Color.Warning">#FFD43B</Color>
+    <Color x:Key="Color.Negative">#FF4F7B</Color>
+    <Color x:Key="Color.Hit300">#4FC3F7</Color>
+    <Color x:Key="Color.Hit100">#9BDC28</Color>
+    <Color x:Key="Color.Hit50">#FFD43B</Color>
+    <Color x:Key="Color.HitMiss">#FF4F7B</Color>
+
+    <SolidColorBrush x:Key="Brush.BackgroundPrimary" Color="{StaticResource Color.BackgroundPrimary}" />
+    <SolidColorBrush x:Key="Brush.BackgroundSecondary" Color="{StaticResource Color.BackgroundSecondary}" />
+    <SolidColorBrush x:Key="Brush.BackgroundPanel" Color="{StaticResource Color.BackgroundPanel}" />
+    <SolidColorBrush x:Key="Brush.BackgroundToolbar" Color="{StaticResource Color.BackgroundToolbar}" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="{StaticResource Color.BorderSubtle}" />
+    <SolidColorBrush x:Key="Brush.TextPrimary" Color="{StaticResource Color.TextPrimary}" />
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="{StaticResource Color.TextSecondary}" />
+    <SolidColorBrush x:Key="Brush.Accent" Color="{StaticResource Color.Accent}" />
+    <SolidColorBrush x:Key="Brush.AccentHover" Color="{StaticResource Color.AccentHover}" />
+    <SolidColorBrush x:Key="Brush.AccentLight" Color="{StaticResource Color.AccentLight}" />
+    <SolidColorBrush x:Key="Brush.Positive" Color="{StaticResource Color.Positive}" />
+    <SolidColorBrush x:Key="Brush.Warning" Color="{StaticResource Color.Warning}" />
+    <SolidColorBrush x:Key="Brush.Negative" Color="{StaticResource Color.Negative}" />
+    <SolidColorBrush x:Key="Brush.HitMiss" Color="{StaticResource Color.HitMiss}" />
+
+    <!-- Base text -->
+    <Style TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+    </Style>
+
+    <Style x:Key="Text.Secondary" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+    </Style>
+
+    <!-- Toolbar buttons -->
+    <Style TargetType="Button">
+        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource Brush.AccentHover}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Search box -->
+    <Style TargetType="TextBox">
+        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="CaretBrush" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="6,3" />
+        <Setter Property="FontSize" Value="11" />
+    </Style>
+
+    <Style TargetType="ComboBox">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Padding" Value="5,2" />
+    </Style>
+
+    <Style TargetType="CheckBox">
+        <Setter Property="FontSize" Value="11" />
+    </Style>
+
+    <!-- Status chip -->
+    <Style x:Key="StatusChip" TargetType="Border">
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="10,3" />
+        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- GridSplitter -->
+    <Style TargetType="GridSplitter">
+        <Setter Property="Background" Value="{StaticResource Brush.BorderSubtle}" />
+    </Style>
+
+    <!-- Slim dark scrollbars -->
+    <Style TargetType="ScrollBar">
+        <Setter Property="Width" Value="9" />
+        <Setter Property="MinWidth" Value="9" />
+        <Setter Property="Background" Value="{StaticResource Brush.BackgroundSecondary}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.Accent}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid Background="{TemplateBinding Background}">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton IsEnabled="False" Opacity="0" />
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb>
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border Width="7" Margin="1"
+                                                    CornerRadius="3.5"
+                                                    Background="{StaticResource Brush.AccentLight}" />
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton IsEnabled="False" Opacity="0" />
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Tooltips themed (plan: no OS-default white surfaces) -->
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+    </Style>
+
+    <!-- Context menus themed -->
+    <Style TargetType="ContextMenu">
+        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="4,3" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContextMenu">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="MenuItem">
+        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="Padding" Value="12,5" />
+        <Setter Property="MinWidth" Value="180" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter ContentSource="Header"
+                                          RecognizesAccessKey="True"
+                                          VerticalAlignment="Center"
+                                          Margin="2,0" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.AccentHover}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+                            <Setter Property="Opacity" Value="0.55" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="Separator">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Margin="4,2" Background="{StaticResource Brush.BorderSubtle}" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Kumori.Core\Kumori.Core.csproj" />
+    <ProjectReference Include="..\Kumori.Storage\Kumori.Storage.csproj" />
+    <ProjectReference Include="..\Kumori.Tracking\Kumori.Tracking.csproj" />
+  </ItemGroup>
+</Project>

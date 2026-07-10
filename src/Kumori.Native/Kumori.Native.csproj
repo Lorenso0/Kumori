@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Kumori.Core\Kumori.Core.csproj" />
+    <ProjectReference Include="..\Kumori.Storage\Kumori.Storage.csproj" />
+    <ProjectReference Include="..\Kumori.Tracking\Kumori.Tracking.csproj" />
+  </ItemGroup>
+</Project>
