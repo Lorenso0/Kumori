@@ -20,6 +20,7 @@ internal partial class KumoriSettingsSidebar : CompositeDrawable
     private const float default_width = 290;
 
     private readonly FillFlowContainer<PlayerSettingsGroup> content;
+    private readonly OsuScrollContainer scroll;
 
     public KumoriSettingsSidebar(bool anchorLeft, float width = default_width)
     {
@@ -38,7 +39,7 @@ internal partial class KumoriSettingsSidebar : CompositeDrawable
                     : ColourInfo.GradientHorizontal(Color4.Black.Opacity(0), Color4.Black.Opacity(0.8f)),
                 Depth = float.MaxValue,
             },
-            new OsuScrollContainer(Direction.Vertical)
+            scroll = new OsuScrollContainer(Direction.Vertical)
             {
                 RelativeSizeAxes = Axes.Both,
                 Child = content = new FillFlowContainer<PlayerSettingsGroup>
@@ -64,6 +65,9 @@ internal partial class KumoriSettingsSidebar : CompositeDrawable
         content.Clear(false);
         content.AddRange(groups);
     }
+
+    public void ScrollIntoView(Drawable drawable)
+        => Scheduler.Add(() => scroll.ScrollIntoView(drawable, animated: true, extraScroll: 14));
 }
 
 internal partial class KumoriAnalyzerSidebar : KumoriSettingsSidebar

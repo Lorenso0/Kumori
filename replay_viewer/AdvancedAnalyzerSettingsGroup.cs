@@ -70,7 +70,14 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
             new PlayerCheckbox { LabelText = "Cursor movement samples", Current = viewModel.ShowMovementSamples },
             new PlayerCheckbox { LabelText = "Button-held samples", Current = viewModel.ShowHeldSamples },
             divider(),
-            new PlayerCheckbox { LabelText = "Selected click marker", Current = viewModel.ShowSelectedClickMarker },
+            new SettingsColour
+            {
+                LabelText = "Selected note color",
+                Current = viewModel.SelectedNoteColour,
+            },
+            new PlayerCheckbox { LabelText = "Recolor selected note", Current = viewModel.RecolourSelectedNote },
+            new PlayerCheckbox { LabelText = "Show note indicator", Current = viewModel.ShowSelectedNoteIndicator },
+            new PlayerCheckbox { LabelText = "Show selected click marker", Current = viewModel.ShowSelectedClickMarker },
             divider(),
             fullButton("Close analyzer", overlay.Close),
         ];

@@ -140,8 +140,13 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
         return true;
     }
 
-    public void SetSelectedClickMarker(MissAnalysisEntry? entry, bool visible, osu.Framework.Graphics.Colour4 colour)
-        => selectedClickMarker?.Set(entry, visible, colour);
+    public void SetSelectedAnalysisMarkers(
+        MissAnalysisEntry? entry,
+        bool showClickMarker,
+        bool recolourNote,
+        bool showNoteIndicator,
+        osu.Framework.Graphics.Colour4 colour)
+        => selectedClickMarker?.Set(entry, showClickMarker, recolourNote, showNoteIndicator, colour);
 
     protected virtual void ConfigureReplaySidebar()
     {

@@ -151,6 +151,9 @@ public partial class ReplayViewerGame : OsuGameBase
                 if (player.IsLoaded)
                     player.Seek(time);
             });
+        var timelinePopup = new AdvancedAnalyzerTimelinePopup();
+        Add(timelinePopup);
+        seekBar.SetAnalysisPopup(timelinePopup.Show, timelinePopup.HideCard);
 
         bindMarkerToggle(seekBar.ShowMisses, KumoriViewerSetting.ShowMissMarkers);
         bindMarkerToggle(seekBar.ShowMehs, KumoriViewerSetting.ShowMehMarkers);
@@ -183,6 +186,11 @@ public partial class ReplayViewerGame : OsuGameBase
         var analyzerRuntime = new AdvancedAnalyzerRuntime(() => currentPlayer);
         advancedAnalyzerOverlay = new AdvancedAnalyzerOverlay(advancedAnalyzerViewModel, analyzerRuntime);
         Add(advancedAnalyzerOverlay);
+        seekBar.BindAnalyzer(advancedAnalyzerViewModel, entry =>
+        {
+            advancedAnalyzerOverlay.Open();
+            advancedAnalyzerViewModel.Select(entry);
+        });
         player.OpenMissAnalyzer = advancedAnalyzerOverlay.Open;
         if (preparedAnalysis == null)
             player.AnalysisJudgementsReady = snapshots => Schedule(() =>

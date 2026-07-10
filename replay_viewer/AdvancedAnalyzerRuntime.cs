@@ -46,6 +46,11 @@ internal sealed class AdvancedAnalyzerRuntime
     public void Start() => getPlayer()?.StartReplayPlayback();
     public void StepFrame(int direction) => getPlayer()?.StepFrame(direction);
     public void SetRate(double rate) => getPlayer()?.SetPlaybackRate(rate);
-    public void SetSelectedClickMarker(MissAnalysisEntry? entry, bool visible)
-        => getPlayer()?.SetSelectedClickMarker(entry, visible);
+    public void SetSelectedAnalysisMarkers(
+        MissAnalysisEntry? entry,
+        bool showClickMarker,
+        bool recolourNote,
+        bool showNoteIndicator,
+        osu.Framework.Graphics.Colour4 colour)
+        => getPlayer()?.SetSelectedAnalysisMarkers(entry, showClickMarker, recolourNote, showNoteIndicator, colour);
 }

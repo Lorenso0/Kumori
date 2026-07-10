@@ -1,4 +1,5 @@
 using osu.Framework.Configuration;
+using osu.Framework.Graphics;
 using osu.Framework.Platform;
 
 namespace Kumori.ReplayViewer;
@@ -22,6 +23,9 @@ public enum KumoriViewerSetting
     MissAnalyzerShowMovementSamples,
     MissAnalyzerShowHeldSamples,
     MissAnalyzerShowSelectedClickMarker,
+    MissAnalyzerRecolourSelectedNote,
+    MissAnalyzerShowSelectedNoteIndicator,
+    MissAnalyzerSelectedNoteColour,
     MissAnalyzerDefaultsVersion,
     BackgroundOpacity,
     MasterVolume,
@@ -74,6 +78,9 @@ public class KumoriViewerConfig : IniConfigManager<KumoriViewerSetting>
         SetDefault(KumoriViewerSetting.MissAnalyzerShowMovementSamples, true);
         SetDefault(KumoriViewerSetting.MissAnalyzerShowHeldSamples, true);
         SetDefault(KumoriViewerSetting.MissAnalyzerShowSelectedClickMarker, true);
+        SetDefault(KumoriViewerSetting.MissAnalyzerRecolourSelectedNote, true);
+        SetDefault(KumoriViewerSetting.MissAnalyzerShowSelectedNoteIndicator, true);
+        SetDefault(KumoriViewerSetting.MissAnalyzerSelectedNoteColour, Colour4.FromHex("#8b5cf6"));
         SetDefault(KumoriViewerSetting.MissAnalyzerDefaultsVersion, 0);
         SetDefault(KumoriViewerSetting.BackgroundOpacity, 0.0, 0, 1, 0.01);
         SetDefault(KumoriViewerSetting.MasterVolume, 1.0, 0, 1, 0.01);

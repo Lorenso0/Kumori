@@ -146,14 +146,16 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         {
             Vector2 start = centre + (samples[0].Position - selected.TargetPosition) * scale;
             Vector2 end = centre + (samples[^1].Position - selected.TargetPosition) * scale;
+            Vector2 startDirection = endpointDirection(samples, fromStart: true);
+            Vector2 endDirection = endpointDirection(samples, fromStart: false);
 
             if ((end - start).Length < 5)
             {
-                start.X -= 4;
-                end.X += 4;
+                start -= startDirection * 5;
+                end += endDirection * 5;
             }
-            AddInternal(endpointMarker(start, Color4.Cyan, filled: false, size: 8));
-            AddInternal(endpointMarker(end, AdvancedAnalyzerColours.Miss, filled: true, size: 7));
+            AddInternal(endpointArrow(start, startDirection, Color4.Cyan, 11));
+            AddInternal(endpointArrow(end, endDirection, AdvancedAnalyzerColours.Miss, 12));
         }
 
         if (viewModel.ShowInputMarkers.Value && selected.InputFrame is { } input)
@@ -189,21 +191,45 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         Colour = colour,
     };
 
-    private static CircularContainer endpointMarker(Vector2 position, Color4 colour, bool filled, float size) => new()
+    private static SpriteIcon endpointArrow(Vector2 position, Vector2 direction, Color4 colour, float size)
     {
-        Position = position,
-        Size = new Vector2(size),
-        Anchor = Anchor.TopLeft,
-        Origin = Anchor.Centre,
-        Masking = true,
-        BorderThickness = 1.2f,
-        BorderColour = colour,
-        Child = new Box
+        if (direction.LengthSquared < 0.01f)
+            direction = Vector2.UnitX;
+
+        return new SpriteIcon
         {
-            RelativeSizeAxes = Axes.Both,
-            Colour = filled ? colour.Opacity(0.88f) : Color4.Black.Opacity(0.75f),
-        },
-    };
+            Position = position,
+            Size = new Vector2(size),
+            Anchor = Anchor.TopLeft,
+            Origin = Anchor.Centre,
+            Rotation = (float)(Math.Atan2(direction.Y, direction.X) * 180 / Math.PI),
+            Icon = FontAwesome.Solid.ArrowRight,
+            Colour = colour,
+            Shadow = true,
+        };
+    }
+
+    private static Vector2 endpointDirection(IReadOnlyList<MissReplayFrameSample> samples, bool fromStart)
+    {
+        if (samples.Count < 2)
+            return Vector2.UnitX;
+
+        Vector2 endpoint = fromStart ? samples[0].Position : samples[^1].Position;
+        IEnumerable<MissReplayFrameSample> candidates = fromStart
+            ? samples.Skip(1)
+            : samples.Take(samples.Count - 1).Reverse();
+
+        foreach (MissReplayFrameSample candidate in candidates)
+        {
+            Vector2 direction = fromStart
+                ? candidate.Position - endpoint
+                : endpoint - candidate.Position;
+            if (direction.LengthSquared > 0.01f)
+                return direction / direction.Length;
+        }
+
+        return Vector2.UnitX;
+    }
 
     private static bool shouldConnect(MissReplayFrameSample previous, MissReplayFrameSample current)
     {

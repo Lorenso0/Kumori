@@ -3,6 +3,7 @@ using osu.Framework.Bindables;
 using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Input.Events;
@@ -15,14 +16,17 @@ namespace Kumori.ReplayViewer;
 internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
 {
     private readonly AdvancedAnalyzerViewModel viewModel;
+    private readonly Action<Drawable> scrollIntoView;
     private FillFlowContainer list = null!;
     private SpriteText count = null!;
     private EventTimeline timeline = null!;
+    private readonly List<EventButton> eventButtons = [];
 
-    public AdvancedAnalyzerEventBrowser(AdvancedAnalyzerViewModel viewModel)
+    public AdvancedAnalyzerEventBrowser(AdvancedAnalyzerViewModel viewModel, Action<Drawable> scrollIntoView)
         : base("Review events")
     {
         this.viewModel = viewModel;
+        this.scrollIntoView = scrollIntoView;
         Width = KumoriAnalyzerSidebar.COMPACT_WIDTH - 20;
     }
 
@@ -52,7 +56,7 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
                         new FilterCard("100s", viewModel.CountFor(KumoriTimelineMarkerKind.Ok), KumoriTimelineMarkerKind.Ok, viewModel.ShowOks)),
                 },
             },
-            timeline = new EventTimeline(viewModel.AllEntries),
+            timeline = new EventTimeline(viewModel),
             new Box
             {
                 RelativeSizeAxes = Axes.X,
@@ -70,6 +74,7 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
 
         viewModel.FiltersChanged += rebuild;
         viewModel.SelectionChanged += rebuild;
+        viewModel.HoverChanged += updateHover;
         rebuild();
     }
 
@@ -79,6 +84,7 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
             return;
 
         list.Clear();
+        eventButtons.Clear();
         count.Text = $"Showing {viewModel.VisibleEntries.Count} of {viewModel.TotalCount}";
         timeline.SetVisible(viewModel.VisibleEntries);
 
@@ -93,11 +99,35 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
             return;
         }
 
+        EventButton? selectedButton = null;
         for (int i = 0; i < viewModel.VisibleEntries.Count; i++)
         {
             int index = i;
-            list.Add(new EventButton(viewModel.VisibleEntries[i], i == viewModel.SelectedIndex, () => viewModel.Select(index)));
+            MissAnalysisEntry entry = viewModel.VisibleEntries[i];
+            var button = new EventButton(
+                entry,
+                i == viewModel.SelectedIndex,
+                () => viewModel.Select(index),
+                () => viewModel.SetHovered(entry),
+                () => viewModel.ClearHovered(entry));
+            eventButtons.Add(button);
+            list.Add(button);
+            if (i == viewModel.SelectedIndex)
+                selectedButton = button;
         }
+        updateHover();
+        if (selectedButton != null)
+        {
+            EventButton button = selectedButton;
+            Scheduler.Add(() => scrollIntoView(button));
+        }
+    }
+
+    private void updateHover()
+    {
+        timeline?.SetHovered(viewModel.HoveredEntry);
+        foreach (EventButton button in eventButtons)
+            button.SetExternallyHovered(ReferenceEquals(button.Entry, viewModel.HoveredEntry));
     }
 
     private static FillFlowContainer filterRow(params Drawable[] children) => new()
@@ -113,6 +143,7 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
     {
         viewModel.FiltersChanged -= rebuild;
         viewModel.SelectionChanged -= rebuild;
+        viewModel.HoverChanged -= updateHover;
         base.Dispose(isDisposing);
     }
 
@@ -120,13 +151,19 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
     {
         private readonly MissAnalysisEntry entry;
         private readonly Action action;
+        private readonly Action hoverAction;
+        private readonly Action hoverLostAction;
         private readonly bool selected;
         private Box background = null!;
 
-        public EventButton(MissAnalysisEntry entry, bool selected, Action action)
+        public MissAnalysisEntry Entry => entry;
+
+        public EventButton(MissAnalysisEntry entry, bool selected, Action action, Action hoverAction, Action hoverLostAction)
         {
             this.entry = entry;
             this.action = action;
+            this.hoverAction = hoverAction;
+            this.hoverLostAction = hoverLostAction;
             this.selected = selected;
             RelativeSizeAxes = Axes.X;
             Height = 52;
@@ -203,14 +240,24 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
 
         protected override bool OnHover(HoverEvent e)
         {
+            hoverAction();
             background.FadeColour(Color4.White.Opacity(0.13f), 120);
             return true;
         }
 
         protected override void OnHoverLost(HoverLostEvent e)
         {
-            background.FadeColour(Color4.White.Opacity(0.06f), 180);
+            hoverLostAction();
+            background.FadeColour(Color4.White.Opacity(selected ? 0.15f : 0.045f), 180);
             base.OnHoverLost(e);
+        }
+
+        public void SetExternallyHovered(bool hovered)
+        {
+            if (background == null || IsHovered)
+                return;
+            background.FadeColour(Color4.White.Opacity(hovered ? 0.13f : selected ? 0.15f : 0.045f), 100);
+            BorderThickness = selected || hovered ? 1 : 0;
         }
     }
 
@@ -292,13 +339,14 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
 
     private partial class EventTimeline : CompositeDrawable
     {
-        private readonly IReadOnlyList<MissAnalysisEntry> allEntries;
+        private readonly AdvancedAnalyzerViewModel viewModel;
         private IReadOnlyList<MissAnalysisEntry> visibleEntries = [];
+        private readonly List<EventTimelineMarker> markers = [];
         private float renderedWidth;
 
-        public EventTimeline(IReadOnlyList<MissAnalysisEntry> allEntries)
+        public EventTimeline(AdvancedAnalyzerViewModel viewModel)
         {
-            this.allEntries = allEntries;
+            this.viewModel = viewModel;
             RelativeSizeAxes = Axes.X;
             Height = 54;
             Masking = true;
@@ -309,6 +357,14 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
         {
             visibleEntries = entries;
             rebuild();
+        }
+
+        public void SetHovered(MissAnalysisEntry? entry)
+        {
+            foreach (EventTimelineMarker marker in markers)
+                marker.SetState(
+                    ReferenceEquals(marker.Entry, viewModel.SelectedEntry),
+                    ReferenceEquals(marker.Entry, entry));
         }
 
         protected override void Update()
@@ -322,6 +378,7 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
         {
             renderedWidth = DrawWidth;
             ClearInternal();
+            markers.Clear();
             if (DrawWidth <= 1)
                 return;
 
@@ -336,15 +393,18 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
                 Colour = Color4.White.Opacity(0.28f),
             });
 
+            IReadOnlyList<MissAnalysisEntry> allEntries = viewModel.AllEntries;
             double endTime = Math.Max(1, allEntries.Count == 0 ? 1 : allEntries.Max(entry => entry.EventTime));
             foreach (MissAnalysisEntry entry in visibleEntries)
             {
-                AddInternal(new Box
-                {
-                    Position = new Vector2(left + width * (float)(entry.EventTime / endTime), 14),
-                    Size = new Vector2(2, 13),
-                    Colour = AdvancedAnalyzerColours.For(entry.Kind),
-                });
+                var marker = new EventTimelineMarker(
+                    entry,
+                    viewModel,
+                    new Vector2(left + width * (float)(entry.EventTime / endTime), 14),
+                    ReferenceEquals(entry, viewModel.SelectedEntry),
+                    ReferenceEquals(entry, viewModel.HoveredEntry));
+                markers.Add(marker);
+                AddInternal(marker);
             }
 
             AddInternal(new SpriteText
@@ -363,6 +423,61 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
                 Font = FontUsage.Default.With(size: 9),
                 Colour = Color4.White.Opacity(0.5f),
             });
+        }
+
+        private partial class EventTimelineMarker : CompositeDrawable, IHasCustomTooltip<MissAnalysisEntry>
+        {
+            private readonly MissAnalysisEntry entry;
+            private readonly AdvancedAnalyzerViewModel viewModel;
+            private readonly Box marker;
+
+            public MissAnalysisEntry Entry => entry;
+
+            public EventTimelineMarker(
+                MissAnalysisEntry entry,
+                AdvancedAnalyzerViewModel viewModel,
+                Vector2 position,
+                bool selected,
+                bool hovered)
+            {
+                this.entry = entry;
+                this.viewModel = viewModel;
+                Position = position;
+                Size = new Vector2(10, 16);
+                Origin = Anchor.TopCentre;
+                InternalChild = marker = new Box
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Colour = AdvancedAnalyzerColours.For(entry.Kind),
+                };
+                SetState(selected, hovered);
+            }
+
+            public void SetState(bool selected, bool hovered)
+                => marker.Size = new Vector2(selected || hovered ? 4 : 2, selected || hovered ? 16 : 13);
+
+            public override bool HandlePositionalInput => true;
+            public MissAnalysisEntry TooltipContent => entry;
+            public ITooltip<MissAnalysisEntry> GetCustomTooltip() => new AdvancedAnalyzerEventTooltip();
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                viewModel.SetHovered(entry);
+                return true;
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                viewModel.ClearHovered(entry);
+                base.OnHoverLost(e);
+            }
+
+            protected override bool OnClick(ClickEvent e)
+            {
+                viewModel.Select(entry);
+                return true;
+            }
         }
     }
 }

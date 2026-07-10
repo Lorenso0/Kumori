@@ -42,8 +42,8 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     private void load()
     {
         inspector = new AdvancedAnalyzerSettingsGroup(viewModel, this);
-        var browser = new AdvancedAnalyzerEventBrowser(viewModel);
         leftSidebar = new KumoriAnalyzerSidebar();
+        var browser = new AdvancedAnalyzerEventBrowser(viewModel, leftSidebar.ScrollIntoView);
         leftSidebar.SetGroups([browser]);
         rightSidebar = new KumoriSettingsSidebar(anchorLeft: false);
         rightSidebar.SetGroups([inspector]);
@@ -103,6 +103,7 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
         isPlaying = false;
         viewModel.SelectNextFrom(entryTime);
         isOpen = true;
+        viewModel.SetAnalyzerOpen(true);
         runtime.SetRate(viewModel.PlaybackRate.Value);
         this.FadeIn(160, Easing.OutQuint);
         inspector.UpdateEntry(viewModel.SelectedEntry);
@@ -127,9 +128,10 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     private void leave(double time, bool restorePlayback)
     {
         isOpen = false;
+        viewModel.SetAnalyzerOpen(false);
         isPlaying = false;
         loopSeekPending = false;
-        runtime.SetSelectedClickMarker(null, false, viewModel.SelectedNoteColour.Value);
+        runtime.SetSelectedAnalysisMarkers(null, false, false, false, viewModel.SelectedNoteColour.Value);
         runtime.Pause();
         runtime.Exit();
         runtime.SetRate(entryRate);
@@ -228,9 +230,11 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     private void selectionAppearanceChanged() => updateSelectedClickMarker();
 
     private void updateSelectedClickMarker()
-        => runtime.SetSelectedClickMarker(
+        => runtime.SetSelectedAnalysisMarkers(
             viewModel.SelectedEntry,
             isOpen && viewModel.ShowSelectedClickMarker.Value,
+            isOpen && viewModel.RecolourSelectedNote.Value,
+            isOpen && viewModel.ShowSelectedNoteIndicator.Value,
             viewModel.SelectedNoteColour.Value);
 
     private void playbackSettingsChanged()

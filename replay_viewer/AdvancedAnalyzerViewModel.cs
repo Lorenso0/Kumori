@@ -1,4 +1,5 @@
 using osu.Framework.Bindables;
+using osu.Framework.Graphics;
 
 namespace Kumori.ReplayViewer;
 
@@ -17,20 +18,28 @@ internal sealed class AdvancedAnalyzerViewModel
     public BindableBool ShowMovementSamples { get; } = new();
     public BindableBool ShowHeldSamples { get; } = new();
     public BindableBool ShowSelectedClickMarker { get; } = new();
+    public BindableBool RecolourSelectedNote { get; } = new();
+    public BindableBool ShowSelectedNoteIndicator { get; } = new();
+    public Bindable<Colour4> SelectedNoteColour { get; } = new();
     public BindableDouble LoopBefore { get; } = new();
     public BindableDouble LoopAfter { get; } = new();
     public BindableDouble PlaybackRate { get; } = new();
 
     public IReadOnlyList<MissAnalysisEntry> VisibleEntries { get; private set; } = [];
     public MissAnalysisEntry? SelectedEntry => VisibleEntries.Count == 0 ? null : VisibleEntries[selectedIndex];
+    public MissAnalysisEntry? HoveredEntry { get; private set; }
     public int SelectedIndex => selectedIndex;
     public int TotalCount => model.Entries.Count;
     public IReadOnlyList<MissAnalysisEntry> AllEntries => model.Entries;
     public int CountFor(KumoriTimelineMarkerKind kind) => model.Entries.Count(entry => entry.Kind == kind);
     public bool UsesFallbackData => model.Entries.Any(e => e.Source == AnalysisDataSource.Inferred);
+    public bool AnalyzerOpen { get; private set; }
 
     public event Action? FiltersChanged;
     public event Action? SelectionChanged;
+    public event Action? HoverChanged;
+    public event Action? AnalyzerVisibilityChanged;
+    public event Action? SelectionAppearanceChanged;
     public event Action? PlaybackSettingsChanged;
 
     public AdvancedAnalyzerViewModel(MissAnalysisModel model, KumoriViewerConfig config)
@@ -46,6 +55,9 @@ internal sealed class AdvancedAnalyzerViewModel
         initialise(ShowMovementSamples, KumoriViewerSetting.MissAnalyzerShowMovementSamples);
         initialise(ShowHeldSamples, KumoriViewerSetting.MissAnalyzerShowHeldSamples);
         initialise(ShowSelectedClickMarker, KumoriViewerSetting.MissAnalyzerShowSelectedClickMarker);
+        initialise(RecolourSelectedNote, KumoriViewerSetting.MissAnalyzerRecolourSelectedNote);
+        initialise(ShowSelectedNoteIndicator, KumoriViewerSetting.MissAnalyzerShowSelectedNoteIndicator);
+        initialise(SelectedNoteColour, KumoriViewerSetting.MissAnalyzerSelectedNoteColour);
         initialise(LoopBefore, KumoriViewerSetting.MissAnalyzerLoopBefore, 150, 2000, 50);
         initialise(LoopAfter, KumoriViewerSetting.MissAnalyzerLoopAfter, 150, 2000, 50);
         initialise(PlaybackRate, KumoriViewerSetting.MissAnalyzerPlaybackRate, 0.05, 2, 0.01);
@@ -58,6 +70,9 @@ internal sealed class AdvancedAnalyzerViewModel
         LoopBefore.ValueChanged += _ => PlaybackSettingsChanged?.Invoke();
         LoopAfter.ValueChanged += _ => PlaybackSettingsChanged?.Invoke();
         PlaybackRate.ValueChanged += _ => PlaybackSettingsChanged?.Invoke();
+        RecolourSelectedNote.ValueChanged += _ => SelectionAppearanceChanged?.Invoke();
+        ShowSelectedNoteIndicator.ValueChanged += _ => SelectionAppearanceChanged?.Invoke();
+        SelectedNoteColour.ValueChanged += _ => SelectionAppearanceChanged?.Invoke();
         refreshFilters(false);
     }
 
@@ -93,6 +108,35 @@ internal sealed class AdvancedAnalyzerViewModel
     public void SelectPrevious() => Select(selectedIndex - 1);
     public void SelectNext() => Select(selectedIndex + 1);
 
+    public void Select(MissAnalysisEntry entry)
+    {
+        int index = VisibleEntries.ToList().IndexOf(entry);
+        if (index >= 0)
+            Select(index);
+    }
+
+    public void SetHovered(MissAnalysisEntry? entry)
+    {
+        if (ReferenceEquals(HoveredEntry, entry))
+            return;
+        HoveredEntry = entry;
+        HoverChanged?.Invoke();
+    }
+
+    public void ClearHovered(MissAnalysisEntry entry)
+    {
+        if (ReferenceEquals(HoveredEntry, entry))
+            SetHovered(null);
+    }
+
+    public void SetAnalyzerOpen(bool open)
+    {
+        if (AnalyzerOpen == open)
+            return;
+        AnalyzerOpen = open;
+        AnalyzerVisibilityChanged?.Invoke();
+    }
+
     private int nearestIndex(double time)
         => Enumerable.Range(0, VisibleEntries.Count).MinBy(i => Math.Abs(VisibleEntries[i].EventTime - time));
 
@@ -100,6 +144,11 @@ internal sealed class AdvancedAnalyzerViewModel
     {
         double? selectedTime = SelectedEntry?.EventTime;
         VisibleEntries = model.Entries.Where(isVisible).ToArray();
+        if (HoveredEntry != null && !VisibleEntries.Contains(HoveredEntry))
+        {
+            HoveredEntry = null;
+            HoverChanged?.Invoke();
+        }
         selectedIndex = VisibleEntries.Count == 0 ? 0 : selectedTime == null ? 0 : nearestIndex(selectedTime.Value);
         if (notify)
             FiltersChanged?.Invoke();
@@ -117,6 +166,12 @@ internal sealed class AdvancedAnalyzerViewModel
     private void initialise(BindableBool bindable, KumoriViewerSetting setting)
     {
         bindable.BindTo(config.GetBindable<bool>(setting));
+        bindable.ValueChanged += _ => config.Save();
+    }
+
+    private void initialise(Bindable<Colour4> bindable, KumoriViewerSetting setting)
+    {
+        bindable.BindTo(config.GetBindable<Colour4>(setting));
         bindable.ValueChanged += _ => config.Save();
     }
 

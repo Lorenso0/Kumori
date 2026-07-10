@@ -6,6 +6,7 @@ using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Effects;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input;
 using osu.Framework.Input.Events;
 using osu.Framework.Logging;
 using osuTK;
@@ -55,6 +56,13 @@ internal partial class KumoriSeekBar : CompositeDrawable
     private Container okLane = null!;
     private Container sliderBreakLane = null!;
     private SpriteText statusText = null!;
+    private AdvancedAnalyzerViewModel? analyzerViewModel;
+    private Action<MissAnalysisEntry>? activateAnalysisEntry;
+    private Action<MissAnalysisEntry, Vector2>? showAnalysisPopup;
+    private Action? hideAnalysisPopup;
+    private InputManager? inputManager;
+    private AnalysisTimelineMarker? hoveredAnalysisMarker;
+    private readonly List<AnalysisTimelineMarker> analysisMarkers = [];
 
     private FinalHitsContract? finalHits;
     private double? actualAccuracy;
@@ -174,6 +182,8 @@ internal partial class KumoriSeekBar : CompositeDrawable
     {
         base.LoadComplete();
 
+        inputManager = GetContainingInputManager();
+
         ShowMisses.BindValueChanged(v => missLane.Alpha = v.NewValue ? 1 : 0, true);
         ShowMehs.BindValueChanged(v => mehLane.Alpha = v.NewValue ? 1 : 0, true);
         ShowOks.BindValueChanged(v => okLane.Alpha = v.NewValue ? 1 : 0, true);
@@ -214,6 +224,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
         mehLane.Clear();
         okLane.Clear();
         sliderBreakLane.Clear();
+        analysisMarkers.Clear();
         comparisonLogged = false;
         foreach (KumoriTimelineMarker marker in markers)
         {
@@ -228,6 +239,24 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     public void SetActualAccuracy(double accuracy) => actualAccuracy = accuracy;
 
+    public void BindAnalyzer(AdvancedAnalyzerViewModel viewModel, Action<MissAnalysisEntry> activateEntry)
+    {
+        unbindAnalyzer();
+        analyzerViewModel = viewModel;
+        activateAnalysisEntry = activateEntry;
+        viewModel.FiltersChanged += rebuildAnalysisMarkers;
+        viewModel.SelectionChanged += updateAnalysisMarkerStates;
+        viewModel.HoverChanged += updateAnalysisMarkerStates;
+        viewModel.AnalyzerVisibilityChanged += updateAnalysisMarkerStates;
+        rebuildAnalysisMarkers();
+    }
+
+    public void SetAnalysisPopup(Action<MissAnalysisEntry, Vector2> show, Action hide)
+    {
+        showAnalysisPopup = show;
+        hideAnalysisPopup = hide;
+    }
+
     public void AddActualJudgements(IEnumerable<JudgementEventContract> events)
         => AddMarkers(KumoriTimelineMarkers.FromContract(events));
 
@@ -238,6 +267,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
         float progress = fraction(currentTime());
         fill.Width = progress;
         playhead.X = progress;
+        updateTimelineHover();
 
         // One-shot geometry diagnostic around 2 s in, so runtime.log can
         // prove the bar's on-screen placement if it is reported invisible.
@@ -286,6 +316,119 @@ internal partial class KumoriSeekBar : CompositeDrawable
             };
 
         lane.Add(marker);
+    }
+
+    private void rebuildAnalysisMarkers() => Schedule(() =>
+    {
+        if (analyzerViewModel == null)
+            return;
+
+        recorded.Clear();
+        simulatedCounts.Clear();
+        missLane.Clear();
+        mehLane.Clear();
+        okLane.Clear();
+        sliderBreakLane.Clear();
+        analysisMarkers.Clear();
+        comparisonLogged = false;
+
+        foreach (MissAnalysisEntry entry in analyzerViewModel.AllEntries)
+        {
+            recorded.Add(((int)Math.Round(entry.EventTime), entry.Kind));
+            simulatedCounts[entry.Kind] = simulatedCounts.GetValueOrDefault(entry.Kind) + 1;
+            addAnalysisMarker(entry);
+        }
+        updateAnalysisMarkerStates();
+    });
+
+    private void addAnalysisMarker(MissAnalysisEntry entry)
+    {
+        (Container lane, Color4 colour, float height, float width, bool belowTrack) = entry.Kind switch
+        {
+            KumoriTimelineMarkerKind.Miss => (missLane, miss_colour, marker_lane_height, 3.5f, false),
+            KumoriTimelineMarkerKind.Meh => (mehLane, meh_colour, marker_lane_height * 0.55f, 3f, false),
+            KumoriTimelineMarkerKind.Ok => (okLane, ok_colour, marker_lane_height * 0.55f, 3f, false),
+            _ => (sliderBreakLane, miss_colour.Opacity(0.45f), marker_lane_height * 0.55f, 5.5f, true),
+        };
+
+        var marker = new AnalysisTimelineMarker(
+            entry,
+            analyzerViewModel!,
+            activateAnalysisEntry!,
+            colour,
+            width,
+            height,
+            belowTrack)
+        {
+            RelativePositionAxes = Axes.X,
+            X = fraction(entry.EventTime),
+        };
+        analysisMarkers.Add(marker);
+        lane.Add(marker);
+    }
+
+    private void updateAnalysisMarkerStates()
+    {
+        if (analyzerViewModel == null)
+            return;
+        foreach (AnalysisTimelineMarker marker in analysisMarkers)
+            marker.SetState(
+                analyzerViewModel.AnalyzerOpen && ReferenceEquals(marker.Entry, analyzerViewModel.SelectedEntry),
+                ReferenceEquals(marker.Entry, analyzerViewModel.HoveredEntry));
+
+        // Direct seek-bar hover is positioned by the polling path below.
+        // Hover arriving from the sidebar or mini timeline should display the
+        // same card at the corresponding bottom timeline marker.
+        if (hoveredAnalysisMarker != null)
+            return;
+
+        AnalysisTimelineMarker? externallyHovered = analyzerViewModel.HoveredEntry == null
+            ? null
+            : analysisMarkers.FirstOrDefault(marker =>
+                ReferenceEquals(marker.Entry, analyzerViewModel.HoveredEntry)
+                && analyzerViewModel.VisibleEntries.Contains(marker.Entry));
+        if (externallyHovered == null)
+        {
+            hidePopup();
+            return;
+        }
+
+        showPopup(
+            externallyHovered.Entry,
+            new Vector2(externallyHovered.ScreenSpaceDrawQuad.Centre.X, externallyHovered.ScreenSpaceDrawQuad.TopLeft.Y));
+    }
+
+    private void showPopup(MissAnalysisEntry entry, Vector2 screenPosition)
+        => showAnalysisPopup?.Invoke(entry, screenPosition);
+
+    private void hidePopup() => hideAnalysisPopup?.Invoke();
+
+    private void updateTimelineHover()
+    {
+        if (inputManager == null || analyzerViewModel == null)
+            return;
+
+        Vector2 mousePosition = inputManager.CurrentState.Mouse.Position;
+        AnalysisTimelineMarker? next = analysisMarkers.LastOrDefault(marker =>
+            analyzerViewModel.VisibleEntries.Contains(marker.Entry)
+            && marker.IsPresent
+            && marker.ReceivePositionalInputAt(mousePosition));
+        if (ReferenceEquals(next, hoveredAnalysisMarker))
+            return;
+
+        if (hoveredAnalysisMarker != null)
+            analyzerViewModel.ClearHovered(hoveredAnalysisMarker.Entry);
+
+        hoveredAnalysisMarker = next;
+        if (next == null)
+        {
+            hidePopup();
+            return;
+        }
+
+        analyzerViewModel.SetHovered(next.Entry);
+        showPopup(next.Entry, new Vector2(next.ScreenSpaceDrawQuad.Centre.X, next.ScreenSpaceDrawQuad.TopLeft.Y));
+        Logger.Log($"Kumori: showing timeline event popup for #{next.Entry.Index} at {next.Entry.EventTime:0}ms.");
     }
 
     private void addActualMarker(JudgementEventContract judgement)
@@ -378,5 +521,93 @@ internal partial class KumoriSeekBar : CompositeDrawable
     {
         float frac = Math.Clamp(track.ToLocalSpace(screenSpacePosition).X / Math.Max(1, track.DrawWidth), 0, 1);
         performSeek(firstHitTime + frac * (lastHitTime - firstHitTime));
+    }
+
+    private void unbindAnalyzer()
+    {
+        if (analyzerViewModel == null)
+            return;
+        analyzerViewModel.FiltersChanged -= rebuildAnalysisMarkers;
+        analyzerViewModel.SelectionChanged -= updateAnalysisMarkerStates;
+        analyzerViewModel.HoverChanged -= updateAnalysisMarkerStates;
+        analyzerViewModel.AnalyzerVisibilityChanged -= updateAnalysisMarkerStates;
+        analyzerViewModel = null;
+        activateAnalysisEntry = null;
+        hoveredAnalysisMarker = null;
+        hidePopup();
+        showAnalysisPopup = null;
+        hideAnalysisPopup = null;
+    }
+
+    protected override void Dispose(bool isDisposing)
+    {
+        unbindAnalyzer();
+        base.Dispose(isDisposing);
+    }
+
+    private partial class AnalysisTimelineMarker : CompositeDrawable
+    {
+        private readonly AdvancedAnalyzerViewModel viewModel;
+        private readonly Action<MissAnalysisEntry> activate;
+        private readonly Drawable visual;
+        private readonly float normalWidth;
+        private readonly float normalHeight;
+
+        public MissAnalysisEntry Entry { get; }
+        public override bool HandlePositionalInput => true;
+
+        public AnalysisTimelineMarker(
+            MissAnalysisEntry entry,
+            AdvancedAnalyzerViewModel viewModel,
+            Action<MissAnalysisEntry> activate,
+            Color4 colour,
+            float width,
+            float height,
+            bool belowTrack)
+        {
+            Entry = entry;
+            this.viewModel = viewModel;
+            this.activate = activate;
+            normalWidth = width;
+            normalHeight = height;
+            Width = 16;
+            Height = marker_lane_height;
+            Anchor = belowTrack ? Anchor.TopLeft : Anchor.BottomLeft;
+            Origin = belowTrack ? Anchor.TopCentre : Anchor.BottomCentre;
+
+            visual = belowTrack
+                ? new Box
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    Size = new Vector2(width, height),
+                    Colour = colour,
+                }
+                : new Circle
+                {
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                    Size = new Vector2(width, height),
+                    Colour = colour,
+                };
+            InternalChild = visual;
+        }
+
+        public void SetState(bool selected, bool hovered)
+        {
+            bool emphasized = selected || hovered;
+            visual.ResizeTo(new Vector2(emphasized ? Math.Max(6, normalWidth * 1.7f) : normalWidth,
+                emphasized ? normalHeight * 1.2f : normalHeight), 100, Easing.OutQuint);
+            visual.Alpha = emphasized ? 1 : 0.82f;
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e) => true;
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            activate(Entry);
+            return true;
+        }
+
     }
 }
