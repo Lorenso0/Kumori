@@ -7,10 +7,16 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <ApplicationIcon>Assets\ReplayViewer.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="ppy.osu.Game" Version="2026.621.0" />
     <PackageReference Include="ppy.osu.Game.Rulesets.Osu" Version="2026.621.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\ReplayViewer.ico"
+                      LogicalName="Kumori.ReplayViewer.replay.ico" />
   </ItemGroup>
 </Project>

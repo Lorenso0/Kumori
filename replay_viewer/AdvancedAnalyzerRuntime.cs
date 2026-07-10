@@ -17,12 +17,13 @@ internal sealed class AdvancedAnalyzerRuntime
     {
         if (getPlayer() is not { IsLoaded: true } player)
             return false;
-        player.PauseGameplay();
+        player.EnterAnalysisMode();
         return true;
     }
 
     public void Exit()
     {
+        getPlayer()?.ExitAnalysisMode();
     }
 
     public void Focus(double time)

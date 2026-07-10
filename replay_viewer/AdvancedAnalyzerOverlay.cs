@@ -279,6 +279,31 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
             TogglePlayback();
             return true;
         }
+        if (e.Key == Key.Left)
+        {
+            viewModel.SelectPrevious();
+            return true;
+        }
+        if (e.Key == Key.Right)
+        {
+            viewModel.SelectNext();
+            return true;
+        }
+        if (e.Key == Key.A)
+        {
+            StepFrame(-1);
+            return true;
+        }
+        if (e.Key == Key.D)
+        {
+            StepFrame(1);
+            return true;
+        }
+        if (e.Key == Key.Enter)
+        {
+            ReturnToReplayHere();
+            return true;
+        }
         return base.OnKeyDown(e);
     }
 

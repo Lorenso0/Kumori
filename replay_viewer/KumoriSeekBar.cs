@@ -51,6 +51,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     private Container track = null!;
     private Box fill = null!;
+    private Box unavailableRemainder = null!;
     private Circle playhead = null!;
     private Container missLane = null!;
     private Container mehLane = null!;
@@ -67,6 +68,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     private FinalHitsContract? finalHits;
     private double? actualAccuracy;
+    private double? captureEndTime;
     private int framesSeen;
     private bool geometryLogged;
     private bool comparisonLogged;
@@ -169,6 +171,13 @@ internal partial class KumoriSeekBar : CompositeDrawable
                                 Width = 0,
                                 Colour = fill_colour,
                             },
+                            unavailableRemainder = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                RelativePositionAxes = Axes.X,
+                                Alpha = 0,
+                                Colour = Color4.Black.Opacity(0.72f),
+                            },
                         },
                     },
                     playhead = new Circle
@@ -255,6 +264,24 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     public void SetActualAccuracy(double accuracy) => actualAccuracy = accuracy;
 
+    public void SetCaptureEnd(double? time)
+    {
+        captureEndTime = time;
+        Schedule(() =>
+        {
+            if (time is not { } endTime || endTime >= lastHitTime)
+            {
+                unavailableRemainder.Alpha = 0;
+                return;
+            }
+
+            float cutoff = fraction(endTime);
+            unavailableRemainder.X = cutoff;
+            unavailableRemainder.Width = 1 - cutoff;
+            unavailableRemainder.Alpha = 1;
+        });
+    }
+
     public void BindAnalyzer(AdvancedAnalyzerViewModel viewModel, Action<MissAnalysisEntry> activateEntry)
     {
         unbindAnalyzer();
@@ -284,6 +311,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
         fill.Width = progress;
         playhead.X = progress;
         updateTimelineHover();
+        updateCaptureEndStatus();
 
         // One-shot geometry diagnostic around 2 s in, so runtime.log can
         // prove the bar's on-screen placement if it is reported invisible.
@@ -298,6 +326,20 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     private float fraction(double time)
         => (float)Math.Clamp((time - firstHitTime) / (lastHitTime - firstHitTime), 0, 1);
+
+    private void updateCaptureEndStatus()
+    {
+        if (captureEndTime is not { } endTime || currentTime() < endTime - 1)
+        {
+            if (captureEndTime != null)
+                statusText.Alpha = 0;
+            return;
+        }
+
+        statusText.Text = $"Capture ended — no input after {AdvancedAnalyzerMetrics.FormatTime(endTime)}";
+        statusText.Colour = Color4.Orange;
+        statusText.Alpha = 1;
+    }
 
     private void addMarker(double time, KumoriTimelineMarkerKind kind)
     {
@@ -536,7 +578,8 @@ internal partial class KumoriSeekBar : CompositeDrawable
     private void seekToPosition(Vector2 screenSpacePosition)
     {
         float frac = Math.Clamp(track.ToLocalSpace(screenSpacePosition).X / Math.Max(1, track.DrawWidth), 0, 1);
-        performSeek(firstHitTime + frac * (lastHitTime - firstHitTime));
+        double requestedTime = firstHitTime + frac * (lastHitTime - firstHitTime);
+        performSeek(captureEndTime is { } endTime ? Math.Min(requestedTime, endTime) : requestedTime);
     }
 
     private void unbindAnalyzer()

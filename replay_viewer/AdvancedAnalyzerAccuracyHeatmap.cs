@@ -79,11 +79,18 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         AddInternal(new SpriteText
         {
             Text = selected.ObjectType.StartsWith("Slider", StringComparison.OrdinalIgnoreCase)
-                ? "SLIDER HEATMAP"
-                : "MISS HEATMAP",
+                ? "SLIDER CURSOR PATH"
+                : "MISS CURSOR PATH",
             Position = new Vector2(10, 8),
             Font = FontUsage.Default.With(size: 12, weight: "bold"),
             Colour = Color4.White.Opacity(0.82f),
+        });
+        AddInternal(new SpriteText
+        {
+            Text = "CYAN move/held · RED X tap · arrows start/end",
+            Position = new Vector2(10, 27),
+            Font = FontUsage.Default.With(size: 8, weight: "bold"),
+            Colour = Color4.White.Opacity(0.55f),
         });
 
         AddInternal(new CircularContainer
@@ -154,14 +161,18 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
                 start -= startDirection * 5;
                 end += endDirection * 5;
             }
-            AddInternal(endpointArrow(start, startDirection, Color4.Cyan, 11));
-            AddInternal(endpointArrow(end, endDirection, AdvancedAnalyzerColours.Miss, 12));
+            // Keep direction arrows away from clipped panel edges and from
+            // the input X, which commonly occupies the final sample.
+            Vector2 startArrow = clampArrow(start + startDirection * 11, 11);
+            Vector2 endArrow = clampArrow(end - endDirection * 14, 12);
+            AddInternal(endpointArrow(startArrow, startDirection, Color4.Cyan, 11));
+            AddInternal(endpointArrow(endArrow, endDirection, AdvancedAnalyzerColours.Miss, 12));
         }
 
         if (viewModel.ShowInputMarkers.Value && selected.InputFrame is { } input)
         {
             Vector2 click = centre + (input.Position - selected.TargetPosition) * scale;
-            addCross(click, 18, AdvancedAnalyzerColours.Miss, 3.5f);
+            addCross(click, 13, AdvancedAnalyzerColours.Miss, 2.75f);
         }
 
         AddInternal(new SpriteText
@@ -179,6 +190,14 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
     {
         AddInternal(line(position, size, thickness, 45, colour));
         AddInternal(line(position, size, thickness, -45, colour));
+    }
+
+    private Vector2 clampArrow(Vector2 position, float size)
+    {
+        float margin = size / 2 + 3;
+        return new Vector2(
+            Math.Clamp(position.X, margin, Math.Max(margin, DrawWidth - margin)),
+            Math.Clamp(position.Y, 42 + margin, heatmap_height - 25 - margin));
     }
 
     private static Box line(Vector2 position, float length, float thickness, float rotation, Color4 colour) => new()

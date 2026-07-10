@@ -144,6 +144,17 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     {
         base.Update();
 
+        if (analysisMode)
+        {
+            // Upstream replay hotkeys and hover logic may attempt to show or
+            // expand this overlay after the analyzer has opened. The analyzer
+            // owns both side zones until it closes.
+            if (ReplayOverlay.Settings.Expanded.Value)
+                ReplayOverlay.Settings.Expanded.Value = false;
+            ReplayOverlay.ClearTransforms();
+            ReplayOverlay.Alpha = 0;
+        }
+
         if (PlaybackEndTime is not { } endTime || !LoadedBeatmapSuccessfully)
             return;
 
@@ -221,7 +232,7 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
         ? master.UserPlaybackRate.Value
         : 1;
 
-    public void EnterAnalysisMode(PlayerSettingsGroup analyzerSettings)
+    public void EnterAnalysisMode()
     {
         if (!LoadedBeatmapSuccessfully)
             return;
@@ -230,12 +241,14 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
         // replay menu so edge-hover cannot reopen it over the analyzer.
         analysisMode = true;
         ReplayOverlay.Settings.Expanded.Value = false;
+        ReplayOverlay.ClearTransforms();
         ReplayOverlay.Hide();
     }
 
     public void ExitAnalysisMode()
     {
         analysisMode = false;
+        ReplayOverlay.ClearTransforms();
         ReplayOverlay.Show();
     }
 

@@ -1,8 +1,10 @@
 using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
 using osu.Game.Graphics.UserInterface;
 using osu.Game.Overlays.Settings;
 using osu.Game.Screens.Play.PlayerSettings;
@@ -14,22 +16,22 @@ namespace Kumori.ReplayViewer;
 internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
 {
     private readonly AdvancedAnalyzerViewModel viewModel;
-    private readonly SpriteText title;
-    private readonly SpriteText source;
-    private readonly SpriteText diagnosis;
-    private readonly SpriteText objectDetail;
-    private readonly SpriteText timing;
-    private readonly SpriteText aim;
+    private readonly SingleLineText title;
+    private readonly SingleLineText source;
+    private readonly SingleLineText summary;
+    private readonly SingleLineText objectDetail;
     private readonly IconButton playButton;
     private readonly AdvancedAnalyzerAccuracyHeatmap heatmap;
+    private readonly AdvancedAnalyzerTimingBar timingBar;
 
     public AdvancedAnalyzerSettingsGroup(AdvancedAnalyzerViewModel viewModel, AdvancedAnalyzerOverlay overlay)
         : base("Advanced analyzer")
     {
         this.viewModel = viewModel;
 
-        Drawable[] controls =
+        Children =
         [
+            section("PLAYBACK"),
             playbackRow(
                 iconButton(FontAwesome.Solid.Backward, "Previous event", viewModel.SelectPrevious),
                 iconButton(FontAwesome.Solid.StepBackward, "Previous frame", () => overlay.StepFrame(-1)),
@@ -58,18 +60,23 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
                 TransferValueOnCommit = true,
             },
             divider(),
-            title = heading(),
-            source = text(11, true),
-            diagnosis = text(16, true),
+
+            section("EVENT ANALYSIS"),
+            title = singleLine(20, true),
+            source = singleLine(10, true),
+            summary = singleLine(10, true),
+            objectDetail = singleLine(12),
+            timingBar = new AdvancedAnalyzerTimingBar(),
             divider(),
-            objectDetail = text(14),
-            timing = text(14),
-            aim = text(14),
+
+            section("CURSOR PATH"),
             heatmap = new AdvancedAnalyzerAccuracyHeatmap(viewModel),
             new PlayerCheckbox { LabelText = "Miss click marker", Current = viewModel.ShowInputMarkers },
             new PlayerCheckbox { LabelText = "Cursor movement samples", Current = viewModel.ShowMovementSamples },
             new PlayerCheckbox { LabelText = "Button-held samples", Current = viewModel.ShowHeldSamples },
             divider(),
+
+            section("SELECTED NOTE"),
             new SettingsColour
             {
                 LabelText = "Selected note color",
@@ -79,10 +86,11 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
             new PlayerCheckbox { LabelText = "Show note indicator", Current = viewModel.ShowSelectedNoteIndicator },
             new PlayerCheckbox { LabelText = "Show selected click marker", Current = viewModel.ShowSelectedClickMarker },
             divider(),
+
+            section("SHORTCUTS"),
+            labelText("Left/Right event  ·  A/D frame  ·  Space play", 9),
             fullButton("Close analyzer", overlay.Close),
         ];
-
-        Children = controls;
 
         UpdateEntry(viewModel.SelectedEntry);
     }
@@ -93,18 +101,18 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
         {
             title.Text = "No review events";
             source.Text = viewModel.TotalCount == 0 ? "No bad hits were found." : "No events match the filters.";
-            diagnosis.Text = objectDetail.Text = timing.Text = aim.Text = string.Empty;
+            summary.Text = objectDetail.Text = string.Empty;
             heatmap.SetEntry(null);
+            timingBar.SetEntry(null);
             return;
         }
 
         title.Text = $"{entry.Label} at {AdvancedAnalyzerMetrics.FormatTime(entry.EventTime)}";
-        source.Text = entry.Source == AnalysisDataSource.Lazer ? "EXACT - LAZER JUDGEMENT" : "CAPTURED RESULT + REPLAY DATA";
-        source.Colour = entry.Source == AnalysisDataSource.Lazer ? Color4.Cyan : Color4.Orange;
-        diagnosis.Text = AdvancedAnalyzerMetrics.Diagnosis(entry);
+        source.Text = AdvancedAnalyzerMetrics.EvidenceLabel(entry);
+        source.Colour = AdvancedAnalyzerMetrics.Confidence(entry) == AnalyzerEvidenceConfidence.High ? Color4.Cyan : Color4.Orange;
+        summary.Text = AdvancedAnalyzerMetrics.EventSummary(entry);
         objectDetail.Text = $"Object: {entry.ObjectType}";
-        timing.Text = $"Input: {AdvancedAnalyzerMetrics.FormatInputTiming(entry)}";
-        aim.Text = AdvancedAnalyzerMetrics.FormatCursorPosition(entry);
+        timingBar.SetEntry(entry);
         heatmap.SetEntry(entry);
     }
 
@@ -114,17 +122,27 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
         playButton.TooltipText = playing ? "Pause" : "Play";
     }
 
-    private static SpriteText heading() => new()
-    {
-        Font = FontUsage.Default.With(size: 20, weight: "bold"),
-        Colour = Color4.White,
-    };
-
-    private static SpriteText text(float size, bool bold = false) => new()
+    private static SingleLineText singleLine(float size, bool bold = false) => new()
     {
         Font = FontUsage.Default.With(size: size, weight: bold ? "bold" : null),
         Colour = Color4.White.Opacity(0.78f),
+    };
+
+    private static SpriteText section(string value) => new()
+    {
+        Text = value,
+        Font = FontUsage.Default.With(size: 10, weight: "bold"),
+        Colour = Color4.Cyan.Opacity(0.72f),
         RelativeSizeAxes = Axes.X,
+    };
+
+    private static SpriteText labelText(string value, float size) => new()
+    {
+        Text = value,
+        Font = FontUsage.Default.With(size: size),
+        Colour = Color4.White.Opacity(0.62f),
+        RelativeSizeAxes = Axes.X,
+        Truncate = true,
     };
 
     private static Box divider() => new()
@@ -159,4 +177,15 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
         Spacing = new Vector2(8, 0),
         Children = children,
     };
+
+    private partial class SingleLineText : SpriteText, IHasTooltip
+    {
+        public LocalisableString TooltipText => Text;
+
+        public SingleLineText()
+        {
+            RelativeSizeAxes = Axes.X;
+            Truncate = true;
+        }
+    }
 }

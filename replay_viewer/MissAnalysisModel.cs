@@ -2,6 +2,7 @@ using osu.Game.Rulesets.Objects;
 using osu.Game.Rulesets.Osu;
 using osu.Game.Rulesets.Osu.Objects;
 using osu.Game.Rulesets.Osu.Replays;
+using osu.Game.Rulesets.Scoring;
 using osuTK;
 
 namespace Kumori.ReplayViewer;
@@ -50,10 +51,12 @@ internal sealed record MissAnalysisEntry(
     double? InputOffsetMs,
     bool ExactTiming,
     int? ComboBefore,
-    int? ComboAfter)
+    int? ComboAfter,
+    HitWindowAnalysis HitWindows)
 {
     public double? TapOffsetMs => InputOffsetMs;
     public MissReplayFrameSample? TapFrame => InputFrame;
+    public double HitWindowMs => HitWindows.Miss;
 }
 
 internal sealed record MissReplayFrameSample(
@@ -169,7 +172,8 @@ internal static class MissAnalysisBuilder
                     input == null ? null : input.Time - referenceTime,
                     false,
                     null,
-                    null));
+                    null,
+                    analysis.HitWindows));
             }
         }
 
@@ -282,7 +286,8 @@ internal static class MissAnalysisBuilder
                 inputOffset,
                 true,
                 judgement.ComboBefore,
-                judgement.ComboAfter));
+                judgement.ComboAfter,
+                analysis.HitWindows));
         }
 
         return new MissAnalysisModel(entries);
@@ -418,7 +423,20 @@ internal static class MissAnalysisBuilder
             offset,
             judgement != null && kind is KumoriTimelineMarkerKind.Ok or KumoriTimelineMarkerKind.Meh,
             judgement?.ComboBefore,
-            judgement?.ComboAfter);
+            judgement?.ComboAfter,
+            hitWindowsFor(judgement?.HitObject ?? matched));
+    }
+
+    private static HitWindowAnalysis hitWindowsFor(HitObject? hitObject)
+    {
+        var windows = hitObject?.HitWindows;
+        return windows == null
+            ? new HitWindowAnalysis(20, 80, 140, 150)
+            : new HitWindowAnalysis(
+                windows.WindowFor(HitResult.Great),
+                windows.WindowFor(HitResult.Ok),
+                windows.WindowFor(HitResult.Meh),
+                windows.WindowFor(HitResult.Miss));
     }
 
     private static PreparedReplay prepareReplay(IReadOnlyList<HitObject> hitObjects, IEnumerable<OsuReplayFrame> replayFrames)

@@ -64,7 +64,14 @@ public partial class ReplayViewerGame : OsuGameBase
         base.SetHost(host);
 
         if (host.Window != null)
+        {
+            using Stream? icon = typeof(ReplayViewerGame).Assembly
+                .GetManifestResourceStream("Kumori.ReplayViewer.replay.ico");
+            if (icon != null)
+                host.Window.SetIconFromStream(icon);
+
             host.Window.CursorState |= CursorState.Hidden;
+        }
     }
 
     protected override void LoadComplete()
@@ -144,8 +151,6 @@ public partial class ReplayViewerGame : OsuGameBase
         // player attaches it at positive depth so it renders underneath the
         // gameplay/HUD layers. Marker visibility binds to persisted settings
         // that the in-player "Kumori" settings group also edits.
-        if (contract.ReplayPlaybackEnd is { } playbackEnd)
-            lastHitTime = Math.Clamp(playbackEnd, firstHitTime + 1, lastHitTime);
         var seekBar = new KumoriSeekBar(
             firstHitTime,
             lastHitTime,
@@ -166,6 +171,7 @@ public partial class ReplayViewerGame : OsuGameBase
 
         seekBar.SetFinalHits(contract.FinalHits);
         seekBar.SetActualAccuracy(contract.Attempt.Accuracy);
+        seekBar.SetCaptureEnd(contract.ReplayPlaybackEnd);
         seekBar.AddMarkers(KumoriTimelineMarkers.FromContract(contract.JudgementEvents));
         Logger.Log("Kumori: prefilled seek bar from captured judgement events; runtime replay judgements will merge in as playback runs.");
 
