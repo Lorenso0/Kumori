@@ -46,8 +46,15 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
 
     public bool IsGameplayPaused => GameplayClockContainer?.IsPaused.Value ?? true;
 
-    private float seekBarAlphaBeforeAnalysis;
+    /// <summary>Hard playback cutoff for an unfinished capture.</summary>
+    public double? PlaybackEndTime { get; init; }
+
+    /// <summary>Map time to return to when Play is pressed at the cutoff.</summary>
+    public double PlaybackRestartTime { get; init; }
+
     private readonly List<ReplayJudgementSnapshot> analysisJudgements = [];
+    private bool analysisMode;
+    private bool playbackEndReached;
 
     public Action<IReadOnlyList<ReplayJudgementSnapshot>>? AnalysisJudgementsReady { get; set; }
 
@@ -96,6 +103,11 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
             // controls (and ruleset-provided groups such as replay analysis)
             // are kept, then a minimal background group is added back below.
             ConfigureReplaySidebar();
+            ReplayOverlay.Settings.Padding = new MarginPadding
+            {
+                Bottom = KumoriSeekBar.ReservedBottomHeight,
+            };
+            ReplayOverlay.Settings.Expanded.BindValueChanged(replaySettingsExpandedChanged, true);
 
             // The skin layout re-creates its own SongProgress on every skin
             // change; keep it suppressed so only Kumori's bar is visible.
@@ -127,6 +139,36 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     }
 
     protected virtual bool AttachKumoriHud => true;
+
+    protected override void Update()
+    {
+        base.Update();
+
+        if (PlaybackEndTime is not { } endTime || !LoadedBeatmapSuccessfully)
+            return;
+
+        if (GameplayTime < endTime - 1)
+        {
+            playbackEndReached = false;
+            return;
+        }
+
+        if (!playbackEndReached)
+        {
+            playbackEndReached = true;
+            PauseGameplay();
+            return;
+        }
+
+        // Treat Play at an incomplete replay's endpoint like replaying a
+        // finished video instead of immediately pausing at the cutoff again.
+        if (!IsGameplayPaused)
+        {
+            playbackEndReached = false;
+            Seek(PlaybackRestartTime);
+            StartReplayPlayback();
+        }
+    }
 
     public override bool OnExiting(ScreenExitEvent e)
     {
@@ -184,21 +226,28 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
         if (!LoadedBeatmapSuccessfully)
             return;
         PauseGameplay();
-        // The analyzer owns its sidebars. Keep lazer's normal replay menu
-        // out of the way without changing any upstream overlay state.
+        // The analyzer owns its sidebars. Collapse and lock lazer's normal
+        // replay menu so edge-hover cannot reopen it over the analyzer.
+        analysisMode = true;
+        ReplayOverlay.Settings.Expanded.Value = false;
         ReplayOverlay.Hide();
-        if (SeekBar != null)
-        {
-            seekBarAlphaBeforeAnalysis = SeekBar.Alpha;
-            SeekBar.Alpha = 0;
-        }
     }
 
     public void ExitAnalysisMode()
     {
+        analysisMode = false;
         ReplayOverlay.Show();
-        if (SeekBar != null)
-            SeekBar.Alpha = seekBarAlphaBeforeAnalysis;
+    }
+
+    private void replaySettingsExpandedChanged(osu.Framework.Bindables.ValueChangedEvent<bool> expanded)
+    {
+        if (analysisMode && expanded.NewValue)
+        {
+            ReplayOverlay.Settings.Expanded.Value = false;
+            return;
+        }
+
+        SeekBar?.SetInputBlocked(expanded.NewValue);
     }
 
     private void attachSeekBar()

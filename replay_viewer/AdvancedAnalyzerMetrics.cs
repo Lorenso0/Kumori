@@ -54,6 +54,20 @@ internal static class AdvancedAnalyzerMetrics
     public static string FormatTime(double time)
         => $"{(int)(time / 60000):00}:{(int)(time / 1000) % 60:00}.{(int)(time % 1000):000}";
 
-    public static string FormatDistance(double? distance)
-        => distance is { } value ? $"{value:0.0}px" : "n/a";
+    public static string FormatCursorPosition(MissAnalysisEntry entry)
+    {
+        if (entry.DistanceFromTarget is not { } distance)
+            return "Cursor: no position sample available";
+
+        double radius = Math.Max(1, entry.TargetRadius);
+        double edgeDifference = distance - radius;
+        double percentOfRadius = Math.Abs(edgeDifference) / radius * 100;
+
+        if (Math.Abs(edgeDifference) < 0.5)
+            return "Cursor: on the edge of the hit area";
+
+        return edgeDifference > 0
+            ? $"Cursor: {percentOfRadius:0}% beyond hit radius"
+            : $"Cursor: {percentOfRadius:0}% within hit radius";
+    }
 }

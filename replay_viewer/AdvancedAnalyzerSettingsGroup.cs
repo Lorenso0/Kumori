@@ -104,7 +104,7 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
         diagnosis.Text = AdvancedAnalyzerMetrics.Diagnosis(entry);
         objectDetail.Text = $"Object: {entry.ObjectType}";
         timing.Text = $"Input: {AdvancedAnalyzerMetrics.FormatInputTiming(entry)}";
-        aim.Text = $"Cursor distance: {AdvancedAnalyzerMetrics.FormatDistance(entry.DistanceFromTarget)}  |  radius {entry.TargetRadius:0}px";
+        aim.Text = AdvancedAnalyzerMetrics.FormatCursorPosition(entry);
         heatmap.SetEntry(entry);
     }
 

@@ -258,9 +258,18 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         float directionalError = Vector2.Dot(input.Position - entry.TargetPosition, incoming);
         if (Math.Abs(directionalError) < 1)
             return entry.InputFrame != null ? "Click aligned with target" : "Closest approach aligned";
+
+        float percentOfHitRadius = Math.Abs(directionalError) / Math.Max(1, (float)entry.TargetRadius) * 100;
+        if (entry.InputFrame != null)
+        {
+            return directionalError > 0
+                ? $"Click: {percentOfHitRadius:0}% of hit radius past center"
+                : $"Click: {percentOfHitRadius:0}% of hit radius short";
+        }
+
         return directionalError > 0
-            ? $"{(entry.InputFrame != null ? "Overshoot" : "Closest approach overshoot")} {directionalError:0.0}px"
-            : $"{(entry.InputFrame != null ? "Undershoot" : "Closest approach undershoot")} {Math.Abs(directionalError):0.0}px";
+            ? $"Closest: {percentOfHitRadius:0}% of hit radius past center"
+            : $"Closest: {percentOfHitRadius:0}% of hit radius short";
     }
 
     private static bool supportsHeatmap(MissAnalysisEntry entry)

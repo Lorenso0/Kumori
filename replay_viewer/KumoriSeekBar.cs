@@ -23,6 +23,7 @@ namespace Kumori.ReplayViewer;
 /// </summary>
 internal partial class KumoriSeekBar : CompositeDrawable
 {
+    public const float ReservedBottomHeight = bottom_offset + bar_height + 10;
     // Kumori theme palette (Python_old/osu_tracker/core/themes.py).
     private static readonly Color4 fill_colour = Color4Extensions.FromHex("#8b5cf6"); // PURPLE
     private static readonly Color4 miss_colour = Color4Extensions.FromHex("#ff4f7b"); // HIT_MISS
@@ -69,6 +70,21 @@ internal partial class KumoriSeekBar : CompositeDrawable
     private int framesSeen;
     private bool geometryLogged;
     private bool comparisonLogged;
+    private bool inputBlocked;
+
+    public override bool HandlePositionalInput => !inputBlocked;
+
+    public void SetInputBlocked(bool blocked) => Schedule(() =>
+    {
+        inputBlocked = blocked;
+        if (!blocked)
+            return;
+
+        if (hoveredAnalysisMarker != null)
+            analyzerViewModel?.ClearHovered(hoveredAnalysisMarker.Entry);
+        hoveredAnalysisMarker = null;
+        hidePopup();
+    });
 
     public KumoriSeekBar(double firstHitTime, double lastHitTime, Func<double> currentTime, Action<double> performSeek)
     {
@@ -405,7 +421,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     private void updateTimelineHover()
     {
-        if (inputManager == null || analyzerViewModel == null)
+        if (inputBlocked || inputManager == null || analyzerViewModel == null)
             return;
 
         Vector2 mousePosition = inputManager.CurrentState.Mouse.Position;

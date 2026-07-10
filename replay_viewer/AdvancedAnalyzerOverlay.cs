@@ -13,6 +13,7 @@ namespace Kumori.ReplayViewer;
 internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
 {
     private const float left_zone_width = KumoriAnalyzerSidebar.COMPACT_WIDTH;
+    private const float bottom_clearance = KumoriSeekBar.ReservedBottomHeight;
 
     private readonly AdvancedAnalyzerViewModel viewModel;
     private readonly AdvancedAnalyzerRuntime runtime;
@@ -47,16 +48,20 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
         leftSidebar.SetGroups([browser]);
         rightSidebar = new KumoriSettingsSidebar(anchorLeft: false);
         rightSidebar.SetGroups([inspector]);
-        InternalChildren =
-        [
-            new Box
+        InternalChild = new Container
+        {
+            RelativeSizeAxes = Axes.Both,
+            Padding = new MarginPadding { Bottom = bottom_clearance },
+            Children =
+            [
+                new Box
             {
                 RelativeSizeAxes = Axes.Y,
                 Width = left_zone_width,
                 Colour = new osuTK.Graphics.Color4(8, 9, 14, 252),
                 Depth = 1,
             },
-            new Box
+                new Box
             {
                 RelativeSizeAxes = Axes.Y,
                 Width = left_zone_width,
@@ -65,7 +70,7 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
                 Colour = new osuTK.Graphics.Color4(8, 9, 14, 252),
                 Depth = 1,
             },
-            new PopoverContainer
+                new PopoverContainer
             {
                 RelativeSizeAxes = Axes.Both,
                 Children =
@@ -73,8 +78,9 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
                     leftSidebar,
                     rightSidebar,
                 ],
-            },
-        ];
+                },
+            ],
+        };
     }
 
     protected override void LoadComplete()
@@ -279,6 +285,7 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
         => isOpen
            && Alpha > 0.01f
+           && screenSpacePos.Y < ToScreenSpace(new Vector2(0, DrawHeight - bottom_clearance)).Y
            && (screenSpacePos.X < ToScreenSpace(new Vector2(left_zone_width, 0)).X
                || screenSpacePos.X > ToScreenSpace(new Vector2(DrawWidth - left_zone_width, 0)).X)
            && base.ReceivePositionalInputAt(screenSpacePos);

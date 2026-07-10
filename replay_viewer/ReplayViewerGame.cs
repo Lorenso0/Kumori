@@ -126,6 +126,7 @@ public partial class ReplayViewerGame : OsuGameBase
             ruleset,
             workingBeatmap,
             viewerConfig.GetBindable<bool>(KumoriViewerSetting.DisableHidden).Value);
+        (double firstHitTime, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
         SelectedMods.Value = score.ScoreInfo.Mods;
         var player = new KumoriReplayPlayer(score)
         {
@@ -134,6 +135,8 @@ public partial class ReplayViewerGame : OsuGameBase
             ViewerConfig = viewerConfig,
             RequestReload = reloadReplayScreen,
             RequestWindowClose = () => gameHost?.Exit(),
+            PlaybackEndTime = contract.ReplayPlaybackEnd,
+            PlaybackRestartTime = firstHitTime,
         };
         currentPlayer = player;
 
@@ -141,7 +144,8 @@ public partial class ReplayViewerGame : OsuGameBase
         // player attaches it at positive depth so it renders underneath the
         // gameplay/HUD layers. Marker visibility binds to persisted settings
         // that the in-player "Kumori" settings group also edits.
-        (double firstHitTime, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
+        if (contract.ReplayPlaybackEnd is { } playbackEnd)
+            lastHitTime = Math.Clamp(playbackEnd, firstHitTime + 1, lastHitTime);
         var seekBar = new KumoriSeekBar(
             firstHitTime,
             lastHitTime,

@@ -63,6 +63,26 @@ public sealed record ViewerContract
         }
     }
 
+    /// <summary>
+    /// Last map time containing real cursor input for an unfinished play.
+    /// Completed plays remain unrestricted and run to the end of the map.
+    /// </summary>
+    public double? ReplayPlaybackEnd
+    {
+        get
+        {
+            if (Attempt.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            double lastSample = Samples
+                .Where(sample => (sample.Flags & paused_sample_flag) == 0)
+                .Select(sample => sample.MapTimeMs)
+                .DefaultIfEmpty(double.NegativeInfinity)
+                .Max();
+            return double.IsFinite(lastSample) ? lastSample : AnalysisCoverageEnd;
+        }
+    }
+
     public static ViewerContract Load(string path)
     {
         using var stream = File.OpenRead(path);
