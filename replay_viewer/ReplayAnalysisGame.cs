@@ -24,6 +24,8 @@ internal partial class ReplayAnalysisGame : OsuGameBase
     private readonly string contractPath;
     private GameHost gameHost = null!;
     private Score sourceScore = null!;
+    private readonly Stopwatch watchdog = Stopwatch.StartNew();
+    private bool finishing;
 
     public Exception? Failure { get; private set; }
     public bool Succeeded { get; private set; }
@@ -48,6 +50,9 @@ internal partial class ReplayAnalysisGame : OsuGameBase
             gameHost = Dependencies.Get<GameHost>();
             var ruleset = new OsuRuleset();
             var workingBeatmap = new KumoriWorkingBeatmap(contract.BeatmapPath, contract.MediaDirectory, audio, gameHost);
+            // Headless hosts do not run the normal music-controller track
+            // preparation path used by the desktop game.
+            workingBeatmap.LoadTrack();
             Beatmap.Value = workingBeatmap;
             Ruleset.Value = ruleset.RulesetInfo;
 
@@ -70,6 +75,9 @@ internal partial class ReplayAnalysisGame : OsuGameBase
 
     private void complete(IReadOnlyList<PreparedReplayJudgement> judgements)
     {
+        if (finishing)
+            return;
+        finishing = true;
         try
         {
             new PreparedReplayAnalysis(
@@ -129,10 +137,20 @@ internal partial class ReplayAnalysisGame : OsuGameBase
 
     private void fail(Exception ex)
     {
+        if (finishing)
+            return;
+        finishing = true;
         Failure = ex;
         NativeViewerLog.Error(ex, "Replay analysis preparation failed");
         if (gameHost != null)
             gameHost.Exit();
+    }
+
+    protected override void Update()
+    {
+        base.Update();
+        if (!finishing && watchdog.Elapsed > TimeSpan.FromSeconds(30))
+            fail(new TimeoutException("Replay analysis host did not complete within 30 seconds."));
     }
 }
 

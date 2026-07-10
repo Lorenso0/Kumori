@@ -171,7 +171,23 @@ public sealed class ReplayViewerContractService
             ?? throw new InvalidOperationException("Replay analysis process did not start.");
         Task<string> stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(45));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            throw new TimeoutException("Replay judgement simulation did not complete within 45 seconds.");
+        }
         string output = await stdout;
         string error = await stderr;
         if (!string.IsNullOrWhiteSpace(output))

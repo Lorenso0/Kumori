@@ -208,6 +208,7 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
                 x_count INTEGER NOT NULL DEFAULT 0,
                 key1_binding TEXT NOT NULL DEFAULT 'Z',
                 key2_binding TEXT NOT NULL DEFAULT 'X',
+                player_name TEXT,
                 interrupted INTEGER NOT NULL DEFAULT 0,
                 legacy INTEGER NOT NULL DEFAULT 0
             );
@@ -348,6 +349,7 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         EnsureColumn(con, "beatmaps", "hp", "REAL");
         EnsureColumn(con, "beatmaps", "bpm", "REAL");
         EnsureColumn(con, "beatmaps", "max_combo", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, "sessions", "player_name", "TEXT");
         EnsureColumn(con, "attempts", "geki", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(con, "attempts", "katu", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(con, "attempts", "large_tick_hits", "INTEGER NOT NULL DEFAULT 0");

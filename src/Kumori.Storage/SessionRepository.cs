@@ -20,12 +20,13 @@ public sealed class SessionRepository
         }
         using var con = _factory.Open();
         var hasKeys = HasColumn(con, "sessions", "z_count");
+        var hasPlayerName = HasColumn(con, "sessions", "player_name");
         var hasLegacy = HasColumn(con, "sessions", "legacy");
         var hasChanges = HasTable(con, "attempt_profile_changes");
         using var cmd = con.CreateCommand();
         cmd.CommandText = $"""
             SELECT s.id, s.started_at, s.ended_at, s.active_seconds,
-                   s.player_name, s.interrupted,
+                   {(hasPlayerName ? "s.player_name" : "NULL")}, s.interrupted,
                    COUNT(a.id),
                    SUM(CASE WHEN a.outcome = 'completed' THEN 1 ELSE 0 END),
                    {(hasKeys ? "s.z_count, s.x_count, s.key1_binding, s.key2_binding" : "0, 0, 'Z', 'X'")},

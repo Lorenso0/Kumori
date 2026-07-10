@@ -520,7 +520,7 @@ internal sealed class KumoriWorkingBeatmap : WorkingBeatmap
             ? null
             : textureStore.Get(Metadata.BackgroundFile);
     protected override Track? GetBeatmapTrack()
-        => string.IsNullOrWhiteSpace(Metadata.AudioFile)
+        => string.IsNullOrWhiteSpace(Metadata.AudioFile) || !mediaStorage.Exists(Metadata.AudioFile)
             ? null
             : trackStore.Get(Metadata.AudioFile);
     protected override ISkin? GetSkin() => null;

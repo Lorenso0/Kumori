@@ -15,6 +15,7 @@ TestResults/
 Old/
 build/
 dist/
+artifacts/
 headless/
 third_party/artifacts/
 **/bin/

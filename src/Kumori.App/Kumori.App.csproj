@@ -45,6 +45,6 @@
   <Target Name="PublishReplayAnalyzer" AfterTargets="Publish">
     <MSBuild Projects="..\..\replay_viewer\Kumori.ReplayViewer.csproj"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=$(SelfContained);PublishDir=$(PublishDir)Kumori.ReplayViewer\;PublishReadyToRun=$(PublishReadyToRun)" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=$(SelfContained);PublishDir=$(PublishDir)Kumori.ReplayViewer\;PublishReadyToRun=false" />
   </Target>
 </Project>
