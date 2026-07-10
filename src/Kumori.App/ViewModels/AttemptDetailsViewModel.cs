@@ -26,7 +26,9 @@ public partial class AttemptDetailsViewModel : ObservableObject
     private readonly ReplayViewerContractService? _replayViewer;
     private readonly Dictionary<long, AttemptDetails> _cache = new();
     private readonly Dictionary<long, IReadOnlyList<PressurePoint>> _curveCache = new();
+    private readonly Dictionary<string, double> _originalStarCache = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _loadCts;
+    private double? _calculatedOriginalStars;
 
     [ObservableProperty]
     private IReadOnlyList<PressurePoint> _pressureCurve = Array.Empty<PressurePoint>();
@@ -108,7 +110,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
                 return "—";
             }
             var pair = _adjustedDifficulty.TryGetValue("stars", out var s) ? s : default;
-            double? original = pair.Original ?? d.BaseStars;
+            double? original = pair.Original ?? _calculatedOriginalStars ?? d.BaseStars;
             double? adjusted = pair.Converted ?? d.AdjustedStars ?? d.Summary.Stars;
             return DifficultyDisplay(original, adjusted, decimals: 2, suffix: "★");
         }
@@ -122,7 +124,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
                 return "—";
             }
             var pair = _adjustedDifficulty.TryGetValue("stars", out var s) ? s : default;
-            double? original = pair.Original ?? d.BaseStars;
+            double? original = pair.Original ?? _calculatedOriginalStars ?? d.BaseStars;
             double? adjusted = pair.Converted ?? d.AdjustedStars ?? d.Summary.Stars;
             return DifficultyDisplay(original, adjusted, decimals: 2);
         }
@@ -330,6 +332,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
     partial void OnDetailsChanged(AttemptDetails? value)
     {
+        _calculatedOriginalStars = null;
         _adjustedDifficulty = value is { } d
             ? ApplyModDifficultySettings(d.Mods, d.CapturedDifficulty)
             : new Dictionary<string, DifficultyPair>();
@@ -434,6 +437,41 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
         PressureCurve = Array.Empty<PressurePoint>();
         _ = LoadPressureCurveAsync(value);
+        _ = LoadOriginalStarsAsync(value);
+    }
+
+    private async Task LoadOriginalStarsAsync(AttemptDetails? details)
+    {
+        if (details is null || details.CapturedDifficulty.TryGetValue("stars", out var stars) && stars.Original is not null)
+        {
+            return;
+        }
+
+        var path = BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_originalStarCache.TryGetValue(path, out var original))
+            {
+                original = await Task.Run(() => BeatmapStarRatingCalculator.CalculateOriginal(path));
+                _originalStarCache[path] = original;
+            }
+
+            if (ReferenceEquals(Details, details))
+            {
+                _calculatedOriginalStars = original;
+                OnPropertyChanged(nameof(StarsDisplay));
+                OnPropertyChanged(nameof(StarsNumberDisplay));
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Original star calculation failed for attempt {AttemptId}", details.Summary.Id);
+        }
     }
 
     private async Task LoadPressureCurveAsync(AttemptDetails? details)
