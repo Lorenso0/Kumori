@@ -22,6 +22,7 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
     private FillFlowContainer list = null!;
     private SpriteText count = null!;
     private OsuTextFlowContainer patterns = null!;
+    private OsuTextFlowContainer trends = null!;
     private EventTimeline timeline = null!;
     private readonly List<EventButton> eventButtons = [];
 
@@ -48,6 +49,12 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
                 RelativeSizeAxes = Axes.X,
                 AutoSizeAxes = Axes.Y,
                 Colour = Color4.White.Opacity(0.62f),
+            },
+            trends = new OsuTextFlowContainer(cp => cp.Font = OsuFont.Default.With(size: 10))
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Colour = Color4.Cyan.Opacity(0.68f),
             },
             new FillFlowContainer
             {
@@ -96,6 +103,7 @@ internal partial class AdvancedAnalyzerEventBrowser : PlayerSettingsGroup
         eventButtons.Clear();
         count.Text = $"Showing {viewModel.VisibleEntries.Count} of {viewModel.TotalCount}";
         patterns.Text = AdvancedAnalyzerMetrics.PatternSummary(viewModel.AllEntries);
+        trends.Text = viewModel.RecentTrendSummary;
         timeline.SetVisible(viewModel.VisibleEntries);
 
         if (viewModel.VisibleEntries.Count == 0)

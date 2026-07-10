@@ -43,6 +43,46 @@ public sealed class AttemptDetailsRepository
         };
     }
 
+    public IReadOnlyList<AttemptTrendSummary> GetRecentSameMapAttempts(long attemptId, int limit = 6)
+    {
+        if (!_factory.DatabaseExists)
+            return [];
+        using var con = _factory.Open();
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = """
+            SELECT a.id, a.accuracy, a.n100, a.n50, a.misses, a.slider_breaks, t.mean
+            FROM attempts a
+            LEFT JOIN attempt_timing t ON t.attempt_id = a.id
+            WHERE a.beatmap_id = (SELECT beatmap_id FROM attempts WHERE id = @id)
+              AND a.id < @id AND a.outcome <> 'active'
+            ORDER BY CASE a.outcome
+                         WHEN 'completed' THEN 0
+                         WHEN 'failed' THEN 1
+                         ELSE 2
+                     END,
+                     a.id DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@id", attemptId);
+        cmd.Parameters.AddWithValue("@limit", Math.Clamp(limit, 1, 20));
+        using var reader = cmd.ExecuteReader();
+        var result = new List<AttemptTrendSummary>();
+        while (reader.Read())
+        {
+            result.Add(new AttemptTrendSummary
+            {
+                Id = reader.GetInt64(0),
+                Accuracy = reader.GetDouble(1),
+                N100 = (int)reader.GetInt64(2),
+                N50 = (int)reader.GetInt64(3),
+                Misses = (int)reader.GetInt64(4),
+                SliderBreaks = (int)reader.GetInt64(5),
+                MeanOffset = reader.IsDBNull(6) ? null : reader.GetDouble(6),
+            });
+        }
+        return result;
+    }
+
     private static AttemptDetails? ReadAttemptRow(SqliteConnection con, long attemptId)
     {
         using var cmd = con.CreateCommand();

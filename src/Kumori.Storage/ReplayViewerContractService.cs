@@ -41,6 +41,7 @@ public sealed class ReplayViewerContractService
         }
 
         var metadata = _movement.GetMetadata(attemptId);
+        var recentAttempts = _details.GetRecentSameMapAttempts(attemptId);
         Directory.CreateDirectory(_contractDirectory);
         DeleteOldContracts(attemptId);
         var contractPath = Path.Combine(_contractDirectory, $"{attemptId}-{Guid.NewGuid():N}.json");
@@ -66,6 +67,7 @@ public sealed class ReplayViewerContractService
                 grade = details.Summary.Grade ?? "",
                 outcome = details.Summary.Outcome,
                 progress = details.Summary.Progress,
+                mean_offset = details.Timing?.Mean,
             },
             beatmap_path = Path.GetFullPath(beatmapPath),
             media_directory = Path.GetFullPath(mediaDirectory ?? Path.GetDirectoryName(beatmapPath)!),
@@ -82,6 +84,16 @@ public sealed class ReplayViewerContractService
                 n50 = details.N50,
                 misses = details.Summary.Misses,
             },
+            recent_attempts = recentAttempts.Select(attempt => new
+            {
+                id = attempt.Id,
+                accuracy = attempt.Accuracy,
+                n100 = attempt.N100,
+                n50 = attempt.N50,
+                misses = attempt.Misses,
+                slider_breaks = attempt.SliderBreaks,
+                mean_offset = attempt.MeanOffset,
+            }).ToArray(),
             samples = samples.Select(s => new
             {
                 map_time_ms = s.MapTimeMs,

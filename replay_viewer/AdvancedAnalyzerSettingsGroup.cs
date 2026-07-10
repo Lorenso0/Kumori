@@ -19,6 +19,7 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
     private readonly SingleLineText title;
     private readonly SingleLineText source;
     private readonly SingleLineText summary;
+    private readonly SingleLineText timingBoundary;
     private readonly SingleLineText objectDetail;
     private readonly IconButton playButton;
     private readonly AdvancedAnalyzerAccuracyHeatmap heatmap;
@@ -65,6 +66,7 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
             title = singleLine(20, true),
             source = singleLine(10, true),
             summary = singleLine(10, true),
+            timingBoundary = singleLine(10),
             objectDetail = singleLine(12),
             timingBar = new AdvancedAnalyzerTimingBar(),
             divider(),
@@ -101,7 +103,7 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
         {
             title.Text = "No review events";
             source.Text = viewModel.TotalCount == 0 ? "No bad hits were found." : "No events match the filters.";
-            summary.Text = objectDetail.Text = string.Empty;
+            summary.Text = timingBoundary.Text = objectDetail.Text = string.Empty;
             heatmap.SetEntry(null);
             timingBar.SetEntry(null);
             return;
@@ -111,6 +113,7 @@ internal partial class AdvancedAnalyzerSettingsGroup : PlayerSettingsGroup
         source.Text = AdvancedAnalyzerMetrics.EvidenceLabel(entry);
         source.Colour = AdvancedAnalyzerMetrics.Confidence(entry) == AnalyzerEvidenceConfidence.High ? Color4.Cyan : Color4.Orange;
         summary.Text = AdvancedAnalyzerMetrics.EventSummary(entry);
+        timingBoundary.Text = AdvancedAnalyzerMetrics.TimingBoundaryExplanation(entry);
         objectDetail.Text = $"Object: {entry.ObjectType}";
         timingBar.SetEntry(entry);
         heatmap.SetEntry(entry);

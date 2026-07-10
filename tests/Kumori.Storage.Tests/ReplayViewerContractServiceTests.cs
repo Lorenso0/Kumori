@@ -66,6 +66,38 @@ public class ReplayViewerContractServiceTests : IDisposable
     }
 
     [Fact]
+    public void WriteContract_IncludesRecentSameMapAttempts()
+    {
+        using (var con = Open())
+        {
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                    accuracy, n100, n50, misses, slider_breaks, mods_key)
+                VALUES (0, 1, 1, '2026-07-07T09:30:00', 'quit',
+                    96.0, 20, 4, 3, 1, 'HD');
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                    accuracy, n100, n50, misses, slider_breaks, mods_key)
+                VALUES (-1, 1, 1, '2026-07-07T09:00:00', 'completed',
+                    95.5, 24, 5, 4, 2, 'HD');
+                INSERT INTO attempt_timing VALUES (0, @blob, 1, 0, 1, 7.0, 7.0, 0);
+                INSERT INTO attempt_timing VALUES (-1, @blob, 1, 0, 1, 8.5, 8.5, 0);
+                """;
+            cmd.Parameters.AddWithValue("@blob", BlobCodec.EncodeOffsets([8.5]));
+            cmd.ExecuteNonQuery();
+        }
+
+        var path = CreateService().WriteContract(1, _beatmapPath);
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var recent = doc.RootElement.GetProperty("recent_attempts");
+        Assert.Equal(2, recent.GetArrayLength());
+        Assert.Equal(-1, recent[0].GetProperty("id").GetInt64());
+        Assert.Equal(95.5, recent[0].GetProperty("accuracy").GetDouble());
+        Assert.Equal(8.5, recent[0].GetProperty("mean_offset").GetDouble());
+    }
+
+    [Fact]
     public void WriteContract_RequiresMovementSamples()
     {
         using var con = Open();

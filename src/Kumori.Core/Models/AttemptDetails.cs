@@ -110,3 +110,14 @@ public sealed record InputSummary
     public int PeakKps { get; init; }
     public double AverageKps { get; init; }
 }
+
+public sealed record AttemptTrendSummary
+{
+    public long Id { get; init; }
+    public double Accuracy { get; init; }
+    public int N100 { get; init; }
+    public int N50 { get; init; }
+    public int Misses { get; init; }
+    public int SliderBreaks { get; init; }
+    public double? MeanOffset { get; init; }
+}

@@ -34,6 +34,7 @@ internal sealed class AdvancedAnalyzerViewModel
     public int CountFor(KumoriTimelineMarkerKind kind) => model.Entries.Count(entry => entry.Kind == kind);
     public bool UsesFallbackData => model.Entries.Any(e => e.Source == AnalysisDataSource.Inferred);
     public bool AnalyzerOpen { get; private set; }
+    public string RecentTrendSummary { get; }
 
     public event Action? FiltersChanged;
     public event Action? SelectionChanged;
@@ -42,10 +43,11 @@ internal sealed class AdvancedAnalyzerViewModel
     public event Action? SelectionAppearanceChanged;
     public event Action? PlaybackSettingsChanged;
 
-    public AdvancedAnalyzerViewModel(MissAnalysisModel model, KumoriViewerConfig config)
+    public AdvancedAnalyzerViewModel(MissAnalysisModel model, KumoriViewerConfig config, ViewerContract? contract = null)
     {
         this.model = model;
         this.config = config;
+        RecentTrendSummary = AdvancedAnalyzerMetrics.RecentTrendSummary(contract);
         initialise(ShowMisses, KumoriViewerSetting.ShowMissMarkers);
         initialise(ShowMehs, KumoriViewerSetting.ShowMehMarkers);
         initialise(ShowOks, KumoriViewerSetting.ShowOkMarkers);

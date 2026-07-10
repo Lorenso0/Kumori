@@ -106,11 +106,65 @@ internal static class AdvancedAnalyzerMetrics
         };
         string strongest = patterns.Where(p => p.Count > 0).OrderByDescending(p => p.Count).FirstOrDefault().Text
                            ?? $"{misses.Length} misses had mixed causes";
+        string direction = DirectionSummary(misses);
         if (offsets.Length == 0)
-            return strongest;
+            return $"{strongest}. {direction}";
 
         double average = offsets.Average();
-        return $"{strongest}. Average tap: {Math.Abs(average):0} ms {(average < 0 ? "early" : "late")}.";
+        return $"{strongest}. {direction} Average tap: {Math.Abs(average):0} ms {(average < 0 ? "early" : "late")}.";
+    }
+
+    public static string TimingBoundaryExplanation(MissAnalysisEntry entry)
+    {
+        if (entry.InputOffsetMs is not { } offset)
+            return string.Empty;
+        double absolute = Math.Abs(offset);
+        return entry.Kind switch
+        {
+            KumoriTimelineMarkerKind.Ok => $"100: {Math.Max(0, absolute - entry.HitWindows.Great):0.0} ms outside 300 window",
+            KumoriTimelineMarkerKind.Meh => $"50: {Math.Max(0, absolute - entry.HitWindows.Ok):0.0} ms outside 100 window",
+            KumoriTimelineMarkerKind.Miss => $"Miss: {Math.Max(0, absolute - entry.HitWindows.Meh):0.0} ms outside 50 window",
+            _ => "Inside the 300 timing window",
+        };
+    }
+
+    public static string RecentTrendSummary(ViewerContract? contract)
+    {
+        if (contract?.FinalHits is not { } current || contract.RecentAttempts.Count == 0)
+            return "No earlier attempts on this map to compare.";
+        double accuracy = contract.RecentAttempts.Average(a => a.Accuracy);
+        double misses = contract.RecentAttempts.Average(a => a.Misses);
+        string accuracyTrend = contract.Attempt.Accuracy >= accuracy ? "up" : "down";
+        string missTrend = current.Misses <= misses ? "fewer" : "more";
+        string timing = contract.Attempt.MeanOffset is { } now
+                        && contract.RecentAttempts.Where(a => a.MeanOffset != null).Select(a => a.MeanOffset!.Value).ToArray() is { Length: > 0 } prior
+            ? $" Timing shifted {Math.Abs(now - prior.Average()):0} ms {(now >= prior.Average() ? "later" : "earlier")}."
+            : string.Empty;
+        return $"Vs last {contract.RecentAttempts.Count}: accuracy {accuracyTrend} {Math.Abs(contract.Attempt.Accuracy - accuracy):0.00}%; {missTrend} misses ({current.Misses} vs {misses:0.0}).{timing}";
+    }
+
+    private static string DirectionSummary(IEnumerable<MissAnalysisEntry> entries)
+    {
+        string[] directions = entries.Select(AimDirection).Where(d => d != null).Cast<string>().ToArray();
+        if (directions.Length == 0)
+            return "No consistent aim direction.";
+        var strongest = directions.GroupBy(d => d).OrderByDescending(g => g.Count()).First();
+        return strongest.Count() * 2 > directions.Length
+            ? $"Aim bias: {strongest.Count()}/{directions.Length} {strongest.Key}."
+            : "No consistent aim direction.";
+    }
+
+    private static string? AimDirection(MissAnalysisEntry entry)
+    {
+        MissReplayFrameSample? frame = entry.InputFrame ?? entry.NearestFrame;
+        if (frame == null)
+            return null;
+        Vector2 error = frame.Position - entry.TargetPosition;
+        if (error.Length < entry.TargetRadius * 0.15)
+            return null;
+        return Math.Abs(error.X) >= Math.Abs(error.Y)
+            ? error.X < 0 ? "left" : "right"
+            : error.Y < 0 ? "above" : "below";
     }
 
     public static string FormatInputTiming(MissAnalysisEntry entry)

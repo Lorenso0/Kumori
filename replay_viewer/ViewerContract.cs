@@ -35,6 +35,9 @@ public sealed record ViewerContract
     [JsonPropertyName("final_hits")]
     public FinalHitsContract? FinalHits { get; init; }
 
+    [JsonPropertyName("recent_attempts")]
+    public List<RecentAttemptContract> RecentAttempts { get; init; } = [];
+
     /// <summary>
     /// Last map time backed by real capture evidence for an unfinished play.
     /// Completed plays intentionally return null so their full judgement pass
@@ -143,6 +146,9 @@ public sealed record AttemptContract
 
     [JsonPropertyName("progress")]
     public double Progress { get; init; }
+
+    [JsonPropertyName("mean_offset")]
+    public double? MeanOffset { get; init; }
 }
 
 public sealed record ModContract
@@ -203,4 +209,22 @@ public sealed record FinalHitsContract
 
     [JsonPropertyName("misses")]
     public int Misses { get; init; }
+}
+
+public sealed record RecentAttemptContract
+{
+    [JsonPropertyName("id")]
+    public long Id { get; init; }
+    [JsonPropertyName("accuracy")]
+    public double Accuracy { get; init; }
+    [JsonPropertyName("n100")]
+    public int N100 { get; init; }
+    [JsonPropertyName("n50")]
+    public int N50 { get; init; }
+    [JsonPropertyName("misses")]
+    public int Misses { get; init; }
+    [JsonPropertyName("slider_breaks")]
+    public int SliderBreaks { get; init; }
+    [JsonPropertyName("mean_offset")]
+    public double? MeanOffset { get; init; }
 }

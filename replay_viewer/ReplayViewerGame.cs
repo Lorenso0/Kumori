@@ -193,7 +193,7 @@ public partial class ReplayViewerGame : OsuGameBase
             seekBar.SetMarkers(initialModel.Markers);
             Logger.Log($"Kumori: loaded {initialModel.Entries.Count} exact judgements from prepared replay analysis.");
         }
-        advancedAnalyzerViewModel = new AdvancedAnalyzerViewModel(initialModel, viewerConfig);
+        advancedAnalyzerViewModel = new AdvancedAnalyzerViewModel(initialModel, viewerConfig, contract);
         var analyzerRuntime = new AdvancedAnalyzerRuntime(() => currentPlayer);
         advancedAnalyzerOverlay = new AdvancedAnalyzerOverlay(advancedAnalyzerViewModel, analyzerRuntime);
         Add(advancedAnalyzerOverlay);
