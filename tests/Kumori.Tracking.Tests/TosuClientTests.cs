@@ -155,6 +155,27 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_ParsesPerformanceValuesFromResultsScreen()
+    {
+        var client = new TosuClient();
+
+        client.Ingest(Packet("""
+            {
+                "state": {"name": "ResultScreen"},
+                "resultsScreen": {
+                    "score": 123456,
+                    "pp": {"current": 321.45, "fc": 400.5, "maxThisPlay": 350.25}
+                }
+            }
+            """));
+
+        var snapshot = client.LastSnapshot!;
+        Assert.Equal(321.45, snapshot.Pp);
+        Assert.Equal(400.5, snapshot.FcPp);
+        Assert.Equal(350.25, snapshot.MaxPp);
+    }
+
+    [Fact]
     public void Ingest_IgnoresBlankGradeWhenRankIsAvailable()
     {
         var client = new TosuClient();

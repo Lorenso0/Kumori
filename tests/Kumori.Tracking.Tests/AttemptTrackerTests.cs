@@ -48,6 +48,24 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void ResultsWithoutPerformanceValues_PreserveLatestGameplayPerformance()
+    {
+        _tracker.Ingest(Play(0, live: 0));
+        _tracker.Ingest(Play(3.5, live: 3500, score: 50_000, n300: 300, progress: 1) with
+        {
+            Pp = 321.45,
+            FcPp = 400.5,
+            MaxPp = 350.25,
+        });
+        _tracker.Ingest(Results(3.8, score: 50_000, n300: 300, progress: 1));
+
+        var snapshot = Assert.Single(_sink.Finals).Snapshot;
+        Assert.Equal(321.45, snapshot.Pp);
+        Assert.Equal(400.5, snapshot.FcPp);
+        Assert.Equal(350.25, snapshot.MaxPp);
+    }
+
+    [Fact]
     public void ResultsScreenRichHitCounts_AreFinalized()
     {
         _tracker.Ingest(Play(0, live: 0));

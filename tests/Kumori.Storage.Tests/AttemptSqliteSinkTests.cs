@@ -162,6 +162,21 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
+    public void SharedBeatmapMetadata_StoresBaseRatherThanModAdjustedStars()
+    {
+        var sink = CreateSink();
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "mapA",
+            WallTime = 1_788_000_000,
+            BeatmapStats = new BeatmapStats { BaseStars = 6.16, Stars = 7.30 },
+        });
+
+        using var con = Open();
+        Assert.Equal(6.16, Scalar<double>(con, "SELECT stars FROM beatmaps WHERE identity = 'mapA'"), precision: 2);
+    }
+
+    [Fact]
     public void SessionTracker_PersistsActiveSeconds()
     {
         var sink = CreateSink();

@@ -120,16 +120,12 @@ public sealed class TosuClient
                     c.ValueKind == JsonValueKind.Object
             ? c
             : default;
-        var pp = play.ValueKind == JsonValueKind.Object &&
-                 play.TryGetProperty("pp", out var ppElement) &&
-                 ppElement.ValueKind == JsonValueKind.Object
-            ? ppElement
-            : default;
         var health = play.ValueKind == JsonValueKind.Object &&
                      play.TryGetProperty("healthBar", out var hb) &&
                      hb.ValueKind == JsonValueKind.Object
             ? hb
             : default;
+        var performance = ParsePerformance(play, root);
 
         var score = GetLong(play, "score") ?? GetLong(root, "score") ?? GetNestedLong(root, "resultsScreen", "score") ?? 0;
         var grade = GetString(play, "grade")
@@ -177,9 +173,9 @@ public sealed class TosuClient
             Media = ParseMedia(root, checksum, beatmapId, beatmapSetId),
             Score = score,
             Grade = grade,
-            Pp = GetDouble(pp, "current") ?? GetDouble(root, "pp") ?? 0,
-            FcPp = GetDouble(pp, "fc") ?? GetNestedDouble(root, "performance", "fcPp") ?? 0,
-            MaxPp = GetDouble(pp, "maxThisPlay") ?? GetDouble(pp, "maxAchievedThisPlay") ?? 0,
+            Pp = performance.Current ?? 0,
+            FcPp = performance.Fc ?? 0,
+            MaxPp = performance.Max ?? 0,
             ModsKey = mods.Count == 0 ? "NM" : string.Concat(mods.Select(m => m.Acronym)),
             Mods = mods,
             Play = new JudgementCapture.PlayValues
@@ -198,8 +194,8 @@ public sealed class TosuClient
                 SliderTailHit = richHits.SliderTailHits,
                 SliderTailMiss = richHits.SliderTailMisses,
                 Combo = GetDouble(combo, "max") ?? GetDouble(play, "combo") ?? 0,
-                PpPeak = GetDouble(pp, "maxAchievedThisPlay") ?? GetDouble(pp, "current") ?? 0,
-                PpCurrent = GetDouble(pp, "current") ?? 0,
+                PpPeak = performance.Max ?? performance.Current ?? 0,
+                PpCurrent = performance.Current ?? 0,
                 Accuracy = GetDouble(play, "accuracy") ?? 0,
                 Health = GetDouble(health, "normal") ?? GetDouble(play, "healthBar") ?? 1,
                 UnstableRate = GetDouble(play, "unstableRate") ?? 0,
@@ -323,6 +319,56 @@ public sealed class TosuClient
         root.TryGetProperty(objectName, out var obj) && obj.ValueKind == JsonValueKind.Object
             ? GetDouble(obj, name)
             : null;
+
+    /// <summary>
+    /// Tosu exposes live performance under play.pp, but versions and skins can
+    /// move the final value to result/score payloads. Read the same fields from
+    /// every known score container so a results packet does not look like 0pp.
+    /// </summary>
+    private static PerformanceValues ParsePerformance(JsonElement play, JsonElement root)
+    {
+        var sources = new List<JsonElement> { play };
+        foreach (var name in new[] { "resultsScreen", "result", "score", "performance" })
+        {
+            if (TryGetObject(root, name, out var source))
+            {
+                sources.Add(source);
+            }
+        }
+
+        double? current = null, fc = null, max = null;
+        foreach (var source in sources)
+        {
+            var pp = TryGetPpObject(source, out var nested) ? nested : source;
+            current ??= GetDouble(pp, "current") ?? GetDouble(pp, "value") ?? GetDouble(pp, "pp");
+            fc ??= GetDouble(pp, "fc") ?? GetDouble(pp, "fcPp") ?? GetDouble(pp, "fc_pp");
+            max ??= GetDouble(pp, "maxThisPlay") ?? GetDouble(pp, "maxAchievedThisPlay")
+                ?? GetDouble(pp, "max_pp");
+        }
+
+        // Older tosu payloads use a scalar root pp value.
+        if (root.TryGetProperty("pp", out var rootPp))
+        {
+            current ??= TryGetDouble(rootPp);
+        }
+        fc ??= GetNestedDouble(root, "performance", "fcPp");
+        return new PerformanceValues(current, fc, max);
+    }
+
+    private static bool TryGetPpObject(JsonElement source, out JsonElement pp)
+    {
+        if (source.ValueKind == JsonValueKind.Object
+            && source.TryGetProperty("pp", out pp)
+            && pp.ValueKind == JsonValueKind.Object)
+        {
+            return true;
+        }
+
+        pp = default;
+        return false;
+    }
+
+    private sealed record PerformanceValues(double? Current, double? Fc, double? Max);
 
     private static bool TryGetObject(JsonElement root, string name, out JsonElement obj)
     {

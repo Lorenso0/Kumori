@@ -488,7 +488,10 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         cmd.Parameters.AddWithValue("@title", (object?)start.Title ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@mapper", (object?)start.Mapper ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@difficulty", (object?)start.Difficulty ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@stars", (object?)start.BeatmapStats.Stars ?? DBNull.Value);
+        // This is shared map metadata. The mod-adjusted value belongs on the
+        // attempt, otherwise a DT/HR play can change the apparent base stars
+        // for every other play of the same map.
+        cmd.Parameters.AddWithValue("@stars", (object?)(start.BeatmapStats.BaseStars ?? start.BeatmapStats.Stars) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ar", (object?)start.BeatmapStats.ApproachRate ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@cs", (object?)start.BeatmapStats.CircleSize ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@od", (object?)start.BeatmapStats.OverallDifficulty ?? DBNull.Value);
