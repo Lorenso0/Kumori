@@ -43,8 +43,8 @@ internal static class DifficultyStrainCurveBuilder
         var firstAdjustedTime = firstObjectTime / clockRate;
         var difficultyObjects = CreateDifficultyHitObjects(playable, clockRate);
 
-        var aim = new Aim(mods, includeSliders: true);
-        var speed = new Speed(mods);
+        var aim = new KumoriAim(mods, includeSliders: true);
+        var speed = new KumoriSpeed(mods);
         var peaks = new List<double>();
 
         foreach (var difficultyObject in difficultyObjects)
@@ -58,8 +58,8 @@ internal static class DifficultyStrainCurveBuilder
                 peaks.Add(0);
             }
 
-            var aimValue = aim.GetObjectDifficulties()[^1];
-            var speedValue = speed.GetObjectDifficulties()[^1];
+            var aimValue = aim.LastObjectDifficulty;
+            var speedValue = speed.LastObjectDifficulty;
             peaks[section] = Math.Max(peaks[section], aimValue + speedValue);
         }
 
@@ -168,6 +168,25 @@ internal static class DifficultyStrainCurveBuilder
         }
 
         return result;
+    }
+
+    // The NuGet packages do not expose lazer's source-only object-difficulty
+    // helper. These tiny derived types capture the values while the public
+    // skill processor runs, without modifying upstream code.
+    private sealed class KumoriAim(Mod[] mods, bool includeSliders) : Aim(mods, includeSliders)
+    {
+        public double LastObjectDifficulty { get; private set; }
+
+        protected override double StrainValueAt(DifficultyHitObject current)
+            => LastObjectDifficulty = base.StrainValueAt(current);
+    }
+
+    private sealed class KumoriSpeed(Mod[] mods) : Speed(mods)
+    {
+        public double LastObjectDifficulty { get; private set; }
+
+        protected override double StrainValueAt(DifficultyHitObject current)
+            => LastObjectDifficulty = base.StrainValueAt(current);
     }
 
     private static double? FindSetting(

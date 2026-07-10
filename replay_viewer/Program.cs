@@ -32,7 +32,7 @@ public static class Program
                 {
                     status = "ok",
                     contract_version = ViewerContract.CurrentVersion,
-                    lazer_commit = BuildInfo.LazerCommit,
+                    lazer_package = BuildInfo.LazerPackageVersion,
                     assembly = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
                 }));
                 return 0;
@@ -130,5 +130,5 @@ internal sealed record Arguments(bool Probe, string? ContractPath, string? Analy
 
 internal static class BuildInfo
 {
-    public const string LazerCommit = "acf314f4ed7eccdd1de42bff81ffef97621125c9";
+    public const string LazerPackageVersion = "2026.621.0";
 }

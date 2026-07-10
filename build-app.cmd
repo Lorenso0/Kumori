@@ -13,10 +13,6 @@ REM    build-app.cmd publish    Release publish (self-contained,
 REM                             single-file, ReadyToRun) to dist\app
 REM ============================================================
 
-echo Ensuring the required osu!lazer source revision is available...
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-lazer.ps1
-if errorlevel 1 exit /b %errorlevel%
-
 if /i "%~1"=="publish" goto :publish
 
 dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Debug -r win-x64 ^

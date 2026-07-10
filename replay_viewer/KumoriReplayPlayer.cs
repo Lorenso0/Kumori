@@ -47,7 +47,6 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     public bool IsGameplayPaused => GameplayClockContainer?.IsPaused.Value ?? true;
 
     private float seekBarAlphaBeforeAnalysis;
-    private IReadOnlyList<PlayerSettingsGroup>? settingsBeforeAnalysis;
     private readonly List<ReplayJudgementSnapshot> analysisJudgements = [];
 
     public Action<IReadOnlyList<ReplayJudgementSnapshot>>? AnalysisJudgementsReady { get; set; }
@@ -111,11 +110,7 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
             beginAnalysisCollection();
             if (DrawableRuleset is DrawableOsuRuleset osuDrawable)
             {
-                // The analyzer supplies one selected-object marker. Disable
-                // lazer's replay-wide marker layer so stale config cannot
-                // display every click underneath it.
-                osuDrawable.ReplayClickMarkersEnabled.Value = false;
-                selectedClickMarker = new KumoriSelectedClickMarker();
+                selectedClickMarker = new KumoriSelectedClickMarker(osuDrawable.Playfield);
                 osuDrawable.PlayfieldAdjustmentContainer.Add(selectedClickMarker);
                 Drawable markerProxy = selectedClickMarker.CreateProxy();
                 markerProxy.Depth = float.NegativeInfinity;
@@ -145,12 +140,12 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
         return true;
     }
 
-    public void SetSelectedClickMarker(MissAnalysisEntry? entry, bool visible)
-        => selectedClickMarker?.Set(entry, visible);
+    public void SetSelectedClickMarker(MissAnalysisEntry? entry, bool visible, osu.Framework.Graphics.Colour4 colour)
+        => selectedClickMarker?.Set(entry, visible, colour);
 
     protected virtual void ConfigureReplaySidebar()
     {
-        ReplayOverlay.Settings.RemoveAll(d => d is VisualSettings || d is AudioSettings, true);
+        ReplayOverlay.Settings.RemoveAll(d => d is VisualSettings || d is AudioSettings || d is ReplayAnalysisSettings, true);
         ReplayOverlay.Settings.Add(new KumoriSeekBarSettings(ViewerConfig!, RequestReload, SeekBar, OpenMissAnalyzer));
         ReplayOverlay.Settings.Add(new KumoriAudioSettings(ViewerConfig!));
         ReplayOverlay.Settings.Add(new KumoriBackgroundSettings(ViewerConfig!));
@@ -184,10 +179,9 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
         if (!LoadedBeatmapSuccessfully)
             return;
         PauseGameplay();
-        settingsBeforeAnalysis ??= ReplayOverlay.Settings.Groups;
-        ReplayOverlay.Settings.SetGroups([analyzerSettings]);
-        ReplayOverlay.SetSettingsForced(true);
-        ReplayOverlay.Show();
+        // The analyzer owns its sidebars. Keep lazer's normal replay menu
+        // out of the way without changing any upstream overlay state.
+        ReplayOverlay.Hide();
         if (SeekBar != null)
         {
             seekBarAlphaBeforeAnalysis = SeekBar.Alpha;
@@ -197,12 +191,7 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
 
     public void ExitAnalysisMode()
     {
-        ReplayOverlay.SetSettingsForced(false);
-        if (settingsBeforeAnalysis != null)
-        {
-            ReplayOverlay.Settings.SetGroups(settingsBeforeAnalysis);
-            settingsBeforeAnalysis = null;
-        }
+        ReplayOverlay.Show();
         if (SeekBar != null)
             SeekBar.Alpha = seekBarAlphaBeforeAnalysis;
     }

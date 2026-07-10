@@ -59,17 +59,17 @@ tosu is maintained by its own project and is licensed under LGPL-3.0-only. See [
 
 ## Replay viewer and osu!lazer dependency
 
-The replay viewer is a separate executable shipped beside Kumori in a published build. It is compiled against a tested, pinned revision of the official [ppy/osu](https://github.com/ppy/osu) source tree and osu.Framework. A source build obtains that dependency in `third_party\osu\`; the checkout is intentionally excluded from Git because it is upstream code and large. Kumori's tracked compatibility patch in `patches\osu-replay-viewer-api.patch` is applied automatically after that checkout is restored.
+The replay viewer is a separate executable shipped beside Kumori in a published build. It uses the official [ppy/osu](https://github.com/ppy/osu) and osu.Framework NuGet packages, pinned in `replay_viewer\Kumori.ReplayViewer.csproj`. No osu!lazer source checkout or local upstream patch is required.
 
-The viewer’s exact upstream revision is reported by its `--probe` command and maintained in `replay_viewer\Program.cs`. See [replay_viewer/THIRD-PARTY-NOTICES.md](replay_viewer/THIRD-PARTY-NOTICES.md) for licence information.
+The viewer’s package version is reported by its `--probe` command. See [replay_viewer/THIRD-PARTY-NOTICES.md](replay_viewer/THIRD-PARTY-NOTICES.md) for licence information.
 
 ## Build from source
 
 Requirements: Windows 10/11 x64, Git, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-# On a fresh clone, this automatically downloads the tested, ignored ppy/osu
-# revision needed by the replay viewer, then builds Kumori, the viewer, and the tests.
+# On a fresh clone, this restores the replay viewer's pinned NuGet dependencies,
+# then builds Kumori, the viewer, and the tests.
 .\build-app.cmd
 
 # Build and start Kumori.
@@ -79,7 +79,7 @@ Requirements: Windows 10/11 x64, Git, and the [.NET 8 SDK](https://dotnet.micros
 .\build-app.cmd publish
 ```
 
-`build-app.cmd` always restores the tested ppy/osu revision. Do not switch the checkout to a newer osu!lazer revision unless the replay viewer code is updated to match it.
+Update the pinned osu! NuGet package versions only after validating the replay viewer against representative replays.
 
 ## Creating a GitHub Release
 

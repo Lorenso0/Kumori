@@ -1,10 +1,10 @@
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Input.Events;
 using osu.Framework.Logging;
-using osu.Game.Screens.Play.HUD;
 using osuTK;
 using osuTK.Input;
 
@@ -16,8 +16,8 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
 
     private readonly AdvancedAnalyzerViewModel viewModel;
     private readonly AdvancedAnalyzerRuntime runtime;
-    private ReplaySettingsOverlay leftSidebar = null!;
-    private ReplaySettingsOverlay rightSidebar = null!;
+    private KumoriSettingsSidebar leftSidebar = null!;
+    private KumoriSettingsSidebar rightSidebar = null!;
     private AdvancedAnalyzerSettingsGroup inspector = null!;
     private bool isOpen;
     private bool isPlaying;
@@ -43,15 +43,9 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     {
         inspector = new AdvancedAnalyzerSettingsGroup(viewModel, this);
         var browser = new AdvancedAnalyzerEventBrowser(viewModel);
-        leftSidebar = new KumoriAnalyzerSidebar
-        {
-            ForceExpanded = true,
-        };
+        leftSidebar = new KumoriAnalyzerSidebar();
         leftSidebar.SetGroups([browser]);
-        rightSidebar = new ReplaySettingsOverlay
-        {
-            ForceExpanded = true,
-        };
+        rightSidebar = new KumoriSettingsSidebar(anchorLeft: false);
         rightSidebar.SetGroups([inspector]);
         InternalChildren =
         [
@@ -71,8 +65,15 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
                 Colour = new osuTK.Graphics.Color4(8, 9, 14, 252),
                 Depth = 1,
             },
-            leftSidebar,
-            rightSidebar,
+            new PopoverContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children =
+                [
+                    leftSidebar,
+                    rightSidebar,
+                ],
+            },
         ];
     }
 
@@ -81,6 +82,7 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
         base.LoadComplete();
         viewModel.FiltersChanged += filtersChanged;
         viewModel.SelectionChanged += selectionChanged;
+        viewModel.SelectionAppearanceChanged += selectionAppearanceChanged;
         viewModel.PlaybackSettingsChanged += playbackSettingsChanged;
         viewModel.ShowSelectedClickMarker.ValueChanged += selectedClickMarkerChanged;
     }
@@ -127,7 +129,7 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
         isOpen = false;
         isPlaying = false;
         loopSeekPending = false;
-        runtime.SetSelectedClickMarker(null, false);
+        runtime.SetSelectedClickMarker(null, false, viewModel.SelectedNoteColour.Value);
         runtime.Pause();
         runtime.Exit();
         runtime.SetRate(entryRate);
@@ -207,6 +209,7 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     private void filtersChanged()
     {
         inspector.UpdateEntry(viewModel.SelectedEntry);
+        updateSelectedClickMarker();
         if (isOpen)
             selectCurrent();
     }
@@ -222,8 +225,13 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     private void selectedClickMarkerChanged(osu.Framework.Bindables.ValueChangedEvent<bool> change)
         => updateSelectedClickMarker();
 
+    private void selectionAppearanceChanged() => updateSelectedClickMarker();
+
     private void updateSelectedClickMarker()
-        => runtime.SetSelectedClickMarker(viewModel.SelectedEntry, isOpen && viewModel.ShowSelectedClickMarker.Value);
+        => runtime.SetSelectedClickMarker(
+            viewModel.SelectedEntry,
+            isOpen && viewModel.ShowSelectedClickMarker.Value,
+            viewModel.SelectedNoteColour.Value);
 
     private void playbackSettingsChanged()
     {
@@ -277,6 +285,7 @@ internal partial class AdvancedAnalyzerOverlay : CompositeDrawable
     {
         viewModel.FiltersChanged -= filtersChanged;
         viewModel.SelectionChanged -= selectionChanged;
+        viewModel.SelectionAppearanceChanged -= selectionAppearanceChanged;
         viewModel.PlaybackSettingsChanged -= playbackSettingsChanged;
         viewModel.ShowSelectedClickMarker.ValueChanged -= selectedClickMarkerChanged;
         base.Dispose(isDisposing);

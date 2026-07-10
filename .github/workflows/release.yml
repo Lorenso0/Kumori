@@ -26,10 +26,6 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Obtain the osu!lazer source dependency
-        shell: pwsh
-        run: ./scripts/update-lazer.ps1
-
       - name: Publish Kumori and the replay viewer
         shell: cmd
         run: build-app.cmd publish
