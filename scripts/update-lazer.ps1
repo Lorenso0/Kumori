@@ -11,8 +11,11 @@ if (-not (Test-Path (Join-Path $Checkout ".git"))) {
     git -C $Checkout remote add origin https://github.com/ppy/osu.git
 }
 
-$commit = [string](git -C $Checkout rev-parse --verify HEAD 2>$null)
-$commit = $commit.Trim()
+$commit = ""
+$head = git -C $Checkout rev-parse --verify --quiet 'HEAD^{commit}' 2>$null
+if ($LASTEXITCODE -eq 0) {
+    $commit = ([string]$head).Trim()
+}
 if (-not [string]::Equals($commit, $PinnedCommit, [StringComparison]::OrdinalIgnoreCase)) {
     git -C $Checkout fetch --depth 1 origin $PinnedCommit
     git -C $Checkout checkout --detach $PinnedCommit
