@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Kumori.Core.State;
 using Kumori.Storage;
@@ -11,9 +10,6 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
 {
     private static readonly TimeSpan HealthInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan FrameStatusInterval = TimeSpan.FromMilliseconds(250);
-    private static readonly TimeSpan FinalizeTailGrace = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan FinalizeTailQuiet = TimeSpan.FromMilliseconds(700);
-    private static readonly TimeSpan FinalizeTailMinimum = TimeSpan.FromMilliseconds(500);
     private const int MinimumReplacementFrames = 60;
     private const double MinimumReplacementDurationMs = 1000;
     private const int MaxRecentFrames = 512;
@@ -128,13 +124,8 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
 
     public void Finalize(AttemptFinalization finalization)
     {
-        var attemptId = CurrentActiveAttemptId();
-        if (attemptId is not null)
-        {
-            WaitForTailFrames(attemptId.Value, finalization.Snapshot);
-        }
-
         List<LazerReplayFrame> frames;
+        long? attemptId;
         lock (_gate)
         {
             attemptId = _activeAttemptId;
@@ -161,6 +152,11 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
             return;
         }
 
+        // Detach the attempt before inspecting the final replay snapshot. Finalization is
+        // synchronous with tracking, so waiting here used to let a fast retry reset the
+        // shared buffer and replace this attempt's frames with those from the next play.
+        // The memory source exposes the complete current replay list at this boundary;
+        // for streaming sources we retain the already-buffered frames instead.
         frames = PreferFinalSnapshot(attemptId.Value, frames, finalization.Snapshot);
 
         var replayFrames = PreserveReplayFrameOrder(frames);
@@ -311,54 +307,6 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
     private static double DurationMs(IReadOnlyList<LazerReplayFrame> frames)
         => frames.Count == 0 ? 0 : frames[^1].MapTimeMs - frames[0].MapTimeMs;
 
-    private long? CurrentActiveAttemptId()
-    {
-        lock (_gate)
-        {
-            return _activeAttemptId;
-        }
-    }
-
-    private void WaitForTailFrames(long attemptId, AttemptSnapshot snapshot)
-    {
-        var started = Stopwatch.StartNew();
-        var lastChangeAt = started.Elapsed;
-        var lastCount = -1;
-        double? lastMapTime = null;
-        var targetMapTime = Math.Max(snapshot.LiveTimeMs, snapshot.DurationSeconds * 1000) * 0.95;
-
-        while (started.Elapsed < FinalizeTailGrace)
-        {
-            int count;
-            double? mapTime;
-            lock (_gate)
-            {
-                if (_activeAttemptId != attemptId)
-                {
-                    return;
-                }
-
-                count = _frames.Count;
-                mapTime = _frames.Count > 0 ? _frames[^1].MapTimeMs : null;
-            }
-
-            if (count != lastCount || mapTime != lastMapTime)
-            {
-                lastCount = count;
-                lastMapTime = mapTime;
-                lastChangeAt = started.Elapsed;
-            }
-            else if (started.Elapsed >= FinalizeTailMinimum &&
-                     started.Elapsed - lastChangeAt >= FinalizeTailQuiet &&
-                     (targetMapTime <= 0 || (mapTime ?? 0) >= targetMapTime))
-            {
-                return;
-            }
-
-            Thread.Sleep(50);
-        }
-    }
-
     internal static IReadOnlyList<LazerReplayFrame> PreserveReplayFrameOrder(IReadOnlyList<LazerReplayFrame> frames)
         => frames
             .Select((Frame, Index) => new { Frame, Index })
@@ -379,7 +327,6 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
                 lock (_gate)
                 {
                     _receivedFrames++;
-                    _lastReceivedFrame = frame;
                     RememberRecentFrame(frame);
                     if (_activeAttemptId is not null)
                     {

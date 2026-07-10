@@ -30,7 +30,17 @@ public sealed class TosuClient
     {
         await foreach (var packet in source.ReadPacketsAsync(cancellationToken))
         {
-            Ingest(packet);
+            try
+            {
+                Ingest(packet);
+            }
+            catch (Exception ex)
+            {
+                // A consumer must not be able to terminate the websocket loop.
+                // The next packet is often enough to recover from a transient
+                // database lock or an optional tracking integration failure.
+                Log.Error(ex, "Unhandled error while processing a tosu packet");
+            }
         }
     }
 
@@ -41,7 +51,10 @@ public sealed class TosuClient
         try
         {
             using var doc = JsonDocument.Parse(packet.Raw);
-            snapshot = ParseSnapshot(doc.RootElement, packet);
+            snapshot = ParseSnapshot(
+                doc.RootElement,
+                packet,
+                LastSnapshot?.IsStandardMode ?? false);
         }
         catch (JsonException ex)
         {
@@ -62,7 +75,10 @@ public sealed class TosuClient
         }
     }
 
-    private static TosuSnapshot ParseSnapshot(JsonElement root, TosuPacket packet)
+    private static TosuSnapshot ParseSnapshot(
+        JsonElement root,
+        TosuPacket packet,
+        bool fallbackStandardMode)
     {
         var state = NormalizedState(root);
         var beatmap = root.TryGetProperty("beatmap", out var bm) && bm.ValueKind == JsonValueKind.Object
@@ -141,7 +157,9 @@ public sealed class TosuClient
             State = state,
             IsPlaying = PlayingStates.Contains(state),
             IsResults = ResultStates.Contains(state),
-            IsStandardMode = IsStandardMode(root),
+            IsStandardMode = TryGetStandardMode(root, out var isStandardMode)
+                ? isStandardMode
+                : fallbackStandardMode,
             Artist = artist,
             Title = title,
             Difficulty = difficulty,
@@ -210,8 +228,12 @@ public sealed class TosuClient
     }
 
     /// <summary>Port of _mode_is_standard: play.mode ?? profile.mode; object → number==0; scalar → osu/standard/0.</summary>
-    internal static bool IsStandardMode(JsonElement root)
+    internal static bool IsStandardMode(JsonElement root) =>
+        TryGetStandardMode(root, out var isStandardMode) && isStandardMode;
+
+    private static bool TryGetStandardMode(JsonElement root, out bool isStandardMode)
     {
+        isStandardMode = false;
         JsonElement mode = default;
         if (root.TryGetProperty("play", out var play) && play.ValueKind == JsonValueKind.Object &&
             play.TryGetProperty("mode", out var playMode) && playMode.ValueKind != JsonValueKind.Null)
@@ -229,11 +251,13 @@ public sealed class TosuClient
         }
         if (mode.ValueKind == JsonValueKind.Object)
         {
-            return (GetLong(mode, "number") ?? 0) == 0;
+            isStandardMode = (GetLong(mode, "number") ?? 0) == 0;
+            return true;
         }
         var text = (mode.ValueKind == JsonValueKind.String ? mode.GetString() : mode.GetRawText())?
             .ToLowerInvariant();
-        return text is "0" or "osu" or "standard";
+        isStandardMode = text is "0" or "osu" or "standard";
+        return true;
     }
 
     /// <summary>

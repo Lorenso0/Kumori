@@ -24,6 +24,7 @@ public sealed class TosuTrackingService : IAsyncDisposable
     private readonly string _primaryMediaMirror;
     private readonly IReadOnlyList<string> _fallbackMediaMirrors;
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _trackingGate = new();
     private Task? _runTask;
     private Task? _healthTask;
     private volatile bool _connected;
@@ -86,11 +87,30 @@ public sealed class TosuTrackingService : IAsyncDisposable
 
     private void OnSnapshot(TosuSnapshot snapshot)
     {
-        if (snapshot.IsStandardMode)
+        try
         {
-            CacheMedia(snapshot);
-            _sessionTracker?.Ingest(TrackingFrameMapper.ToSessionFrame(snapshot));
-            _attemptTracker?.Ingest(TrackingFrameMapper.ToAttemptFrame(snapshot));
+            if (snapshot.IsStandardMode)
+            {
+                CacheMedia(snapshot);
+                lock (_trackingGate)
+                {
+                    _sessionTracker?.Ingest(TrackingFrameMapper.ToSessionFrame(snapshot));
+                    _attemptTracker?.Ingest(TrackingFrameMapper.ToAttemptFrame(snapshot));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Tracking persistence failed for a tosu packet; continuing with later packets");
+            _store.Update(s => s with
+            {
+                Tracking = s.Tracking with
+                {
+                    Health = HealthLevel.Error,
+                    Detail = $"tracking save failed: {ex.Message}",
+                },
+            });
+            return;
         }
 
         _store.Update(s => s with
@@ -196,9 +216,13 @@ public sealed class TosuTrackingService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
-        if (_sessionTracker?.HasSession == true && _client.LastSnapshot is { } snapshot)
+        lock (_trackingGate)
         {
-            _sessionTracker.EndClean(snapshot.WallTime, snapshot.MonoTime);
+            _attemptTracker?.EndInterrupted();
+            if (_sessionTracker?.HasSession == true && _client.LastSnapshot is { } snapshot)
+            {
+                _sessionTracker.EndClean(snapshot.WallTime, snapshot.MonoTime);
+            }
         }
         foreach (var task in new[] { _runTask, _healthTask })
         {
@@ -208,5 +232,42 @@ public sealed class TosuTrackingService : IAsyncDisposable
             }
         }
         _cts.Dispose();
+    }
+
+    /// <summary>Ends the live attempt and session when osu! closes or the user ends a session.</summary>
+    public bool EndSession(string evidence = "session_ended")
+    {
+        var snapshot = _client.LastSnapshot;
+        if (snapshot is null)
+        {
+            return false;
+        }
+
+        lock (_trackingGate)
+        {
+            _attemptTracker?.EndInterrupted(evidence);
+            if (_sessionTracker?.HasSession == true)
+            {
+                _sessionTracker.EndClean(snapshot.WallTime, snapshot.MonoTime);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public void NotifyOsuStopped()
+    {
+        var snapshot = _client.LastSnapshot;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        lock (_trackingGate)
+        {
+            _attemptTracker?.EndInterrupted("osu_stopped");
+            _sessionTracker?.EndInterrupted(snapshot.WallTime, snapshot.MonoTime);
+        }
     }
 }

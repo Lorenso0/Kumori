@@ -96,6 +96,9 @@ public sealed class SessionTracker
     public void EndClean(double wallTime, double monoTime) =>
         End(new Frame { WallTime = wallTime, MonoTime = monoTime }, interrupted: false);
 
+    public void EndInterrupted(double wallTime, double monoTime) =>
+        End(new Frame { WallTime = wallTime, MonoTime = monoTime }, interrupted: true);
+
     private void End(Frame frame, bool interrupted)
     {
         if (!_hasSession)

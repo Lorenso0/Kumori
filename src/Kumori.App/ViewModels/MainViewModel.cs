@@ -83,7 +83,8 @@ public partial class MainViewModel : ObservableObject
     private long _dbBytes;
     private long _cacheBytes;
     private long? _activeSessionId;
-    private long? _latestReplayAttemptId;
+    private long? _latestAttemptId;
+    private Func<Task<bool>>? _endLiveSession;
     private long? _oldestLoadedId;
     private bool _reachedEnd;
     private string? _mapFilterKey;
@@ -115,6 +116,8 @@ public partial class MainViewModel : ObservableObject
         Inspector = new AttemptDetailsViewModel(details, replayViewer);
         _store.StateChanged += OnStateChanged;
     }
+
+    public void SetEndLiveSessionHandler(Func<Task<bool>> handler) => _endLiveSession = handler;
 
     public bool IsFullArtwork => SelectedArtworkMode == "Full artwork";
     public string ResultsText => $"{Attempts.Count:N0} results";
@@ -513,9 +516,11 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task EndSessionAsync()
     {
-        var changed = await Task.Run(() => _maintenance.EndOpenSessions());
+        var changed = _endLiveSession is null
+            ? await Task.Run(() => _maintenance.EndOpenSessions()) > 0
+            : await _endLiveSession();
         _store.Update(s => s.ActiveSession is null ? s : s with { ActiveSession = null });
-        HistoryStatus = changed == 0 ? "No open sessions to end" : $"Ended {changed} open session(s)";
+        HistoryStatus = changed ? "Ended current session" : "No open sessions to end";
         await ReloadFirstPageAsync();
     }
 
@@ -878,9 +883,9 @@ public partial class MainViewModel : ObservableObject
             }
 
             var tracking = state.Tracking;
-            if (tracking.LatestReplayAttemptId is { } latestAttemptId && latestAttemptId != _latestReplayAttemptId)
+            if (tracking.LatestAttemptId is { } latestAttemptId && latestAttemptId != _latestAttemptId)
             {
-                _latestReplayAttemptId = latestAttemptId;
+                _latestAttemptId = latestAttemptId;
                 _ = ReloadFirstPageAsync();
             }
 

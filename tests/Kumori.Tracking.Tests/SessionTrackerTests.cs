@@ -83,6 +83,16 @@ public class SessionTrackerTests
         Assert.False(Assert.Single(_sink.Ends).Interrupted);
     }
 
+    [Fact]
+    public void EndInterruptedEndsImmediately()
+    {
+        _tracker.Ingest(Frame(0, playing: true));
+        _tracker.EndInterrupted(10, 10);
+
+        Assert.True(Assert.Single(_sink.Ends).Interrupted);
+        Assert.False(_tracker.HasSession);
+    }
+
     private static SessionTracker.Frame Frame(
         double t,
         bool playing,

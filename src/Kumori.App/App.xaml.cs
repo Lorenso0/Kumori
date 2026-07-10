@@ -141,7 +141,7 @@ public partial class App : Application
                         () => trackingSink.CurrentAttemptId,
                         HasReplayData,
                         store),
-                    _lazerReplayFrames);
+                    new BestEffortAttemptSink(_lazerReplayFrames, "lazer replay-frame capture"));
             }
             else
             {
@@ -173,6 +173,7 @@ public partial class App : Application
                 fallbackMediaMirrors: settings.Current.Media.FallbackMirrors,
                 recordPackets: settings.Current.Tracking.PacketRecordingEnabled);
             _tracking.Start();
+            viewModel.SetEndLiveSessionHandler(() => Task.Run(() => _tracking?.EndSession() ?? false));
 
             bool HasReplayData(long attemptId) =>
                 movement.GetMetadata(attemptId) is { SampleCount: > 0 };
@@ -434,6 +435,7 @@ public partial class App : Application
                 }
                 else
                 {
+                    _tracking?.NotifyOsuStopped();
                     EndOsuCompanionSession();
                 }
                 await Task.Delay(TimeSpan.FromSeconds(3), token);

@@ -212,6 +212,30 @@ public class AttemptTrackerTests
         Assert.Equal(new double[] { 1, 2 }, missEvents.Select(e => e.Value));
     }
 
+    [Fact]
+    public void MidPlayAttachment_UsesObservedMapTimeAndKeepsTheResult()
+    {
+        _tracker.Ingest(Play(0, live: 90_000, score: 500_000, n300: 500, progress: 0.98));
+        _tracker.Ingest(Results(0.2, score: 510_000, n300: 510, progress: 1));
+
+        var final = Assert.Single(_sink.Finals);
+        Assert.Equal("completed", final.Outcome);
+        Assert.True(final.Snapshot.DurationSeconds >= 90);
+    }
+
+    [Fact]
+    public void EndInterrupted_FinalizesAValidActiveAttempt()
+    {
+        _tracker.Ingest(Play(0));
+        _tracker.Ingest(Play(4, live: 4000, score: 20_000, n300: 100, progress: 0.5));
+
+        _tracker.EndInterrupted("app_closed");
+
+        var final = Assert.Single(_sink.Finals);
+        Assert.Equal("abandoned", final.Outcome);
+        Assert.Equal("app_closed", final.Evidence);
+    }
+
     private static AttemptTracker.Frame Play(
         double t,
         string id = "mapA",

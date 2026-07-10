@@ -32,16 +32,18 @@ internal sealed class StatePublishingAttemptSink : IAttemptSink
     {
         var attemptId = _currentAttemptId();
         _inner.Finalize(finalization);
-        if (attemptId is not { } id ||
-            !string.Equals(finalization.Outcome, "completed", StringComparison.OrdinalIgnoreCase) ||
-            !_hasReplayData(id))
+        if (attemptId is not { } id)
         {
             return;
         }
 
         _store.Update(s => s with
         {
-            Tracking = s.Tracking with { LatestReplayAttemptId = id },
+            Tracking = s.Tracking with
+            {
+                LatestAttemptId = id,
+                LatestReplayAttemptId = _hasReplayData(id) ? id : s.Tracking.LatestReplayAttemptId,
+            },
         });
     }
 }

@@ -63,6 +63,16 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_MissingModeAfterStandardPacket_PreservesStandardMode()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"play":{"mode":{"number":0}}}"""));
+        client.Ingest(Packet("""{"state":{"name":"ResultScreen"}}"""));
+
+        Assert.True(client.LastSnapshot!.IsStandardMode);
+    }
+
+    [Fact]
     public void Ingest_ParsesCurrentTosuModsHitErrorsAndBeatmapStats()
     {
         var client = new TosuClient();

@@ -19,6 +19,7 @@ public enum HealthLevel { Unknown, Ok, Degraded, Error }
 public sealed record TrackingStatus
 {
     public bool TosuConnected { get; init; }
+    public long? LatestAttemptId { get; init; }
     public long? LatestReplayAttemptId { get; init; }
     public double? LastPacketAgeSeconds { get; init; }
     public string? CurrentBeatmap { get; init; }

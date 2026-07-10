@@ -191,6 +191,26 @@ public sealed class AttemptTracker
         _lastFrame = frame;
     }
 
+    /// <summary>
+    /// Persists the most recent valid gameplay snapshot when tracking is stopped
+    /// before osu! supplies a normal result, retry, or quit boundary.
+    /// </summary>
+    public void EndInterrupted(string evidence = "tracker_stopped")
+    {
+        if (!_machine.HasAttempt || _latestSnapshot is null)
+        {
+            return;
+        }
+
+        if (_lastFrame is { } frame)
+        {
+            Finalize("abandoned", evidence, frame, results: false);
+        }
+
+        _machine.AttemptCleared();
+        _pendingQuitFrame = null;
+    }
+
     private Frame BoundaryFrame(Frame current) => _pendingQuitFrame ?? _lastFrame ?? current;
 
     private static Frame MergeFinalFrame(Frame? previous, Frame result)
@@ -203,6 +223,12 @@ public sealed class AttemptTracker
         var play = result.Play;
         return result with
         {
+            Packet = result.Packet with
+            {
+                LiveTimeMs = result.Packet.LiveTimeMs > 0
+                    ? result.Packet.LiveTimeMs
+                    : previous.Packet.LiveTimeMs,
+            },
             Play = play with
             {
                 Hit300 = play.Hit300 > 0 ? play.Hit300 : previous.Play.Hit300,
@@ -238,7 +264,12 @@ public sealed class AttemptTracker
     {
         _attemptOrdinal++;
         _attemptStartedMonoTime = frame.Packet.MonoTime;
-        _attemptStartMapTimeMs = frame.Packet.LiveTimeMs;
+        // Tracking can attach after a play has already started (for example,
+        // after startup or a websocket reconnect). Treat the map clock as
+        // elapsed time from the map's beginning so a legitimate near-finished
+        // play is not discarded merely because Kumori observed its last few
+        // seconds.
+        _attemptStartMapTimeMs = 0;
         _lastCheckpointMonoTime = 0;
         _latestSnapshot = Snapshot(frame);
         _pendingQuitFrame = null;
