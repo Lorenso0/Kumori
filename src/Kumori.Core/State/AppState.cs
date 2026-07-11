@@ -26,6 +26,50 @@ public sealed record TrackingStatus
     public bool OsuRunning { get; init; }
     public HealthLevel Health { get; init; } = HealthLevel.Unknown;
     public string? Detail { get; init; }
+    public TosuTelemetry? LatestTelemetry { get; init; }
+}
+
+/// <summary>Latest values received from tosu, retained for the diagnostics UI.</summary>
+public sealed record TosuTelemetry
+{
+    public DateTimeOffset ReceivedAt { get; init; }
+    public string State { get; init; } = "unknown";
+    public bool IsPlaying { get; init; }
+    public bool IsResults { get; init; }
+    public bool IsStandardMode { get; init; }
+    public string? Artist { get; init; }
+    public string? Title { get; init; }
+    public string? Mapper { get; init; }
+    public string? Difficulty { get; init; }
+    public long? BeatmapId { get; init; }
+    public long? BeatmapSetId { get; init; }
+    public string? Checksum { get; init; }
+    public long? LiveTimeMs { get; init; }
+    public long Score { get; init; }
+    public string? Grade { get; init; }
+    public double Accuracy { get; init; }
+    public double Combo { get; init; }
+    public double? MaxCombo { get; init; }
+    public double Progress { get; init; }
+    public double Health { get; init; }
+    public double Pp { get; init; }
+    public double FcPp { get; init; }
+    public double MaxPp { get; init; }
+    public string ModsKey { get; init; } = "NM";
+    public double Hit300 { get; init; }
+    public double Hit100 { get; init; }
+    public double Hit50 { get; init; }
+    public double Miss { get; init; }
+    public double Geki { get; init; }
+    public double Katu { get; init; }
+    public double SliderBreaks { get; init; }
+    public double LargeTickHits { get; init; }
+    public double LargeTickMisses { get; init; }
+    public double SmallTickHits { get; init; }
+    public double SmallTickMisses { get; init; }
+    public double SliderTailHits { get; init; }
+    public double SliderTailMisses { get; init; }
+    public double UnstableRate { get; init; }
 }
 
 public sealed record CaptureStatus

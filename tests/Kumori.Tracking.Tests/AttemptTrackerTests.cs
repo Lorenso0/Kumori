@@ -144,6 +144,20 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void SustainedPlayWithoutScoreCounters_IsNotDiscarded()
+    {
+        _tracker.Ingest(Play(0));
+        _tracker.Ingest(Play(14, live: 14_000));
+        _tracker.Ingest(Menu(14.1));
+        _tracker.Ingest(Menu(16.2));
+
+        var final = Assert.Single(_sink.Finals);
+        Assert.Equal("quit", final.Outcome);
+        Assert.Empty(_sink.Discards);
+        Assert.Equal(0, final.Snapshot.Score);
+    }
+
+    [Fact]
     public void ZeroHealthAtGraceStart_FinalizesAsFailed()
     {
         _tracker.Ingest(Play(0));

@@ -328,7 +328,13 @@ public sealed class AttemptTracker
 
         Checkpoint(frame, force: true);
         var snapshot = _latestSnapshot ?? Snapshot(frame);
-        if (snapshot.DurationSeconds < MinimumAttemptSeconds || !HasJudgement(snapshot))
+        // Do not discard a sustained play solely because the telemetry source
+        // temporarily cannot expose its score counters. osu!lazer updates can
+        // leave tosu able to report state transitions while its GameBase reader
+        // is recovering, which previously turned real plays into
+        // `invalid_final_attempt` records. The short-attempt guard and the
+        // retry/pre-play discard path still filter spurious transitions.
+        if (snapshot.DurationSeconds < MinimumAttemptSeconds)
         {
             Log.Information(
                 "Discarding attempt {Ordinal}: {Reason}; duration={DurationSeconds:0.00}s score={Score} hits={N300}/{N100}/{N50}/{Misses} progress={Progress:P1} outcome={Outcome} evidence={Evidence}",

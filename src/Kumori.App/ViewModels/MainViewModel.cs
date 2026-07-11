@@ -386,6 +386,12 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void OpenTosuDiagnostics()
+    {
+        new TosuDiagnosticsWindow(_appState) { Owner = ActiveOwner() }.Show();
+    }
+
+    [RelayCommand]
     private void OpenSettings()
     {
         new SettingsWindow(_settings) { Owner = ActiveOwner() }.ShowDialog();

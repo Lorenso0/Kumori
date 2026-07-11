@@ -32,7 +32,10 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     public async IAsyncEnumerable<LazerReplayFrame> ReadFramesAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var offsets = LazerMemoryOffsets.Load(_offsetsPath);
+        // Refresh the upstream tosu offsets once when the reader starts. The
+        // snapshot path intentionally reuses this cache so finalisation never
+        // blocks on the network.
+        var offsets = LazerMemoryOffsets.Load(_offsetsPath, refreshOfficialCache: _offsetsPath is null);
         _status.Update(s =>
         {
             s.Enabled = true;
@@ -234,9 +237,6 @@ internal sealed class LazerReplayFrameMemoryReader
     [
         0x00, 0x00, 0x80, 0x44,
         0x00, 0x00, 0x40, 0x44,
-        0x00, 0x00, 0x00, 0x00,
-        null, null, null, null,
-        0x00, 0x00, 0x00, 0x00
     ];
 
     private const int ScoreReplayOffset = 0x10;
@@ -483,7 +483,13 @@ internal sealed class LazerReplayFrameMemoryReader
 
         foreach (var fromPattern in FindGameBasesFromTosuBootstrapPattern())
         {
-            if (IsGameBase(fromPattern) && HasUsableScreenStack(fromPattern))
+            // The bootstrap pattern follows a live object graph directly to
+            // OsuGame. Its vtable marker can lag an osu!lazer update even when
+            // the graph and ScreenStack offsets are already valid. The screen
+            // stack is the data this reader actually needs and is a stronger
+            // practical validation here than rejecting the candidate solely on
+            // a stale vtable value.
+            if (HasUsableScreenStack(fromPattern))
             {
                 LastGameBase = fromPattern;
                 return fromPattern;
@@ -530,31 +536,38 @@ internal sealed class LazerReplayFrameMemoryReader
 
             foreach (var patternAddress in _memory.FindPatterns(region.BaseAddress, region.RegionSize, ScalingContainerTargetDrawSizePattern, maxMatches: 16))
             {
-                nint game;
-                try
+                // osu!lazer has shifted this field relative to the
+                // ScalingContainer anchor across releases. Mirror tosu's
+                // compatible sweep instead of pinning the old 0x24 layout.
+                foreach (var delta in new[] { 0x24, 0x28, 0x2c, 0x20, 0x30, 0x1c, 0x34 })
                 {
-                    var externalLinkOpener = _memory.ReadIntPtr(patternAddress - 0x24);
-                    if (!IsReadablePointer(externalLinkOpener))
+                    nint game = 0;
+                    try
                     {
-                        continue;
+                        var externalLinkOpener = _memory.ReadIntPtr(patternAddress - delta);
+                        if (!IsReadablePointer(externalLinkOpener))
+                        {
+                            continue;
+                        }
+
+                        var api = _memory.ReadIntPtr(externalLinkOpener + _offsets.ExternalLinkOpenerApi);
+                        if (!IsReadablePointer(api))
+                        {
+                            continue;
+                        }
+
+                        game = _memory.ReadIntPtr(api + _offsets.ApiAccessGame);
+                    }
+                    catch
+                    {
+                        // A wrong delta can land on an unreadable field; the
+                        // remaining offsets are still valid candidates.
                     }
 
-                    var api = _memory.ReadIntPtr(externalLinkOpener + _offsets.ExternalLinkOpenerApi);
-                    if (!IsReadablePointer(api))
+                    if (IsReadablePointer(game) && HasUsableScreenStack(game))
                     {
-                        continue;
+                        yield return game;
                     }
-
-                    game = _memory.ReadIntPtr(api + _offsets.ApiAccessGame);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (IsReadablePointer(game))
-                {
-                    yield return game;
                 }
             }
         }
@@ -871,15 +884,20 @@ internal sealed record LazerMemoryOffsets(
     private const string OfficialOffsetsUrl =
         "https://raw.githubusercontent.com/tosuapp/tosu/master/packages/tosu/src/assets/offsets.json";
 
-    public static LazerMemoryOffsets Load(string? path)
+    public static LazerMemoryOffsets Load(string? path, bool refreshOfficialCache = false)
     {
-        path ??= EnsureDefaultOffsetsPath();
+        path ??= EnsureDefaultOffsetsPath(refreshOfficialCache);
         if (!File.Exists(path))
         {
             throw new FileNotFoundException("osu!lazer offsets.json was not found.", path);
         }
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        return Parse(File.ReadAllText(path));
+    }
+
+    private static LazerMemoryOffsets Parse(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         return new LazerMemoryOffsets(
             root.TryGetProperty("OsuVersion", out var version) ? version.GetString() ?? "unknown" : "unknown",
@@ -891,18 +909,30 @@ internal sealed record LazerMemoryOffsets(
             GetOffset(root, "osu.Game.Online.API.APIAccess", "game"));
     }
 
-    private static string EnsureDefaultOffsetsPath()
+    private static string EnsureDefaultOffsetsPath(bool refreshOfficialCache)
     {
         var path = Path.Combine(AppPaths.CacheDir, "tosu", "offsets.json");
-        if (File.Exists(path))
+        if (File.Exists(path) && !refreshOfficialCache)
             return path;
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("Kumori");
-        var json = http.GetStringAsync(OfficialOffsetsUrl).GetAwaiter().GetResult();
-        using var doc = JsonDocument.Parse(json);
-        File.WriteAllText(path, JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true }));
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("Kumori");
+            var json = http.GetStringAsync(OfficialOffsetsUrl).GetAwaiter().GetResult();
+            _ = Parse(json); // validate before replacing the last known-good cache.
+
+            var temp = path + ".new";
+            File.WriteAllText(temp, json);
+            File.Move(temp, path, overwrite: true);
+        }
+        catch when (File.Exists(path))
+        {
+            // Offline or malformed upstream response: a previous valid cache
+            // is safer than disabling replay capture entirely.
+        }
+
         return path;
     }
 
@@ -1017,6 +1047,9 @@ internal sealed class ProcessMemory : IDisposable
     public IEnumerable<nint> FindPatterns(nint baseAddress, long size, IReadOnlyList<byte?> pattern, int maxMatches)
     {
         const int chunkSize = 1024 * 1024;
+        var exactPattern = pattern.All(value => value.HasValue)
+            ? pattern.Select(value => value!.Value).ToArray()
+            : null;
         var remaining = size;
         var address = baseAddress;
         var overlap = Math.Max(0, pattern.Count - 1);
@@ -1040,10 +1073,36 @@ internal sealed class ProcessMemory : IDisposable
                 ? current
                 : previousTail.Concat(current).ToArray();
             var bufferBase = address - previousTail.Length;
-            for (var i = 0; i <= buffer.Length - pattern.Count; i++)
+            if (exactPattern is not null)
             {
-                if (Matches(buffer, i, pattern))
+                var searchStart = 0;
+                while (searchStart <= buffer.Length - exactPattern.Length)
                 {
+                    var found = buffer.AsSpan(searchStart).IndexOf(exactPattern);
+                    if (found < 0)
+                    {
+                        break;
+                    }
+
+                    var index = searchStart + found;
+                    yield return bufferBase + index;
+                    matches++;
+                    if (matches >= maxMatches)
+                    {
+                        yield break;
+                    }
+                    searchStart = index + 1;
+                }
+            }
+            else
+            {
+                for (var i = 0; i <= buffer.Length - pattern.Count; i++)
+                {
+                    if (!Matches(buffer, i, pattern))
+                    {
+                        continue;
+                    }
+
                     yield return bufferBase + i;
                     matches++;
                     if (matches >= maxMatches)

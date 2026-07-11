@@ -122,9 +122,52 @@ public sealed class TosuTrackingService : IAsyncDisposable
                 LastPacketAgeSeconds = 0,
                 Health = HealthLevel.Ok,
                 Detail = snapshot.IsPlaying ? "playing" : snapshot.State,
+                LatestTelemetry = ToTelemetry(snapshot),
             },
         });
     }
+
+    private static TosuTelemetry ToTelemetry(TosuSnapshot snapshot) => new()
+    {
+        ReceivedAt = DateTimeOffset.UtcNow,
+        State = snapshot.State,
+        IsPlaying = snapshot.IsPlaying,
+        IsResults = snapshot.IsResults,
+        IsStandardMode = snapshot.IsStandardMode,
+        Artist = snapshot.Artist,
+        Title = snapshot.Title,
+        Mapper = snapshot.Mapper,
+        Difficulty = snapshot.Difficulty,
+        BeatmapId = snapshot.BeatmapId,
+        BeatmapSetId = snapshot.BeatmapSetId,
+        Checksum = snapshot.Checksum,
+        LiveTimeMs = snapshot.LiveTimeMs,
+        Score = snapshot.Score,
+        Grade = snapshot.Grade,
+        Accuracy = snapshot.Play.Accuracy,
+        Combo = snapshot.Play.Combo,
+        MaxCombo = snapshot.BeatmapStats.MaxCombo,
+        Progress = snapshot.Play.Progress ?? 0,
+        Health = snapshot.Play.Health,
+        Pp = snapshot.Pp,
+        FcPp = snapshot.FcPp,
+        MaxPp = snapshot.MaxPp,
+        ModsKey = snapshot.ModsKey,
+        Hit300 = snapshot.Play.Hit300,
+        Hit100 = snapshot.Play.Hit100,
+        Hit50 = snapshot.Play.Hit50,
+        Miss = snapshot.Play.Miss,
+        Geki = snapshot.Play.Geki,
+        Katu = snapshot.Play.Katu,
+        SliderBreaks = snapshot.Play.SliderBreak,
+        LargeTickHits = snapshot.Play.LargeTickHit,
+        LargeTickMisses = snapshot.Play.LargeTickMiss,
+        SmallTickHits = snapshot.Play.SmallTickHit,
+        SmallTickMisses = snapshot.Play.SmallTickMiss,
+        SliderTailHits = snapshot.Play.SliderTailHit,
+        SliderTailMisses = snapshot.Play.SliderTailMiss,
+        UnstableRate = snapshot.Play.UnstableRate,
+    };
 
     private void CacheMedia(TosuSnapshot snapshot)
     {

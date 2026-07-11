@@ -235,6 +235,7 @@
                                 <MenuItem Header="Check for Kumori updates" Command="{Binding CheckForUpdatesCommand}" />
                                 <Separator />
                                 <MenuItem Header="Developer tools" IsEnabled="False" />
+                                <MenuItem Header="tosu status &amp; log" Command="{Binding OpenTosuDiagnosticsCommand}" />
                                 <MenuItem Header="Lazer Frame Debug" Command="{Binding OpenLazerFrameDebugCommand}" />
                             </ContextMenu>
                         </Button.ContextMenu>

@@ -15,6 +15,10 @@ namespace Kumori.App;
 
 public partial class App : Application
 {
+    // osu!lazer exposes its managed object graph shortly after the process is
+    // visible. Starting tosu immediately can race that initialization, leaving
+    // it with a temporary GameBase resolution failure and zero telemetry.
+    private static readonly TimeSpan TosuStartupGracePeriod = TimeSpan.FromSeconds(2);
     private SingleInstance? _singleInstance;
     private TrayIconService? _tray;
     private MainWindow? _mainWindow;
@@ -379,6 +383,17 @@ public partial class App : Application
         {
             try
             {
+                Log.Information("Waiting {DelaySeconds:0}s for osu!lazer memory to initialize before launching tosu", TosuStartupGracePeriod.TotalSeconds);
+                await Task.Delay(TosuStartupGracePeriod);
+                if (!OsuProcessDetector.IsRunning())
+                {
+                    lock (_osuCompanionGate)
+                    {
+                        _tosuStartedForOsu = false;
+                    }
+                    return;
+                }
+
                 await TosuManager.EnsureInstalledAndLaunchAsync();
                 if (!OsuProcessDetector.IsRunning())
                 {
