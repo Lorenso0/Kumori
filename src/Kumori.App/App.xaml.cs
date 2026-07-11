@@ -331,6 +331,16 @@ public partial class App : Application
             try
             {
                 Log.Information("Preparing osu! companion session: stopping osu! before switching display mode");
+                // tosu keeps raw pointers into osu!lazer. It must not survive
+                // the display-mode restart and attach those stale pointers to
+                // the replacement process.
+                Log.Information("Stopping managed tosu before restarting osu! for the display-mode switch");
+                TosuManager.CloseOwned();
+                lock (_osuCompanionGate)
+                {
+                    _tosuStartedForOsu = false;
+                }
+
                 var launchPaths = OsuProcessDetector.StopAndCaptureLaunchPaths();
                 if (launchPaths.Count == 0)
                 {
@@ -362,6 +372,14 @@ public partial class App : Application
                 lock (_osuCompanionGate)
                 {
                     _companionRestartInProgress = false;
+                }
+
+                // Do not wait for the three-second monitor tick: after a
+                // successful relaunch this schedules a fresh tosu instance
+                // (including its startup grace) against the new osu process.
+                if (_store is not null && OsuProcessDetector.IsRunning())
+                {
+                    EnsureTosuForOsu(_store);
                 }
             }
         });
