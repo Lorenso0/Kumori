@@ -54,9 +54,9 @@ public sealed class SessionRowViewModel : HistoryRowViewModel
         }
     }
 
-    private string Elapsed => FormatElapsed(Model.StartedAt, Model.EndedAt);
+    private string Elapsed => Invariant($"{FormatWallElapsed(Model.StartedAt, Model.EndedAt)} ({FormatElapsed(Model.InMapSeconds)} active)");
 
-    private static string FormatElapsed(string start, string? end)
+    private static string FormatWallElapsed(string start, string? end)
     {
         if (LocalTimeDisplay.Parse(start) is not { } a)
         {
@@ -65,7 +65,12 @@ public sealed class SessionRowViewModel : HistoryRowViewModel
         var b = LocalTimeDisplay.Parse(end) is { } parsed
             ? parsed
             : DateTimeOffset.Now;
-        var seconds = Math.Max(0, (int)(b - a).TotalSeconds);
+        return FormatElapsed((b - a).TotalSeconds);
+    }
+
+    private static string FormatElapsed(double totalSeconds)
+    {
+        var seconds = Math.Max(0, (int)Math.Round(totalSeconds));
         var hours = seconds / 3600;
         var minutes = (seconds % 3600) / 60;
         var secs = seconds % 60;

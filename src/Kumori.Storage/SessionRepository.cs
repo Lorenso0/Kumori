@@ -22,10 +22,12 @@ public sealed class SessionRepository
         var hasKeys = HasColumn(con, "sessions", "z_count");
         var hasPlayerName = HasColumn(con, "sessions", "player_name");
         var hasLegacy = HasColumn(con, "sessions", "legacy");
+        var hasDuration = HasColumn(con, "attempts", "duration_seconds");
         var hasChanges = HasTable(con, "attempt_profile_changes");
         using var cmd = con.CreateCommand();
         cmd.CommandText = $"""
             SELECT s.id, s.started_at, s.ended_at, s.active_seconds,
+                   {(hasDuration ? "COALESCE(SUM(a.duration_seconds), 0)" : "0")},
                    {(hasPlayerName ? "s.player_name" : "NULL")}, s.interrupted,
                    COUNT(a.id),
                    SUM(CASE WHEN a.outcome = 'completed' THEN 1 ELSE 0 END),
@@ -53,19 +55,20 @@ public sealed class SessionRepository
                 StartedAt = r.GetString(1),
                 EndedAt = r.IsDBNull(2) ? null : r.GetString(2),
                 ActiveSeconds = r.GetDouble(3),
-                PlayerName = r.IsDBNull(4) ? null : r.GetString(4),
-                Interrupted = r.GetInt64(5) != 0,
-                AttemptCount = (int)r.GetInt64(6),
-                CompletedCount = r.IsDBNull(7) ? 0 : (int)r.GetInt64(7),
-                ZCount = (int)r.GetInt64(8),
-                XCount = (int)r.GetInt64(9),
-                Key1Binding = r.IsDBNull(10) ? "Z" : r.GetString(10),
-                Key2Binding = r.IsDBNull(11) ? "X" : r.GetString(11),
-                BestPp = r.IsDBNull(12) ? 0 : r.GetDouble(12),
-                TotalMisses = r.IsDBNull(13) ? 0 : (int)r.GetInt64(13),
-                AverageUr = r.IsDBNull(14) ? 0 : r.GetDouble(14),
-                Legacy = r.GetInt64(15) != 0,
-                AccountPpGain = r.IsDBNull(16) ? 0 : r.GetDouble(16),
+                InMapSeconds = r.GetDouble(4),
+                PlayerName = r.IsDBNull(5) ? null : r.GetString(5),
+                Interrupted = r.GetInt64(6) != 0,
+                AttemptCount = (int)r.GetInt64(7),
+                CompletedCount = r.IsDBNull(8) ? 0 : (int)r.GetInt64(8),
+                ZCount = (int)r.GetInt64(9),
+                XCount = (int)r.GetInt64(10),
+                Key1Binding = r.IsDBNull(11) ? "Z" : r.GetString(11),
+                Key2Binding = r.IsDBNull(12) ? "X" : r.GetString(12),
+                BestPp = r.IsDBNull(13) ? 0 : r.GetDouble(13),
+                TotalMisses = r.IsDBNull(14) ? 0 : (int)r.GetInt64(14),
+                AverageUr = r.IsDBNull(15) ? 0 : r.GetDouble(15),
+                Legacy = r.GetInt64(16) != 0,
+                AccountPpGain = r.IsDBNull(17) ? 0 : r.GetDouble(17),
             });
         }
         return results;

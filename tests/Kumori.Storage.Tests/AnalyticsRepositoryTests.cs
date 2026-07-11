@@ -47,6 +47,38 @@ public class AnalyticsRepositoryTests : IDisposable
         Assert.Equal("2026-07-07", summary.Daily[0].Day);
     }
 
+    [Fact]
+    public void GetSummary_UsesAccountChangeFromLatestSessionOnly()
+    {
+        using var con = new SqliteConnection($"Data Source={_dbPath}");
+        con.Open();
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = """
+            ALTER TABLE attempts ADD COLUMN session_id INTEGER;
+            UPDATE attempts SET session_id = CASE id WHEN 1 THEN 10 ELSE 20 END;
+            CREATE TABLE sessions(id INTEGER PRIMARY KEY);
+            INSERT INTO sessions VALUES(10), (20);
+            CREATE TABLE attempt_profile_changes(
+                attempt_id INTEGER NOT NULL, captured_at TEXT NOT NULL,
+                old_total_pp REAL, new_total_pp REAL,
+                old_global_rank INTEGER, new_global_rank INTEGER,
+                old_accuracy REAL, new_accuracy REAL,
+                old_play_count INTEGER, new_play_count INTEGER
+            );
+            INSERT INTO attempt_profile_changes(attempt_id, captured_at, old_total_pp, new_total_pp)
+            VALUES(1, '2026-07-06T10:10:00', 100, 140),
+                  (2, '2026-07-07T10:10:00', 140, 145);
+            """;
+        cmd.ExecuteNonQuery();
+
+        var summary = new AnalyticsRepository(
+            new SqliteConnectionFactory(_dbPath, readOnly: true)).GetSummary();
+
+        Assert.NotNull(summary.LatestAccountChange);
+        Assert.Equal(140, summary.LatestAccountChange!.OldTotalPp);
+        Assert.Equal(145, summary.LatestAccountChange.NewTotalPp);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

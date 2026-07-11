@@ -6,6 +6,8 @@ public sealed record SessionSummary
     public string StartedAt { get; init; } = "";
     public string? EndedAt { get; init; }
     public double ActiveSeconds { get; init; }
+    /// <summary>Total duration of recorded map attempts in this session.</summary>
+    public double InMapSeconds { get; init; }
     public string? PlayerName { get; init; }
     public bool Interrupted { get; init; }
     public bool Legacy { get; init; }

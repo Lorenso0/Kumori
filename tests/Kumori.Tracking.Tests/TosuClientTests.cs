@@ -176,6 +176,30 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_ResultScreen_PrefersFinalPerformanceOverLiveEstimate()
+    {
+        var client = new TosuClient();
+
+        client.Ingest(Packet("""
+            {
+                "state": {"name": "ResultScreen"},
+                "play": {
+                    "mode": {"number": 0},
+                    "pp": {"current": 250.0, "fc": 300.0}
+                },
+                "resultsScreen": {
+                    "pp": {"current": 200.0, "fc": 275.0, "maxThisPlay": 310.0}
+                }
+            }
+            """));
+
+        var snapshot = client.LastSnapshot!;
+        Assert.Equal(200.0, snapshot.Pp);
+        Assert.Equal(275.0, snapshot.FcPp);
+        Assert.Equal(310.0, snapshot.MaxPp);
+    }
+
+    [Fact]
     public void Ingest_IgnoresBlankGradeWhenRankIsAvailable()
     {
         var client = new TosuClient();

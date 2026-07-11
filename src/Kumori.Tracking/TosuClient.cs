@@ -125,7 +125,7 @@ public sealed class TosuClient
                      hb.ValueKind == JsonValueKind.Object
             ? hb
             : default;
-        var performance = ParsePerformance(play, root);
+        var performance = ParsePerformance(play, root, ResultStates.Contains(state));
 
         var score = GetLong(play, "score") ?? GetLong(root, "score") ?? GetNestedLong(root, "resultsScreen", "score") ?? 0;
         var grade = GetString(play, "grade")
@@ -325,15 +325,27 @@ public sealed class TosuClient
     /// move the final value to result/score payloads. Read the same fields from
     /// every known score container so a results packet does not look like 0pp.
     /// </summary>
-    private static PerformanceValues ParsePerformance(JsonElement play, JsonElement root)
+    private static PerformanceValues ParsePerformance(JsonElement play, JsonElement root, bool isResults)
     {
-        var sources = new List<JsonElement> { play };
+        // The live play object can remain populated on the results screen.  In
+        // that case its PP is the last in-game estimate, while the result
+        // payload contains the finalized value. Prefer result containers only
+        // for result packets; during gameplay play.pp remains authoritative.
+        var sources = new List<JsonElement>();
+        if (!isResults)
+        {
+            sources.Add(play);
+        }
         foreach (var name in new[] { "resultsScreen", "result", "score", "performance" })
         {
             if (TryGetObject(root, name, out var source))
             {
                 sources.Add(source);
             }
+        }
+        if (isResults)
+        {
+            sources.Add(play);
         }
 
         double? current = null, fc = null, max = null;

@@ -73,7 +73,7 @@ public sealed class AnalyticsRepository
         return summary with
         {
             Daily = rows,
-            LatestAccountChange = ReadLatestAccountChange(con),
+            LatestAccountChange = ReadLatestSessionAccountChange(con),
             TotalDurationSeconds = ReadTotalDurationSeconds(con),
             ZTotal = keys.Z,
             XTotal = keys.X,
@@ -154,9 +154,9 @@ public sealed class AnalyticsRepository
         return false;
     }
 
-    private static AccountChangeSummary? ReadLatestAccountChange(Microsoft.Data.Sqlite.SqliteConnection con)
+    private static AccountChangeSummary? ReadLatestSessionAccountChange(Microsoft.Data.Sqlite.SqliteConnection con)
     {
-        if (!HasTable(con, "attempt_profile_changes"))
+        if (!HasTable(con, "attempt_profile_changes") || !HasTable(con, "sessions"))
         {
             return null;
         }
@@ -168,6 +168,11 @@ public sealed class AnalyticsRepository
                    old_accuracy, new_accuracy,
                    old_play_count, new_play_count
             FROM attempt_profile_changes
+            WHERE attempt_id IN (
+                SELECT id
+                FROM attempts
+                WHERE session_id = (SELECT id FROM sessions ORDER BY id DESC LIMIT 1)
+            )
             ORDER BY captured_at DESC, attempt_id DESC
             LIMIT 1
             """;
