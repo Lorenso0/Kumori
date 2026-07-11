@@ -32,6 +32,27 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void WatchedReplay_IsNeverStarted()
+    {
+        _tracker.Ingest(Play(0, live: 0) with { IsWatchedReplay = true });
+
+        Assert.Empty(_sink.Starts);
+        Assert.Empty(_sink.Checkpoints);
+        Assert.Empty(_sink.Finals);
+    }
+
+    [Fact]
+    public void WatchedReplayAfterAttemptStart_DiscardsTheAttempt()
+    {
+        _tracker.Ingest(Play(0, live: 0));
+        _tracker.Ingest(Play(1, live: 1000, score: 10_000, n300: 20) with { IsWatchedReplay = true });
+
+        var discard = Assert.Single(_sink.Discards);
+        Assert.Equal("watched_replay", discard.Reason);
+        Assert.Empty(_sink.Finals);
+    }
+
+    [Fact]
     public void BlankResultsGrade_PreservesPreviousGrade()
     {
         var play = Play(3.5, live: 3500, score: 50_000, n300: 300, progress: 1) with

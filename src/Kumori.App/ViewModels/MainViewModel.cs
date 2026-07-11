@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -36,7 +36,7 @@ public partial class MainViewModel : ObservableObject
     public AttemptDetailsViewModel Inspector { get; }
     public IReadOnlyList<string> FilterModeOptions { get; } = new[]
     {
-        "All", "Multiplayer", "Completed", "Failed", "Retried", "Quit"
+        "All", "Completed", "Failed", "Retried", "Quit"
     };
     public IReadOnlyList<string> ArtworkModeOptions { get; } = new[] { "Full artwork", "No artwork" };
 
@@ -821,7 +821,6 @@ public partial class MainViewModel : ObservableObject
         var filtered = attempts.Where(a => mode switch
         {
             "All" => true,
-            "Multiplayer" => a.IsMultiplayer,
             _ => string.Equals(a.Outcome, mode, StringComparison.OrdinalIgnoreCase),
         });
 

@@ -63,6 +63,33 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_DifferentProfileAndPlayerNames_FlagsWatchedReplay()
+    {
+        var client = new TosuClient();
+
+        client.Ingest(Packet("""
+            {
+                "profile": {"name": "OurPlayer"},
+                "play": {"playerName": "OtherPlayer"}
+            }
+            """));
+
+        var snapshot = client.LastSnapshot!;
+        Assert.Equal("OurPlayer", snapshot.ProfileName);
+        Assert.Equal("OtherPlayer", snapshot.PlayerName);
+        Assert.True(snapshot.IsWatchedReplay);
+    }
+
+    [Fact]
+    public void Ingest_PlayerNameComparison_IsCaseInsensitive()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"profile":{"name":"OurPlayer"},"play":{"playerName":"ourplayer"}}"""));
+
+        Assert.False(client.LastSnapshot!.IsWatchedReplay);
+    }
+
+    [Fact]
     public void Ingest_MissingModeAfterStandardPacket_PreservesStandardMode()
     {
         var client = new TosuClient();

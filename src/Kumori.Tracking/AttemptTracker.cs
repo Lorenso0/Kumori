@@ -133,10 +133,17 @@ public sealed class AttemptTracker
         public double Pp { get; init; }
         public double FcPp { get; init; }
         public double MaxPp { get; init; }
+        public bool IsWatchedReplay { get; init; }
     }
 
     public void Ingest(Frame frame)
     {
+        if (frame.IsWatchedReplay)
+        {
+            DiscardWatchedReplay(frame);
+            return;
+        }
+
         if (!frame.IsStandardMode)
         {
             return;
@@ -212,6 +219,20 @@ public sealed class AttemptTracker
     }
 
     private Frame BoundaryFrame(Frame current) => _pendingQuitFrame ?? _lastFrame ?? current;
+
+    private void DiscardWatchedReplay(Frame frame)
+    {
+        if (!_machine.HasAttempt)
+        {
+            return;
+        }
+
+        var snapshot = _latestSnapshot ?? Snapshot(frame);
+        _sink.DiscardIfEmpty(new AttemptDiscard("watched_replay", snapshot, _attemptOrdinal));
+        _machine.AttemptCleared();
+        _pendingQuitFrame = null;
+        ClearAttempt(decrementOrdinal: true);
+    }
 
     private static Frame MergeFinalFrame(Frame? previous, Frame result)
     {

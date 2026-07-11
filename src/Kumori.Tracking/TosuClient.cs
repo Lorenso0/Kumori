@@ -110,6 +110,9 @@ public sealed class TosuClient
         var play = root.TryGetProperty("play", out var p) && p.ValueKind == JsonValueKind.Object
             ? p
             : default;
+        var profile = root.TryGetProperty("profile", out var profileValue) && profileValue.ValueKind == JsonValueKind.Object
+            ? profileValue
+            : default;
         var hits = play.ValueKind == JsonValueKind.Object &&
                    play.TryGetProperty("hits", out var h) &&
                    h.ValueKind == JsonValueKind.Object
@@ -135,6 +138,9 @@ public sealed class TosuClient
             ?? GetNestedString(root, "resultsScreen", "grade")
             ?? GetNestedString(root, "resultsScreen", "rank")
             ?? GetNestedString(root, "score", "rank");
+        var profileName = GetString(profile, "name");
+        var playerName = GetString(play, "playerName")
+            ?? GetNestedString(root, "resultsScreen", "playerName");
         var progress = GetDouble(play, "progress") ?? GetNestedDouble(root, "beatmap", "progress");
         if (progress is null && liveTimeMs is { } live && lastObjectMs is > 0)
         {
@@ -173,6 +179,9 @@ public sealed class TosuClient
             Media = ParseMedia(root, checksum, beatmapId, beatmapSetId),
             Score = score,
             Grade = grade,
+            ProfileName = profileName,
+            PlayerName = playerName,
+            IsWatchedReplay = NamesDiffer(profileName, playerName),
             Pp = performance.Current ?? 0,
             FcPp = performance.Fc ?? 0,
             MaxPp = performance.Max ?? 0,
@@ -289,6 +298,11 @@ public sealed class TosuClient
         var value = v.GetString();
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
+
+    private static bool NamesDiffer(string? profileName, string? playerName) =>
+        !string.IsNullOrWhiteSpace(profileName)
+        && !string.IsNullOrWhiteSpace(playerName)
+        && !string.Equals(profileName.Trim(), playerName.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private static long? GetLong(JsonElement obj, string name) =>
         obj.ValueKind == JsonValueKind.Object &&
@@ -630,6 +644,9 @@ public sealed record TosuSnapshot
     public double MonoTime { get; init; }
     public long Score { get; init; }
     public string? Grade { get; init; }
+    public string? ProfileName { get; init; }
+    public string? PlayerName { get; init; }
+    public bool IsWatchedReplay { get; init; }
     public double Pp { get; init; }
     public double FcPp { get; init; }
     public double MaxPp { get; init; }

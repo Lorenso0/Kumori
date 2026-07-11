@@ -7,7 +7,7 @@ internal static class TrackingFrameMapper
         WallTime = snapshot.WallTime,
         MonoTime = snapshot.MonoTime,
         IsStandardMode = snapshot.IsStandardMode,
-        IsPlaying = snapshot.IsPlaying,
+        IsPlaying = snapshot.IsPlaying && !snapshot.IsWatchedReplay,
         OsuRunning = osuRunning,
     };
 
@@ -30,6 +30,7 @@ internal static class TrackingFrameMapper
         Pp = snapshot.Pp,
         FcPp = snapshot.FcPp,
         MaxPp = snapshot.MaxPp,
+        IsWatchedReplay = snapshot.IsWatchedReplay,
         Play = snapshot.Play,
         Packet = new AttemptStateMachine.PacketView
         {
