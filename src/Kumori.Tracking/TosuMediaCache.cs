@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
 using Kumori.Core;
+using Kumori.Core.Models;
 using Serilog;
 
 namespace Kumori.Tracking;
@@ -39,10 +40,23 @@ internal static class TosuMediaCache
                 return null;
             }
 
+            var lazer = LazerStorage.ResolveBeatmapAssets(media.BeatmapId, media.BeatmapSetId);
+            if (lazer is not null)
+            {
+                return ParseBeatmapMedia(lazer.BeatmapPath, key, beatmapId, media.BeatmapSetId ?? 0);
+            }
+
+            var existing = ReadCachedMedia(key);
+            if (existing is not null)
+            {
+                return existing;
+            }
+
             if (beatmapSource is null || !File.Exists(beatmapSource))
             {
                 Log.Debug("tosu media local beatmap missing; trying mirrors for beatmap {BeatmapId}", beatmapId);
-                return DownloadMedia(media, key, primaryMirror, fallbackMirrors);
+                return CacheFromLazer(media, key)
+                    ?? DownloadMedia(media, key, primaryMirror, fallbackMirrors);
             }
 
             var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
@@ -94,8 +108,8 @@ internal static class TosuMediaCache
             if (!string.IsNullOrWhiteSpace(parsed.AudioFile) &&
                 !File.Exists(Path.Combine(target, parsed.AudioFile)))
             {
-                Log.Debug("tosu media audio missing after local cache; trying mirrors for beatmap {BeatmapId}", beatmapId);
-                return DownloadMedia(media, key, primaryMirror, fallbackMirrors) ?? parsed;
+                Log.Debug("tosu media audio missing after local cache; trying osu!lazer store for beatmap {BeatmapId}", beatmapId);
+                return CacheFromLazer(media, key) ?? DownloadMedia(media, key, primaryMirror, fallbackMirrors) ?? parsed;
             }
             Log.Debug("tosu media cached for beatmap {BeatmapId} at {Path}", beatmapId, target);
             return parsed;
@@ -105,6 +119,65 @@ internal static class TosuMediaCache
             Log.Warning(ex, "tosu media cache failed");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Rebuilds cache entries from the pre-link cache when the same beatmaps exist in osu!lazer.
+    /// Old entries remain untouched as a fallback for maps no longer installed in lazer.
+    /// </summary>
+    public static int MigrateOldLazerCache()
+    {
+        if (!Directory.Exists(AppPaths.OldBeatmapMediaDir))
+        {
+            return 0;
+        }
+
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+        var migrated = 0;
+        foreach (var manifest in Directory.EnumerateFiles(AppPaths.OldBeatmapMediaDir, "manifest.json", SearchOption.AllDirectories).ToArray())
+        {
+            try
+            {
+                var key = Path.GetFileName(Path.GetDirectoryName(manifest)!);
+                if (File.Exists(Path.Combine(AppPaths.BeatmapMediaDir, key, "manifest.json")))
+                {
+                    continue;
+                }
+
+                var old = JsonSerializer.Deserialize<CachedMedia>(File.ReadAllText(manifest), options);
+                if (old is null || old.BeatmapId <= 0 || old.SetId <= 0)
+                {
+                    continue;
+                }
+
+                var linked = CacheFromLazer(new TosuMediaInfo
+                {
+                    BeatmapId = old.BeatmapId,
+                    BeatmapSetId = old.SetId,
+                }, key);
+                if (linked is not null)
+                {
+                    migrated++;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            {
+                Log.Debug(ex, "Could not migrate old beatmap cache manifest {Manifest}", manifest);
+            }
+        }
+
+        Log.Information("Migrated {Count} cached beatmaps to osu!lazer links", migrated);
+        return migrated;
+    }
+
+    internal static bool NeedsRecovery(AttemptSummary attempt)
+    {
+        if (LazerStorage.ResolveBeatmapAssets(attempt.OsuBeatmapId, attempt.BeatmapSetId, attempt.Difficulty) is not null)
+        {
+            return false;
+        }
+        var key = MediaCacheKey(attempt.Checksum, attempt.OsuBeatmapId);
+        return string.IsNullOrWhiteSpace(key) || ReadCachedMedia(key) is null;
     }
 
     private static IEnumerable<string> CandidateSources(
@@ -125,6 +198,64 @@ internal static class TosuMediaCache
         {
             yield return Path.Combine(skinFolder, safeName);
         }
+    }
+
+    private static CachedMedia? CacheFromLazer(TosuMediaInfo media, string key)
+    {
+        var beatmapId = media.BeatmapId ?? 0;
+        var setId = media.BeatmapSetId ?? 0;
+        if (beatmapId <= 0 || setId <= 0)
+        {
+            return null;
+        }
+
+        var files = LazerMediaStore.ResolveFiles(media);
+        if (files is null)
+        {
+            return null;
+        }
+
+        var osuSource = files
+            .Where(pair => pair.Key.EndsWith(".osu", StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault(pair => LazerMediaStore.IsBeatmapId(pair.Value, beatmapId));
+        if (string.IsNullOrWhiteSpace(osuSource.Value))
+        {
+            return null;
+        }
+
+        var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
+        var osuName = $"{beatmapId}.osu";
+        var osuTarget = Path.Combine(target, osuName);
+        if (!LazerMediaStore.TryLink(osuSource.Value, osuTarget))
+        {
+            return null;
+        }
+
+        var parsed = ParseBeatmapMedia(osuTarget, key, beatmapId, setId) with { BeatmapFile = osuName };
+        var wanted = parsed.SampleEvents.Select(e => e.Filename)
+            .Append(parsed.AudioFile)
+            .Append(parsed.BackgroundFile)
+            .Append("combobreak.wav")
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(SafeName)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in wanted)
+        {
+            if (files.TryGetValue(name, out var source))
+            {
+                LazerMediaStore.TryLink(source, Path.Combine(target, name));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(parsed.AudioFile) && !File.Exists(Path.Combine(target, parsed.AudioFile)))
+        {
+            return null;
+        }
+
+        WriteManifest(target, parsed);
+        Log.Debug("tosu media hard-linked from osu!lazer for beatmap {BeatmapId} at {Path}", beatmapId, target);
+        return parsed;
     }
 
     private static string? ResolvePath(string? path, string? songsFolder, string? gameFolder)
@@ -276,6 +407,39 @@ internal static class TosuMediaCache
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         });
         File.WriteAllText(Path.Combine(target, "manifest.json"), json);
+    }
+
+    private static CachedMedia? ReadCachedMedia(string key)
+    {
+        var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
+        var manifest = Path.Combine(target, "manifest.json");
+        if (!File.Exists(manifest))
+        {
+            return null;
+        }
+
+        try
+        {
+            var media = JsonSerializer.Deserialize<CachedMedia>(File.ReadAllText(manifest), new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            });
+            if (media is null || !File.Exists(Path.Combine(target, media.BeatmapFile)))
+            {
+                return null;
+            }
+            return string.IsNullOrWhiteSpace(media.AudioFile) || File.Exists(Path.Combine(target, media.AudioFile))
+                ? media
+                : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string SafeName(string value)

@@ -1,0 +1,14 @@
+<Window x:Class="Kumori.App.LazerStorageDiagnosticsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Lazer storage diagnostics"
+        Width="760" Height="420"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Brush.AppBackground}">
+    <Grid Margin="22">
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <TextBox x:Name="StatusText" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                 Background="#12050B" Foreground="{StaticResource Brush.TextPrimary}" BorderBrush="#3A1628" Padding="12" FontFamily="Consolas" FontSize="13" />
+        <Button Grid.Row="1" Content="Close" Width="100" Height="32" HorizontalAlignment="Right" Margin="0,16,0,0" Click="Close_Click" />
+    </Grid>
+</Window>

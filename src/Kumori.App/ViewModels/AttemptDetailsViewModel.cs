@@ -10,6 +10,7 @@ using CommunityToolkit.Mvvm.Input;
 using Kumori.App.Controls;
 using Kumori.Core.Models;
 using Kumori.Storage;
+using Kumori.Tracking;
 using Serilog;
 using static System.FormattableString;
 using Brush = System.Windows.Media.Brush;
@@ -558,7 +559,8 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
         try
         {
-            var beatmapPath = BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
+            var lazer = LazerStorage.ResolveBeatmapAssets(details.Summary.OsuBeatmapId, details.Summary.BeatmapSetId, details.Summary.Difficulty);
+            var beatmapPath = lazer?.BeatmapPath ?? BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
             if (string.IsNullOrWhiteSpace(beatmapPath))
             {
                 LoadError = "Replay Analyzer needs cached beatmap media for this play";
@@ -569,7 +571,8 @@ public partial class AttemptDetailsViewModel : ObservableObject
             var contract = await Task.Run(() => _replayViewer.WriteContract(
                 details.Summary.Id,
                 beatmapPath,
-                mediaDirectory));
+                mediaDirectory,
+                lazer?.Files));
             await _replayViewer.PrepareAnalysisAsync(contract);
             LastReplayInspectorProcess = _replayViewer.LaunchViewer(contract);
             LoadError = null;

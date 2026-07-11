@@ -49,7 +49,7 @@ internal partial class ReplayAnalysisGame : OsuGameBase
             audio.VolumeSample.Value = 0;
             gameHost = Dependencies.Get<GameHost>();
             var ruleset = new OsuRuleset();
-            var workingBeatmap = new KumoriWorkingBeatmap(contract.BeatmapPath, contract.MediaDirectory, audio, gameHost);
+            var workingBeatmap = new KumoriWorkingBeatmap(contract.BeatmapPath, contract.MediaDirectory, contract.MediaPaths, audio, gameHost);
             // Headless hosts do not run the normal music-controller track
             // preparation path used by the desktop game.
             workingBeatmap.LoadTrack();

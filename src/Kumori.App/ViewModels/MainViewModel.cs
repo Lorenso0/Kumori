@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -11,6 +11,7 @@ using Kumori.Core.Settings;
 using Kumori.Core.State;
 using Kumori.Native;
 using Kumori.Storage;
+using Kumori.Tracking;
 using Serilog;
 using static System.FormattableString;
 
@@ -82,6 +83,7 @@ public partial class MainViewModel : ObservableObject
     private readonly HashSet<long> _collapsedSessions = new();
     private long _dbBytes;
     private long _cacheBytes;
+    private bool _usingLazerRealm;
     private long? _activeSessionId;
     private long? _latestAttemptId;
     private Func<Task<bool>>? _endLiveSession;
@@ -176,7 +178,8 @@ public partial class MainViewModel : ObservableObject
                 Analytics = _analytics.GetSummary(),
                 Sessions = _sessionsRepo.GetRecentSessions(200_000),
                 DbBytes = SafeFileSize(AppPaths.TrackingDatabase),
-                CacheBytes = SafeDirectorySize(AppPaths.BeatmapMediaDir),
+                CacheBytes = CacheStorageUsage.GetAdditionalBytes(AppPaths.BeatmapMediaDir),
+                UsingLazerRealm = LazerStorage.GetDiagnostics().RealmOpened,
             });
             if (search != _activeSearch)
             {
@@ -203,6 +206,7 @@ public partial class MainViewModel : ObservableObject
             }
             _dbBytes = load.DbBytes;
             _cacheBytes = load.CacheBytes;
+            _usingLazerRealm = load.UsingLazerRealm;
             ApplyDashboard(load.Analytics, load.Page, load.DbBytes, load.CacheBytes);
             _oldestLoadedId = load.Page.Count > 0 ? load.Page[^1].Id : null;
             HistoryStatus = load.Page.Count == 0
@@ -234,7 +238,10 @@ public partial class MainViewModel : ObservableObject
         PpGainedMetric = FormatPpGained(analytics.LatestAccountChange);
         RanksGainedMetric = FormatRanksGained(analytics.LatestAccountChange);
         var synced = analytics.LastSyncedAt is { Length: >= 16 } stamp ? stamp.Substring(11, 5) : "—";
-        SyncLine = Invariant($"Synced {synced}  ·  DB {dbBytes / 1_048_576.0:0.0} MB  ·  Cache {cacheBytes / 1_048_576.0:0.0} MB");
+        var mediaStatus = _usingLazerRealm
+            ? $"Using Realm ({cacheBytes / 1_048_576.0:0.00} MB local)"
+            : $"Cache {cacheBytes / 1_048_576.0:0.00} MB";
+        SyncLine = Invariant($"Synced {synced}  ·  DB {dbBytes / 1_048_576.0:0.0} MB  ·  {mediaStatus}");
 
         var first = page.FirstOrDefault();
         GroupHeader = first?.StartedAt.Length >= 10 && DateTime.TryParse(first.StartedAt[..10], out var day)
@@ -284,44 +291,6 @@ public partial class MainViewModel : ObservableObject
         catch (UnauthorizedAccessException ex)
         {
             Log.Debug(ex, "Could not read file size for {Path}", path);
-            return 0;
-        }
-    }
-
-    private static long SafeDirectorySize(string path)
-    {
-        try
-        {
-            if (!Directory.Exists(path))
-            {
-                return 0;
-            }
-            long total = 0;
-            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    total += new FileInfo(file).Length;
-                }
-                catch (IOException ex)
-                {
-                    Log.Debug(ex, "Could not read cached file size for {Path}", file);
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    Log.Debug(ex, "Could not read cached file size for {Path}", file);
-                }
-            }
-            return total;
-        }
-        catch (IOException ex)
-        {
-            Log.Debug(ex, "Could not enumerate directory size for {Path}", path);
-            return 0;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Log.Debug(ex, "Could not enumerate directory size for {Path}", path);
             return 0;
         }
     }

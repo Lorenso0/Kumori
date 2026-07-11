@@ -29,7 +29,7 @@ public sealed class ReplayViewerContractService
     /// <summary>Returns the raw movement capture for validation and analysis views.</summary>
     public IReadOnlyList<MovementSample> GetMovementSamples(long attemptId) => _movement.GetSamples(attemptId);
 
-    public string WriteContract(long attemptId, string beatmapPath, string? mediaDirectory = null)
+    public string WriteContract(long attemptId, string beatmapPath, string? mediaDirectory = null, IReadOnlyDictionary<string, string>? mediaPaths = null)
     {
         var details = _details.GetDetails(attemptId)
             ?? throw new InvalidOperationException($"Attempt {attemptId} was not found.");
@@ -74,6 +74,7 @@ public sealed class ReplayViewerContractService
             },
             beatmap_path = Path.GetFullPath(beatmapPath),
             media_directory = Path.GetFullPath(mediaDirectory ?? Path.GetDirectoryName(beatmapPath)!),
+            media_paths = mediaPaths ?? new Dictionary<string, string>(),
             replay_path = ReplayPathFromCalibration(metadata?.CalibrationJson),
             settings = ReplaySettings(),
             judgement_events = details.Events

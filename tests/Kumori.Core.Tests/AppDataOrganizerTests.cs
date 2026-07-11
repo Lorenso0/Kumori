@@ -43,9 +43,10 @@ public sealed class AppDataOrganizerTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_root, "config", "settings.v2.json.bak-20260708-180509")));
         Assert.True(File.Exists(Path.Combine(_root, "data", "tracking", "osu_tracking.sqlite3")));
         Assert.True(File.Exists(Path.Combine(_root, "data", "tracking", "osu_tracking.sqlite3-wal")));
-        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media", "key", "manifest.json")));
-        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "covers", "cover.jpg")));
-        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "files", "123.osu")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media.old", "key", "manifest.json")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "covers.old", "cover.jpg")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "files.old", "123.osu")));
+        Assert.True(Directory.Exists(Path.Combine(_root, "cache", "beatmaps", "media")));
         Assert.True(File.Exists(Path.Combine(_root, "assets", "skins", "skin.osk")));
         Assert.True(File.Exists(Path.Combine(_root, "runtime", "fixtures", "tosu-1.jsonl")));
         Assert.True(File.Exists(Path.Combine(_root, "runtime", "viewer-contracts", "1.json")));
@@ -103,6 +104,19 @@ public sealed class AppDataOrganizerTests : IDisposable
 
         Assert.Equal("new", File.ReadAllText(Path.Combine(_root, "config", "settings.v2.json")));
         Assert.False(File.Exists(Path.Combine(_root, "settings.v2.json")));
+    }
+
+    [Fact]
+    public void Organize_RollsOverBeatmapCacheOnlyOnce()
+    {
+        Write(Path.Combine("cache", "beatmaps", "media", "old.mp3"), "old");
+
+        AppDataOrganizer.Organize(_root);
+        Write(Path.Combine("cache", "beatmaps", "media", "new.mp3"), "new");
+        AppDataOrganizer.Organize(_root);
+
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media.old", "old.mp3")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media", "new.mp3")));
     }
 
     [Fact]

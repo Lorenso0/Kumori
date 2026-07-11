@@ -12,6 +12,8 @@ public static class AppDataOrganizer
 
         EnsureStructure(root);
         MoveKnownContent(root);
+        RotateBeatmapCacheForLazerLinks(root);
+        EnsureStructure(root);
         DeleteObsoleteRootFiles(root);
         DeleteObsoleteToolFiles(root);
         PruneLogs(root, now ?? DateTimeOffset.Now);
@@ -71,6 +73,36 @@ public static class AppDataOrganizer
         MoveRootFiles(root, Path.Combine(root, "logs", "legacy"), "*.log");
         MoveRootDirectory(Path.Combine(root, "tools", "tosu"), "logs", Path.Combine(root, "logs", "tosu"));
         MoveDirectoryFiles(Path.Combine(root, "logs"), Path.Combine(root, "logs", "app"), "*.log");
+    }
+
+    private static void RotateBeatmapCacheForLazerLinks(string root)
+    {
+        var beatmaps = Path.Combine(root, "cache", "beatmaps");
+        var marker = Path.Combine(beatmaps, ".lazer-linked-cache-v1");
+        if (File.Exists(marker))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var name in new[] { "media", "covers", "files" })
+            {
+                var current = Path.Combine(beatmaps, name);
+                var old = Path.Combine(beatmaps, name + ".old");
+                if (Directory.Exists(current) && !Directory.Exists(old))
+                {
+                    Directory.Move(current, old);
+                }
+            }
+
+            Directory.CreateDirectory(beatmaps);
+            File.WriteAllText(marker, "Cache rolled over for lazer-linked media.");
+        }
+        catch
+        {
+            // Keep the current cache active if a running viewer prevents the rename.
+        }
     }
 
     private static void DeleteObsoleteRootFiles(string root)

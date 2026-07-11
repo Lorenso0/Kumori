@@ -1,0 +1,18 @@
+<Window x:Class="Kumori.App.BeatmapCacheRecoveryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Preparing map data"
+        Width="620" Height="210"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{StaticResource Brush.AppBackground}">
+    <Border Padding="24">
+        <StackPanel>
+            <TextBlock Text="Preparing your map data" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Brush.TextPrimary}" />
+            <TextBlock x:Name="DetailText" Margin="0,10,0,14" TextWrapping="Wrap" FontSize="13" Foreground="{StaticResource Brush.TextSecondary}" />
+            <ProgressBar x:Name="Progress" Height="12" Minimum="0" Maximum="1" Value="0" />
+            <TextBlock x:Name="CountText" Margin="0,10,0,0" Foreground="{StaticResource Brush.TextSecondary}" />
+        </StackPanel>
+    </Border>
+</Window>

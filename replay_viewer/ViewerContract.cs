@@ -20,6 +20,9 @@ public sealed record ViewerContract
     [JsonPropertyName("media_directory")]
     public string? MediaDirectory { get; init; }
 
+    [JsonPropertyName("media_paths")]
+    public Dictionary<string, string> MediaPaths { get; init; } = [];
+
     [JsonPropertyName("replay_path")]
     public string? ReplayPath { get; init; }
 

@@ -88,6 +88,8 @@ public partial class App : Application
         // Shell first — no data work before first paint.
         _mainWindow = new MainWindow(viewModel, settings);
         _mainWindow.Show();
+        new LazerStorageDiagnosticsWindow(LazerStorage.GetDiagnostics()) { Owner = _mainWindow }.Show();
+        _ = RecoverHistoricalBeatmapsAsync(attempts, settings);
         if (!settings.Current.FirstRunCompleted ||
             settings.Current.OnboardingVersion < WelcomeWindow.CurrentOnboardingVersion)
         {
@@ -199,6 +201,34 @@ public partial class App : Application
 
         // Hydrate asynchronously after the shell is visible.
         _ = viewModel.HydrateAsync();
+    }
+
+    private async Task RecoverHistoricalBeatmapsAsync(AttemptRepository attempts, SettingsService settings)
+    {
+        var pending = await Task.Run(() => HistoricalBeatmapCacheRecovery.GetPending(
+            attempts.GetRecentAttempts(limit: 200_000)));
+        if (pending.Count == 0 || _mainWindow is null)
+        {
+            return;
+        }
+
+        var dialog = new BeatmapCacheRecoveryWindow(pending.Count) { Owner = _mainWindow };
+        dialog.Show();
+        try
+        {
+            await Task.Run(() => HistoricalBeatmapCacheRecovery.Run(
+                pending,
+                settings.Current.Media.PrimaryMirror,
+                settings.Current.Media.FallbackMirrors,
+                progress => Dispatcher.Invoke(() => dialog.Report(progress))));
+        }
+        finally
+        {
+            if (dialog.IsVisible)
+            {
+                dialog.Close();
+            }
+        }
     }
 
     private async Task CheckForTosuUpdatesOnLaunchAsync()

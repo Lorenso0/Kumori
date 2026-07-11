@@ -92,7 +92,7 @@ public partial class ReplayViewerGame : OsuGameBase
         Window.Title = $"Kumori — {analysis.Artist} — {analysis.Title} [{analysis.Difficulty}]";
 
         ruleset = new OsuRuleset();
-        workingBeatmap = new KumoriWorkingBeatmap(contract.BeatmapPath, contract.MediaDirectory, audio, host);
+        workingBeatmap = new KumoriWorkingBeatmap(contract.BeatmapPath, contract.MediaDirectory, contract.MediaPaths, audio, host);
         Beatmap.Value = workingBeatmap;
         Ruleset.Value = ruleset.RulesetInfo;
 
@@ -512,22 +512,25 @@ internal static class KumoriScoreExtensions
 internal sealed class KumoriWorkingBeatmap : WorkingBeatmap
 {
     private readonly IBeatmap beatmap;
-    private readonly NativeStorage mediaStorage;
+    private readonly NativeStorage? mediaStorage;
+    private readonly IResourceStore<byte[]> resources;
     private readonly ITrackStore trackStore;
     private readonly LargeTextureStore textureStore;
 
-    public KumoriWorkingBeatmap(string beatmapPath, string? mediaDirectory, AudioManager audio, GameHost host)
-        : this(decode(beatmapPath), audio, host, resolveMediaDirectory(beatmapPath, mediaDirectory))
+    public KumoriWorkingBeatmap(string beatmapPath, string? mediaDirectory, IReadOnlyDictionary<string, string>? mediaPaths, AudioManager audio, GameHost host)
+        : this(decode(beatmapPath), audio, host, resolveMediaDirectory(beatmapPath, mediaDirectory), mediaPaths)
     {
     }
 
     private KumoriWorkingBeatmap(
-        IBeatmap beatmap, AudioManager audio, GameHost host, string mediaDirectory)
+        IBeatmap beatmap, AudioManager audio, GameHost host, string mediaDirectory, IReadOnlyDictionary<string, string>? mediaPaths)
         : base(beatmap.BeatmapInfo, audio)
     {
         this.beatmap = beatmap;
-        mediaStorage = new NativeStorage(mediaDirectory);
-        var resources = new StorageBackedResourceStore(mediaStorage);
+        mediaStorage = mediaPaths is { Count: > 0 } ? null : new NativeStorage(mediaDirectory);
+        resources = mediaPaths is { Count: > 0 }
+            ? new MappedResourceStore(mediaPaths)
+            : new StorageBackedResourceStore(mediaStorage);
         trackStore = audio.GetTrackStore(resources);
         textureStore = new LargeTextureStore(
             host.Renderer, host.CreateTextureLoaderStore(resources));
@@ -540,11 +543,14 @@ internal sealed class KumoriWorkingBeatmap : WorkingBeatmap
             ? null
             : textureStore.Get(Metadata.BackgroundFile);
     protected override Track? GetBeatmapTrack()
-        => string.IsNullOrWhiteSpace(Metadata.AudioFile) || !mediaStorage.Exists(Metadata.AudioFile)
+        => string.IsNullOrWhiteSpace(Metadata.AudioFile) || !resourceExists(Metadata.AudioFile)
             ? null
             : trackStore.Get(Metadata.AudioFile);
     protected override ISkin? GetSkin() => null;
-    public override Stream? GetStream(string storagePath) => mediaStorage.GetStream(storagePath);
+    public override Stream? GetStream(string storagePath) => resources.GetStream(storagePath);
+
+    private bool resourceExists(string name) => resources.GetStream(name) is Stream stream && dispose(stream);
+    private static bool dispose(Stream stream) { stream.Dispose(); return true; }
 
     private static Beatmap decode(string path)
     {
@@ -557,4 +563,18 @@ internal sealed class KumoriWorkingBeatmap : WorkingBeatmap
         => !string.IsNullOrWhiteSpace(mediaDirectory) && Directory.Exists(mediaDirectory)
             ? mediaDirectory
             : Path.GetDirectoryName(beatmapPath)!;
+}
+
+internal sealed class MappedResourceStore : IResourceStore<byte[]>
+{
+    private readonly IReadOnlyDictionary<string, string> paths;
+
+    public MappedResourceStore(IReadOnlyDictionary<string, string> paths) => this.paths = paths;
+
+    public byte[] Get(string name) => paths.TryGetValue(name, out var path) && File.Exists(path) ? File.ReadAllBytes(path) : null!;
+    public Task<byte[]> GetAsync(string name, CancellationToken cancellationToken = default) => Task.FromResult(Get(name));
+    public Stream? GetStream(string name) => paths.TryGetValue(name, out var path) && File.Exists(path) ? File.OpenRead(path) : null;
+    public Task<Stream?> GetStreamAsync(string name, CancellationToken cancellationToken = default) => Task.FromResult(GetStream(name));
+    public IEnumerable<string> GetAvailableResources() => paths.Keys;
+    public void Dispose() { }
 }

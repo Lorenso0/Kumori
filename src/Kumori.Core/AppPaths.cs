@@ -23,9 +23,15 @@ public static class AppPaths
 
     public static string BeatmapMediaDir => Path.Combine(BeatmapCacheDir, "media");
 
+    public static string OldBeatmapMediaDir => Path.Combine(BeatmapCacheDir, "media.old");
+
     public static string BeatmapCoversDir => Path.Combine(BeatmapCacheDir, "covers");
 
+    public static string OldBeatmapCoversDir => Path.Combine(BeatmapCacheDir, "covers.old");
+
     public static string LegacyBeatmapFilesDir => Path.Combine(BeatmapCacheDir, "files");
+
+    public static string OldLegacyBeatmapFilesDir => Path.Combine(BeatmapCacheDir, "files.old");
 
     public static string AssetsDir => Path.Combine(AppDataDir, "assets");
 

@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using Kumori.Core;
 using Kumori.Core.Models;
+using Kumori.Tracking;
 using Serilog;
 
 namespace Kumori.App.ViewModels;
@@ -37,6 +38,12 @@ internal static class BeatmapArtworkResolver
 
     public static string? ResolveBeatmapFile(AttemptSummary summary)
     {
+        var lazer = LazerStorage.ResolveBeatmapAssets(summary.OsuBeatmapId, summary.BeatmapSetId, summary.Difficulty);
+        if (lazer is not null)
+        {
+            return lazer.BeatmapPath;
+        }
+
         var key = MediaCacheKey(summary.Checksum, summary.OsuBeatmapId);
         var manifestFile = string.IsNullOrWhiteSpace(key)
             ? null
@@ -48,10 +55,13 @@ internal static class BeatmapArtworkResolver
 
         if (summary.OsuBeatmapId is > 0)
         {
-            var legacy = Path.Combine(AppPaths.LegacyBeatmapFilesDir, $"{summary.OsuBeatmapId}.osu");
-            if (File.Exists(legacy))
+            foreach (var directory in new[] { AppPaths.LegacyBeatmapFilesDir, AppPaths.OldLegacyBeatmapFilesDir })
             {
-                return legacy;
+                var legacy = Path.Combine(directory, $"{summary.OsuBeatmapId}.osu");
+                if (File.Exists(legacy))
+                {
+                    return legacy;
+                }
             }
         }
 
@@ -66,8 +76,15 @@ internal static class BeatmapArtworkResolver
             return null;
         }
 
-        var directory = Path.Combine(AppPaths.BeatmapMediaDir, key);
-        return Directory.Exists(directory) ? directory : null;
+        foreach (var root in MediaRoots())
+        {
+            var directory = Path.Combine(root, key);
+            if (Directory.Exists(directory))
+            {
+                return directory;
+            }
+        }
+        return null;
     }
 
     private static string? ResolveLocal(string cacheKey)
@@ -75,11 +92,21 @@ internal static class BeatmapArtworkResolver
 
     private static string? ResolveManifestFile(string cacheKey, string propertyName)
     {
-        var manifestPath = Path.Combine(AppPaths.BeatmapMediaDir, cacheKey, "manifest.json");
-        if (!File.Exists(manifestPath))
+        foreach (var root in MediaRoots())
         {
-            return null;
+            var resolved = ResolveManifestFileFromRoot(root, cacheKey, propertyName);
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                return resolved;
+            }
         }
+        return null;
+    }
+
+    private static string? ResolveManifestFileFromRoot(string root, string cacheKey, string propertyName)
+    {
+        var manifestPath = Path.Combine(root, cacheKey, "manifest.json");
+        if (!File.Exists(manifestPath)) return null;
 
         try
         {
@@ -107,6 +134,17 @@ internal static class BeatmapArtworkResolver
         {
             Log.Warning(ex, "Beatmap media manifest parse failed for {ManifestPath}", manifestPath);
             return null;
+        }
+    }
+
+    private static IEnumerable<string> MediaRoots()
+    {
+        yield return AppPaths.BeatmapMediaDir;
+        if (!Directory.Exists(AppPaths.BeatmapCacheDir)) yield break;
+
+        foreach (var directory in Directory.EnumerateDirectories(AppPaths.BeatmapCacheDir, "media.old*"))
+        {
+            yield return directory;
         }
     }
 
