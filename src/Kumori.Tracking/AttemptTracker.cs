@@ -134,13 +134,20 @@ public sealed class AttemptTracker
         public double FcPp { get; init; }
         public double MaxPp { get; init; }
         public bool IsWatchedReplay { get; init; }
+        public bool HasAutoMod { get; init; }
     }
 
     public void Ingest(Frame frame)
     {
         if (frame.IsWatchedReplay)
         {
-            DiscardWatchedReplay(frame);
+            DiscardSuppressedAttempt(frame, "watched_replay");
+            return;
+        }
+
+        if (frame.HasAutoMod)
+        {
+            DiscardSuppressedAttempt(frame, "auto_mod");
             return;
         }
 
@@ -220,7 +227,7 @@ public sealed class AttemptTracker
 
     private Frame BoundaryFrame(Frame current) => _pendingQuitFrame ?? _lastFrame ?? current;
 
-    private void DiscardWatchedReplay(Frame frame)
+    private void DiscardSuppressedAttempt(Frame frame, string reason)
     {
         if (!_machine.HasAttempt)
         {
@@ -228,7 +235,7 @@ public sealed class AttemptTracker
         }
 
         var snapshot = _latestSnapshot ?? Snapshot(frame);
-        _sink.DiscardIfEmpty(new AttemptDiscard("watched_replay", snapshot, _attemptOrdinal));
+        _sink.DiscardIfEmpty(new AttemptDiscard(reason, snapshot, _attemptOrdinal));
         _machine.AttemptCleared();
         _pendingQuitFrame = null;
         ClearAttempt(decrementOrdinal: true);

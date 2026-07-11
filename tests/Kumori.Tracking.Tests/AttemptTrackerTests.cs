@@ -53,6 +53,16 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void AutoMod_IsNeverStarted()
+    {
+        _tracker.Ingest(Play(0, live: 0) with { HasAutoMod = true });
+
+        Assert.Empty(_sink.Starts);
+        Assert.Empty(_sink.Checkpoints);
+        Assert.Empty(_sink.Finals);
+    }
+
+    [Fact]
     public void BlankResultsGrade_PreservesPreviousGrade()
     {
         var play = Play(3.5, live: 3500, score: 50_000, n300: 300, progress: 1) with

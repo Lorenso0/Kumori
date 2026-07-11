@@ -90,6 +90,15 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_AutoMod_FlagsAutoplay()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"play":{"mods":[{"acronym":"AT"}]}}"""));
+
+        Assert.True(client.LastSnapshot!.HasAutoMod);
+    }
+
+    [Fact]
     public void Ingest_MissingModeAfterStandardPacket_PreservesStandardMode()
     {
         var client = new TosuClient();

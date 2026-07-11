@@ -182,6 +182,7 @@ public sealed class TosuClient
             ProfileName = profileName,
             PlayerName = playerName,
             IsWatchedReplay = NamesDiffer(profileName, playerName),
+            HasAutoMod = HasAutoMod(mods),
             Pp = performance.Current ?? 0,
             FcPp = performance.Fc ?? 0,
             MaxPp = performance.Max ?? 0,
@@ -303,6 +304,11 @@ public sealed class TosuClient
         !string.IsNullOrWhiteSpace(profileName)
         && !string.IsNullOrWhiteSpace(playerName)
         && !string.Equals(profileName.Trim(), playerName.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasAutoMod(IReadOnlyList<AttemptMod> mods) => mods.Any(mod =>
+        mod.Acronym.Equals("AT", StringComparison.OrdinalIgnoreCase)
+        || mod.Acronym.Equals("Auto", StringComparison.OrdinalIgnoreCase)
+        || mod.Acronym.Equals("Autoplay", StringComparison.OrdinalIgnoreCase));
 
     private static long? GetLong(JsonElement obj, string name) =>
         obj.ValueKind == JsonValueKind.Object &&
@@ -647,6 +653,7 @@ public sealed record TosuSnapshot
     public string? ProfileName { get; init; }
     public string? PlayerName { get; init; }
     public bool IsWatchedReplay { get; init; }
+    public bool HasAutoMod { get; init; }
     public double Pp { get; init; }
     public double FcPp { get; init; }
     public double MaxPp { get; init; }
