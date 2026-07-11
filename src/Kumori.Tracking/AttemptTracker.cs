@@ -362,6 +362,13 @@ public sealed class AttemptTracker
             _latestSnapshot = snapshot;
         }
 
+        if (string.IsNullOrWhiteSpace(snapshot.Grade) &&
+            OsuGradeCalculator.Calculate(snapshot, outcome) is { } calculatedGrade)
+        {
+            snapshot = snapshot with { Grade = calculatedGrade };
+            Log.Debug("Calculated missing osu! grade {Grade} for attempt {Ordinal}", calculatedGrade, _attemptOrdinal);
+        }
+
         _sink.Finalize(new AttemptFinalization(outcome, evidence, snapshot, _attemptOrdinal));
         ClearAttempt(decrementOrdinal: false);
     }

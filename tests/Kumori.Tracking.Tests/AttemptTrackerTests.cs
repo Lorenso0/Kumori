@@ -107,6 +107,28 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void BlankCompletedGrade_IsCalculatedFromJudgementCounts()
+    {
+        _tracker.Ingest(Play(1.0, live: 1_000, score: 10_000, n300: 100, n100: 5));
+        _tracker.Ingest(Results(4.0, grade: "", score: 50_000, n300: 100, n100: 5, progress: 1));
+
+        Assert.Equal("S", Assert.Single(_sink.Finals).Snapshot.Grade);
+    }
+
+    [Fact]
+    public void BlankFailedGrade_IsCalculatedAsF()
+    {
+        _tracker.Ingest(Play(1.0, live: 1_000, score: 10_000, n300: 10));
+        _tracker.Ingest(Results(4.0, grade: "", score: 10_000, n300: 10, miss: 1, progress: 1) with
+        {
+            Packet = Results(4.0, grade: "", score: 10_000, n300: 10, miss: 1, progress: 1).Packet with { Grade = "F" },
+            Grade = "",
+        });
+
+        Assert.Equal("F", Assert.Single(_sink.Finals).Snapshot.Grade);
+    }
+
+    [Fact]
     public void RetryChain_DiscardsEmptyPulseThenFinalizesRealRetry()
     {
         _tracker.Ingest(Play(0, live: 0));

@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Windows.Forms;
+using Microsoft.Toolkit.Uwp.Notifications;
 
 namespace Kumori.Native;
 
@@ -12,12 +13,16 @@ public sealed class TrayIconService : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _statusItem;
+    private readonly ToolStripMenuItem _dualModeToggleItem;
 
     public event Action? OpenRequested;
     public event Action? SettingsRequested;
     public event Action? LogsRequested;
     public event Action? EndSessionRequested;
     public event Action? ExitRequested;
+    public event Action? RestoreDualModeRequested;
+    public event Action? KeepDualModeRequested;
+    public event Action? DualModeToggleRequested;
 
     public TrayIconService(string tooltip, string? iconPath = null)
     {
@@ -35,6 +40,10 @@ public sealed class TrayIconService : IDisposable
         };
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
+        _dualModeToggleItem = new ToolStripMenuItem("Toggle LG dual mode") { Enabled = false };
+        _dualModeToggleItem.Click += (_, _) => DualModeToggleRequested?.Invoke();
+        menu.Items.Add(_dualModeToggleItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open Kumori", null, (_, _) => OpenRequested?.Invoke());
         menu.Items.Add("Settings", null, (_, _) => SettingsRequested?.Invoke());
         menu.Items.Add("Logs", null, (_, _) => LogsRequested?.Invoke());
@@ -43,10 +52,24 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add("Exit", null, (_, _) => ExitRequested?.Invoke());
         _icon.ContextMenuStrip = menu;
         _icon.DoubleClick += (_, _) => OpenRequested?.Invoke();
+        ToastNotificationManagerCompat.OnActivated += args => OnToastActivated(args.Argument);
     }
 
     public void ShowNotification(string title, string message)
         => _icon.ShowBalloonTip(5000, title, message, ToolTipIcon.None);
+
+    public void SetDualModeToggleEnabled(bool enabled) => _dualModeToggleItem.Enabled = enabled;
+
+    /// <summary>Shows a Windows toast with actions embedded in the notification itself.</summary>
+    public void ShowDualModeRestoreNotification()
+    {
+        new ToastContentBuilder()
+            .AddText("osu! closed")
+            .AddText("Restore the LG monitor's previous display mode?")
+            .AddButton("Yes, restore", ToastActivationType.Foreground, "kumoriAction=restoreDualMode")
+            .AddButton("No, keep dual mode", ToastActivationType.Foreground, "kumoriAction=keepDualMode")
+            .Show();
+    }
 
     public void UpdateStatus(string status)
     {
@@ -75,5 +98,18 @@ public sealed class TrayIconService : IDisposable
     {
         _icon.Visible = false;
         _icon.Dispose();
+    }
+
+    private void OnToastActivated(string arguments)
+    {
+        switch (arguments)
+        {
+            case "kumoriAction=restoreDualMode":
+                RestoreDualModeRequested?.Invoke();
+                break;
+            case "kumoriAction=keepDualMode":
+                KeepDualModeRequested?.Invoke();
+                break;
+        }
     }
 }

@@ -710,6 +710,11 @@ public partial class MainViewModel : ObservableObject
             return;
         }
         _maintenance.DeleteAttempt(row.Id);
+        Inspector.ForgetAttempt(row.Id);
+        if (SelectedAttempt?.Id == row.Id)
+        {
+            SelectedAttempt = null;
+        }
         _ = ReloadFirstPageAsync();
     }
 
@@ -721,6 +726,11 @@ public partial class MainViewModel : ObservableObject
             return;
         }
         _maintenance.DeleteSession(sessionId);
+        if (SelectedAttempt?.Model.SessionId == sessionId)
+        {
+            Inspector.ForgetAttempt(SelectedAttempt.Id);
+            SelectedAttempt = null;
+        }
         _ = ReloadFirstPageAsync();
     }
 

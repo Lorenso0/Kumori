@@ -36,6 +36,40 @@ public static class OsuProcessDetector
         return false;
     }
 
+    /// <summary>Returns identities for the currently running osu! client processes.</summary>
+    public static IReadOnlySet<int> RunningProcessIds()
+    {
+        var result = new HashSet<int>();
+        foreach (var name in ProcessNames)
+        {
+            try
+            {
+                foreach (var process in Process.GetProcessesByName(name))
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            result.Add(process.Id);
+                        }
+                    }
+                    catch
+                    {
+                        // The process can exit while it is being inspected.
+                    }
+                    finally
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+        return result;
+    }
+
     /// <summary>
     /// Stops the current osu! process(es) and returns the executable paths needed
     /// to launch the same client again. Nothing is stopped if the executable path

@@ -18,7 +18,9 @@ public partial class App : Application
     // osu!lazer exposes its managed object graph shortly after the process is
     // visible. Starting tosu immediately can race that initialization, leaving
     // it with a temporary GameBase resolution failure and zero telemetry.
-    private static readonly TimeSpan TosuStartupGracePeriod = TimeSpan.FromSeconds(2);
+    // Only attach to a confirmed osu! session. This prevents tosu from racing
+    // osu!lazer's startup or attaching to a client that closes immediately.
+    private static readonly TimeSpan TosuStartupGracePeriod = TimeSpan.FromSeconds(5);
     // Companion activation should feel immediate when osu! is launched, while
     // still avoiding a busy process-polling loop.
     private static readonly TimeSpan CompanionMonitorInterval = TimeSpan.FromMilliseconds(250);
@@ -37,6 +39,7 @@ public partial class App : Application
     private bool _tosuStartedForOsu;
     private bool _hasObservedOsuProcessState;
     private bool _osuWasRunning;
+    private bool? _trayDualModeToggleEnabled;
     private readonly object _osuCompanionGate = new();
 
     protected override void OnStartup(StartupEventArgs e)
@@ -104,6 +107,11 @@ public partial class App : Application
             Process.Start(new ProcessStartInfo { FileName = AppPaths.LogDir, UseShellExecute = true }));
         _tray.EndSessionRequested += () => Dispatcher.InvokeAsync(() =>
             viewModel.EndSessionCommand.Execute(null));
+        _tray.RestoreDualModeRequested += () => Dispatcher.InvokeAsync(RestoreDualModeAfterOsuClosed);
+        _tray.KeepDualModeRequested += () => Dispatcher.InvokeAsync(() =>
+            PublishCompanionStatus(c => c with { DualModeDetail = "Dual mode left active after osu! closed" }));
+        _tray.DualModeToggleRequested += () => _ = ToggleDualModeFromTrayAsync();
+        UpdateTrayDualModeToggle(settings.Current.Display.AutoSwitchDualMode);
         _tray.ExitRequested += () =>
         {
             if (_mainWindow is not null)
@@ -406,13 +414,33 @@ public partial class App : Application
         {
             try
             {
-                Log.Information("Waiting {DelaySeconds:0}s for osu!lazer memory to initialize before launching tosu", TosuStartupGracePeriod.TotalSeconds);
-                await Task.Delay(TosuStartupGracePeriod);
-                if (!OsuProcessDetector.IsRunning())
+                var osuProcessIdsAtDetection = OsuProcessDetector.RunningProcessIds();
+                if (osuProcessIdsAtDetection.Count == 0)
                 {
                     lock (_osuCompanionGate)
                     {
                         _tosuStartedForOsu = false;
+                    }
+                    return;
+                }
+
+                Log.Information("Waiting {DelaySeconds:0}s for osu!lazer memory to initialize before launching tosu", TosuStartupGracePeriod.TotalSeconds);
+                await Task.Delay(TosuStartupGracePeriod);
+                var osuProcessIdsAfterGrace = OsuProcessDetector.RunningProcessIds();
+                if (!osuProcessIdsAtDetection.Overlaps(osuProcessIdsAfterGrace))
+                {
+                    lock (_osuCompanionGate)
+                    {
+                        _tosuStartedForOsu = false;
+                    }
+                    Log.Information("osu! did not remain alive for the full tosu confirmation window; tosu launch was skipped");
+                    // osu! may have restarted so quickly that the 250 ms
+                    // monitor did not observe the brief stopped state. Retry
+                    // against the replacement process, with a fresh five-
+                    // second confirmation window.
+                    if (osuProcessIdsAfterGrace.Count > 0)
+                    {
+                        EnsureTosuForOsu(store);
                     }
                     return;
                 }
@@ -483,14 +511,7 @@ public partial class App : Application
 
     private void PromptToRestoreDualMode()
     {
-        _tray?.ShowNotification("osu! closed", "Restore the LG monitor's previous display mode?");
-        if (KumoriDialog.Show(
-                _mainWindow,
-                "osu! has closed. Restore the LG monitor's previous display mode?",
-                "Restore LG display mode",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question,
-                MessageBoxResult.No) != MessageBoxResult.Yes)
+        if (_tray is null)
         {
             PublishCompanionStatus(c => c with
             {
@@ -499,6 +520,11 @@ public partial class App : Application
             return;
         }
 
+        _tray.ShowDualModeRestoreNotification();
+    }
+
+    private void RestoreDualModeAfterOsuClosed()
+    {
         try
         {
             var settings = new SettingsService();
@@ -527,6 +553,7 @@ public partial class App : Application
             try
             {
                 var osuRunning = OsuProcessDetector.IsRunning();
+                UpdateTrayDualModeToggle(settings.Current.Display.AutoSwitchDualMode);
                 // Kumori may be opened after osu! is already running. Treat
                 // that first observation as a baseline, not as an osu! launch:
                 // auto-switching the display or opening OTD at that point is
@@ -648,6 +675,53 @@ public partial class App : Application
     private void PublishCompanionStatus(Func<CompanionStatus, CompanionStatus> update)
     {
         _store?.Update(s => s with { Companions = update(s.Companions) });
+    }
+
+    private void UpdateTrayDualModeToggle(bool enabled)
+    {
+        if (_trayDualModeToggleEnabled == enabled)
+        {
+            return;
+        }
+
+        _trayDualModeToggleEnabled = enabled;
+        Dispatcher.InvokeAsync(() => _tray?.SetDualModeToggleEnabled(enabled));
+    }
+
+    private async Task ToggleDualModeFromTrayAsync()
+    {
+        var settings = new SettingsService();
+        settings.Load();
+        if (!settings.Current.Display.AutoSwitchDualMode)
+        {
+            UpdateTrayDualModeToggle(false);
+            return;
+        }
+
+        try
+        {
+            var wasActive = DualModeService.IsDualModeActive();
+            var sent = DualModeService.Toggle(settings.Current);
+            await Task.Delay(750);
+            var isActive = DualModeService.IsDualModeActive();
+            PublishCompanionStatus(c => c with
+            {
+                DualModeEnabled = true,
+                DualModeCommandSent = sent,
+                DualModeActive = isActive,
+                DualModeDetail = sent
+                    ? (isActive == wasActive ? "Dual mode command sent; waiting for display" : isActive ? "Dual mode active" : "Dual mode restored")
+                    : "Dual mode command failed",
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Manual LG dual-mode toggle failed");
+            PublishCompanionStatus(c => c with
+            {
+                DualModeDetail = ex.Message,
+            });
+        }
     }
 
     private void DeactivateDualModeIfRequested()

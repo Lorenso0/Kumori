@@ -30,6 +30,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
     private readonly Dictionary<long, IReadOnlyList<PressurePoint>> _curveCache = new();
     private readonly Dictionary<string, double> _originalStarCache = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _loadCts;
+    private long? _requestedAttemptId;
     private double? _calculatedOriginalStars;
 
     [ObservableProperty]
@@ -624,6 +625,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
     public async Task LoadAsync(long? attemptId)
     {
+        _requestedAttemptId = attemptId;
         _loadCts?.Cancel();
         if (attemptId is null)
         {
@@ -634,6 +636,10 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
         if (_cache.TryGetValue(attemptId.Value, out var cached))
         {
+            if (_requestedAttemptId != attemptId)
+            {
+                return;
+            }
             Details = cached;
             IsLoading = false;
             LoadError = null;
@@ -651,7 +657,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         try
         {
             var loaded = await Task.Run(() => _repository.GetDetails(attemptId.Value), cts.Token);
-            if (cts.IsCancellationRequested)
+            if (cts.IsCancellationRequested || _requestedAttemptId != attemptId)
             {
                 return;
             }
@@ -678,6 +684,21 @@ public partial class AttemptDetailsViewModel : ObservableObject
             {
                 IsLoading = false;
             }
+        }
+    }
+
+    /// <summary>Removes deleted attempts from the inspector and its detail cache.</summary>
+    public void ForgetAttempt(long attemptId)
+    {
+        _cache.Remove(attemptId);
+        _curveCache.Remove(attemptId);
+        if (Details?.Summary.Id == attemptId || _requestedAttemptId == attemptId)
+        {
+            _requestedAttemptId = null;
+            _loadCts?.Cancel();
+            Details = null;
+            IsLoading = false;
+            LoadError = null;
         }
     }
 
