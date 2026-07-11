@@ -19,6 +19,9 @@ public partial class App : Application
     // visible. Starting tosu immediately can race that initialization, leaving
     // it with a temporary GameBase resolution failure and zero telemetry.
     private static readonly TimeSpan TosuStartupGracePeriod = TimeSpan.FromSeconds(2);
+    // Companion activation should feel immediate when osu! is launched, while
+    // still avoiding a busy process-polling loop.
+    private static readonly TimeSpan CompanionMonitorInterval = TimeSpan.FromMilliseconds(250);
     private SingleInstance? _singleInstance;
     private TrayIconService? _tray;
     private MainWindow? _mainWindow;
@@ -32,6 +35,8 @@ public partial class App : Application
     private bool _companionRestartInProgress;
     private bool _managedOsuSessionActive;
     private bool _tosuStartedForOsu;
+    private bool _hasObservedOsuProcessState;
+    private bool _osuWasRunning;
     private readonly object _osuCompanionGate = new();
 
     protected override void OnStartup(StartupEventArgs e)
@@ -439,6 +444,7 @@ public partial class App : Application
 
     private void EndOsuCompanionSession()
     {
+        var promptToRestoreDualMode = false;
         lock (_osuCompanionGate)
         {
             if (_companionRestartInProgress ||
@@ -450,24 +456,68 @@ public partial class App : Application
             _managedOsuSessionActive = false;
             _tosuStartedForOsu = false;
             _otdAutoLaunchAttemptedForOsu = false;
-        }
-
-        // Keep the shutdown order deterministic: restore LG first, then release
-        // the tablet driver and finally stop the owned tosu instance.
-        DeactivateDualModeIfRequested();
-        OpenTabletDriverService.CloseOwned();
-        TosuManager.CloseOwned();
-        lock (_osuCompanionGate)
-        {
+            promptToRestoreDualMode = _dualModeActivatedForOsu;
+            // The user's response now owns restoration. Clear the session flag
+            // first so subsequent monitor ticks do not show duplicate prompts.
             _dualModeActivatedForOsu = false;
         }
+
+        // Leave the LG monitor in its current mode until the user explicitly
+        // chooses to restore it. OTD and tosu remain tied to the osu! session.
+        OpenTabletDriverService.CloseOwned();
+        TosuManager.CloseOwned();
         PublishCompanionStatus(c => c with
         {
             OpenTabletDriverLaunched = false,
             OpenTabletDriverDetail = "OpenTabletDriver closed with osu!",
-            DualModeActive = false,
-            DualModeDetail = "Dual mode restored after osu! closed",
+            DualModeDetail = promptToRestoreDualMode
+                ? "Waiting for confirmation to restore dual mode"
+                : c.DualModeDetail,
         });
+
+        if (promptToRestoreDualMode)
+        {
+            Dispatcher.InvokeAsync(PromptToRestoreDualMode);
+        }
+    }
+
+    private void PromptToRestoreDualMode()
+    {
+        _tray?.ShowNotification("osu! closed", "Restore the LG monitor's previous display mode?");
+        if (KumoriDialog.Show(
+                _mainWindow,
+                "osu! has closed. Restore the LG monitor's previous display mode?",
+                "Restore LG display mode",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+        {
+            PublishCompanionStatus(c => c with
+            {
+                DualModeDetail = "Dual mode left active after osu! closed",
+            });
+            return;
+        }
+
+        try
+        {
+            var settings = new SettingsService();
+            settings.Load();
+            var restored = DualModeService.Deactivate(settings.Current);
+            PublishCompanionStatus(c => c with
+            {
+                DualModeActive = !restored && DualModeService.IsDualModeActive(),
+                DualModeDetail = restored ? "Dual mode restored after osu! closed" : "Dual mode restore failed",
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "LG dual-mode restore failed after osu! closed");
+            PublishCompanionStatus(c => c with
+            {
+                DualModeDetail = $"Dual mode restore failed: {ex.Message}",
+            });
+        }
     }
 
     private async Task CompanionMonitorLoopAsync(AppStateStore store, SettingsService settings, CancellationToken token)
@@ -477,6 +527,13 @@ public partial class App : Application
             try
             {
                 var osuRunning = OsuProcessDetector.IsRunning();
+                // Kumori may be opened after osu! is already running. Treat
+                // that first observation as a baseline, not as an osu! launch:
+                // auto-switching the display or opening OTD at that point is
+                // disruptive and can restart an active game.
+                var osuJustLaunched = _hasObservedOsuProcessState && osuRunning && !_osuWasRunning;
+                _hasObservedOsuProcessState = true;
+                _osuWasRunning = osuRunning;
                 store.Update(s => s with
                 {
                     Companions = s.Companions with
@@ -486,17 +543,17 @@ public partial class App : Application
                         DualModeEnabled = settings.Current.Display.AutoSwitchDualMode,
                     },
                 });
-                if (osuRunning)
+                if (osuJustLaunched)
                 {
                     TryActivateOsuCompanions(settings.Current);
                     EnsureTosuForOsu(store);
                 }
-                else
+                else if (!osuRunning)
                 {
                     _tracking?.NotifyOsuStopped();
                     EndOsuCompanionSession();
                 }
-                await Task.Delay(TimeSpan.FromSeconds(3), token);
+                await Task.Delay(CompanionMonitorInterval, token);
             }
             catch (OperationCanceledException)
             {
