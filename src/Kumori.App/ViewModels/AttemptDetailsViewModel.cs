@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.IO;
 using System.Globalization;
 using System.Text.Json;
 using System.Windows;
+using Microsoft.Win32;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -329,6 +331,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
     }
     public IReadOnlyList<UrPoint> UrSamples => BuildUrSamples(Details);
     public bool CanOpenReplayInspector => Details is not null && _replayViewer is not null;
+    public bool CanValidateOsr => Details is not null;
 
     partial void OnDetailsChanged(AttemptDetails? value)
     {
@@ -433,7 +436,9 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(PressureEndText));
         OnPropertyChanged(nameof(UrSamples));
         OnPropertyChanged(nameof(CanOpenReplayInspector));
+        OnPropertyChanged(nameof(CanValidateOsr));
         OpenReplayInspectorCommand.NotifyCanExecuteChanged();
+        ValidateOsrCommand.NotifyCanExecuteChanged();
 
         PressureCurve = Array.Empty<PressurePoint>();
         _ = LoadPressureCurveAsync(value);
@@ -572,6 +577,48 @@ public partial class AttemptDetailsViewModel : ObservableObject
         {
             Log.Error(ex, "Replay Analyzer launch failed for attempt {AttemptId}", details.Summary.Id);
             LoadError = ex.Message;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanValidateOsr))]
+    private async Task ValidateOsr()
+    {
+        if (Details is not { } details)
+        {
+            return;
+        }
+
+        var picker = new OpenFileDialog
+        {
+            Title = "Select the .osr replay for this play",
+            Filter = "osu! replay (*.osr)|*.osr",
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+        if (picker.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var beatmapPath = BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
+            if (string.IsNullOrWhiteSpace(beatmapPath))
+            {
+                LoadError = "Replay validation needs the cached .osu beatmap file for this play.";
+                return;
+            }
+            var capturedSamples = _replayViewer?.GetMovementSamples(details.Summary.Id) ?? Array.Empty<MovementSample>();
+            var result = await Task.Run(() => OsrValidationService.Validate(picker.FileName, details, beatmapPath, capturedSamples));
+            new OsrValidationWindow(result) { Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive) }.ShowDialog();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException)
+        {
+            Log.Warning(ex, "Could not validate .osr for attempt {AttemptId}", details.Summary.Id);
+            KumoriDialog.Show(
+                Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive),
+                $"Kumori could not read that .osr file.\n\n{ex.Message}",
+                ".osr validation", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

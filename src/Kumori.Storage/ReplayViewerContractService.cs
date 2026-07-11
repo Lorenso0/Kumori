@@ -26,6 +26,9 @@ public sealed class ReplayViewerContractService
         _contractDirectory = contractDirectory ?? AppPaths.ViewerContractsDir;
     }
 
+    /// <summary>Returns the raw movement capture for validation and analysis views.</summary>
+    public IReadOnlyList<MovementSample> GetMovementSamples(long attemptId) => _movement.GetSamples(attemptId);
+
     public string WriteContract(long attemptId, string beatmapPath, string? mediaDirectory = null)
     {
         var details = _details.GetDetails(attemptId)
