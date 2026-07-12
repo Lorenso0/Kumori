@@ -39,6 +39,7 @@ public static class Program
             }
 
             ViewerContract contract = ViewerContract.Load(options.ContractPath!);
+            AdvancedAnalyzerColours.Configure(contract.ThemeId);
             NativeViewerLog.Write($"Loaded contract attempt={contract.Attempt.Id} samples={contract.Samples.Count} beatmap=\"{contract.BeatmapPath}\"");
             var replay = LazerReplayAdapter.CreateReplay(contract);
             Console.WriteLine(JsonSerializer.Serialize(new

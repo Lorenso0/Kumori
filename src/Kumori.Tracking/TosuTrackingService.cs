@@ -30,6 +30,8 @@ public sealed class TosuTrackingService : IAsyncDisposable
     private volatile bool _connected;
     private readonly HashSet<string> _cachedMediaKeys = new(StringComparer.OrdinalIgnoreCase);
 
+    public event Action<OsuClientKind>? ClientKindObserved;
+
     public TosuTrackingService(
         AppStateStore store,
         Uri? uri = null,
@@ -89,6 +91,10 @@ public sealed class TosuTrackingService : IAsyncDisposable
     {
         try
         {
+            if (snapshot.ClientKind != OsuClientKind.Unknown)
+            {
+                ClientKindObserved?.Invoke(snapshot.ClientKind);
+            }
             if (snapshot.IsStandardMode)
             {
                 CacheMedia(snapshot);

@@ -4,6 +4,8 @@
 
     <Style TargetType="Window">
         <Setter Property="FontFamily" Value="{StaticResource Font.App}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.AppBackground}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
         <Setter Property="UseLayoutRounding" Value="True" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
         <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
@@ -28,7 +30,7 @@
     </Style>
 
     <Style TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
         <Setter Property="FontFamily" Value="{StaticResource Font.App}" />
         <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
         <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
@@ -42,12 +44,12 @@
 
     <Style x:Key="Text.Header" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
         <Setter Property="FontSize" Value="12" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
     </Style>
 
     <Style x:Key="Text.Label" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
         <Setter Property="FontSize" Value="11" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextMuted}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
     </Style>
 
     <Style x:Key="Text.LabelUpper" TargetType="TextBlock" BasedOn="{StaticResource Text.Label}">
@@ -65,12 +67,12 @@
 
     <Style x:Key="Text.Metadata" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
         <Setter Property="FontSize" Value="11" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
     </Style>
 
     <Style x:Key="Text.Muted" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
         <Setter Property="FontSize" Value="11" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextMuted}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
     </Style>
 
     <Style x:Key="Text.StatValue" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">

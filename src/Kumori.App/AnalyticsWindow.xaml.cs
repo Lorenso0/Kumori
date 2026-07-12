@@ -13,7 +13,10 @@ public partial class AnalyticsWindow : Window
         _repository = repository;
         InitializeComponent();
         DarkTitleBar.Apply(new System.Windows.Interop.WindowInteropHelper(this).Handle);
-        Loaded += async (_, _) => await LoadAsync();
+        if (Content is FrameworkElement content)
+        {
+            content.Loaded += async (_, _) => await LoadAsync();
+        }
     }
 
     private async Task LoadAsync()

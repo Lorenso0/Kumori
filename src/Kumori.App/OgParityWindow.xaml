@@ -3,8 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="OG Build Parity"
         Width="720" Height="520"
+        MinWidth="480" MinHeight="320"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource Brush.BackgroundPrimary}">
+        Background="{DynamicResource Brush.BackgroundPrimary}">
     <DockPanel Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="Write markdown" Click="Write_Click" Margin="0,0,8,0" />
@@ -16,8 +17,8 @@
                  VerticalScrollBarVisibility="Auto"
                  FontFamily="Consolas"
                  FontSize="12"
-                 Background="{StaticResource Brush.BackgroundSecondary}"
-                 Foreground="{StaticResource Brush.TextPrimary}"
-                 BorderBrush="{StaticResource Brush.Border}" />
+                 Background="{DynamicResource Brush.BackgroundSecondary}"
+                 Foreground="{DynamicResource Brush.TextPrimary}"
+                 BorderBrush="{DynamicResource Brush.Border}" />
     </DockPanel>
 </Window>

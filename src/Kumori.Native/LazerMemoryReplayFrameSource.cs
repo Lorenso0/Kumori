@@ -7,7 +7,7 @@ using Kumori.Tracking;
 
 namespace Kumori.Native;
 
-public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILazerReplayFrameSnapshotSource
+public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILazerReplayFrameSnapshotSource, IAttemptAwareReplayFrameSource
 {
     private static readonly string[] ProcessNames = ["osu!", "osu"];
     private readonly TimeSpan _pollInterval;
@@ -18,6 +18,7 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     private nint _lastGameBase;
     private int? _lastProcessId;
     private int? _lastReplayFrameTimeOffset;
+    private int _attemptActive;
 
     public LazerMemoryReplayFrameSource(
         TimeSpan? pollInterval = null,
@@ -32,20 +33,33 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     public async IAsyncEnumerable<LazerReplayFrame> ReadFramesAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        // Refresh the upstream tosu offsets once when the reader starts. The
-        // snapshot path intentionally reuses this cache so finalisation never
-        // blocks on the network.
-        var offsets = LazerMemoryOffsets.Load(_offsetsPath, refreshOfficialCache: _offsetsPath is null);
-        _status.Update(s =>
-        {
-            s.Enabled = true;
-            s.State = "lazer_memory_starting";
-            s.Detail = $"Loaded osu!lazer offsets {offsets.OsuVersion}.";
-            s.LastError = null;
-        });
+        LazerMemoryOffsets? offsets = null;
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            // No memory handles, process scans, or high-frequency polling are
+            // needed outside an actual lazer attempt.
+            if (Volatile.Read(ref _attemptActive) == 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                continue;
+            }
+
+            if (offsets is null)
+            {
+                // Refresh once per service, but only when replay capture is
+                // genuinely needed. Finalisation reuses this cache.
+                offsets = LazerMemoryOffsets.Load(_offsetsPath, refreshOfficialCache: _offsetsPath is null);
+                var loadedOffsets = offsets;
+                _status.Update(s =>
+                {
+                    s.Enabled = true;
+                    s.State = "lazer_memory_starting";
+                    s.Detail = $"Loaded osu!lazer offsets {loadedOffsets.OsuVersion}.";
+                    s.LastError = null;
+                });
+            }
+
             await Task.Delay(_pollInterval, cancellationToken);
             IReadOnlyList<LazerReplayFrame> frames = Array.Empty<LazerReplayFrame>();
 
@@ -193,6 +207,16 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
             _lastFramesList = reader.LastFramesList;
         }
         return frames;
+    }
+
+    public void StartAttempt(AttemptStart start) => Volatile.Write(ref _attemptActive, 1);
+
+    public void UpdateAttempt(AttemptSnapshot snapshot) { }
+
+    public void EndAttempt()
+    {
+        Volatile.Write(ref _attemptActive, 0);
+        ResetCachedPointers();
     }
 
     private void ResetCachedPointers()

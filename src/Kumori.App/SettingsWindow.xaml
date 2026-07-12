@@ -3,19 +3,19 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Kumori Settings"
         Width="720" Height="680"
-        MinWidth="640" MinHeight="560"
+        MinWidth="560" MinHeight="480"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource Brush.AppBackground}"
+        Background="{DynamicResource Brush.AppBackground}"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType">
     <Window.Resources>
         <Style x:Key="SettingsCard" TargetType="Border">
-            <Setter Property="Background" Value="#170712" />
-            <Setter Property="BorderBrush" Value="#321528" />
+            <Setter Property="Background" Value="{DynamicResource Brush.PanelBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="CornerRadius" Value="{DynamicResource Radius.ThemeCard}" />
             <Setter Property="Padding" Value="14" />
             <Setter Property="Margin" Value="0,0,0,12" />
         </Style>
@@ -23,7 +23,7 @@
         <Style x:Key="SettingsTitle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="16" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
 
@@ -51,7 +51,7 @@
         </Style>
 
         <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
             <Setter Property="Margin" Value="0,0,0,8" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Cursor" Value="Hand" />
@@ -62,8 +62,8 @@
                             <Border x:Name="Box"
                                     Width="11"
                                     Height="11"
-                                    Background="{StaticResource Brush.ControlBackground}"
-                                    BorderBrush="{StaticResource Brush.SubtleBorder}"
+                                    Background="{DynamicResource Brush.ControlBackground}"
+                                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
                                     BorderThickness="1"
                                     Margin="0,0,5,0">
                                 <Path x:Name="Check"
@@ -72,7 +72,7 @@
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center"
                                       Data="M 0.5 3 L 2.7 5.2 L 6.5 0.8"
-                                      Stroke="{StaticResource Brush.TextPrimary}"
+                                      Stroke="{DynamicResource Brush.TextPrimary}"
                                       StrokeThickness="1.25"
                                       StrokeStartLineCap="Round"
                                       StrokeEndLineCap="Round"
@@ -83,12 +83,12 @@
                         </StackPanel>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Box" Property="Background" Value="{StaticResource Brush.AccentPink}" />
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Brush.AccentPink}" />
+                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.AccentPink}" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
                                 <Setter TargetName="Check" Property="Visibility" Value="Visible" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Brush.AccentPurple}" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -104,14 +104,14 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" BorderBrush="{StaticResource Brush.SubtleBorder}" BorderThickness="0,0,0,1" Padding="18,14">
+        <Border Grid.Row="0" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,0,0,1" Padding="18,14">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource Brush.TextPrimary}" />
+                    <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
                     <TextBlock Text="Companion automation, replay viewer, tracking, media, and startup." Style="{StaticResource Text.Metadata}" FontSize="12" Margin="0,3,0,0" />
                 </StackPanel>
                 <TextBlock Grid.Column="1" Text="Saved to settings.v2.json" Style="{StaticResource Text.Muted}" FontSize="11" VerticalAlignment="Center" />
@@ -120,6 +120,57 @@
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="18">
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Appearance" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Choose a visual style. The preview applies immediately across every open Kumori window."
+                                   Style="{StaticResource SettingsHint}" />
+                        <WrapPanel>
+                            <RadioButton x:Name="RefinedTheme"
+                                         GroupName="Theme"
+                                         Tag="refined-kumori"
+                                         Checked="Theme_Checked"
+                                         Margin="0,0,18,10">
+                                <StackPanel Width="176">
+                                    <Border Height="40" CornerRadius="6" BorderBrush="#FF2DA8" BorderThickness="1" Background="#20101A">
+                                        <Border Margin="8" Background="#351027" CornerRadius="4" />
+                                    </Border>
+                                    <TextBlock Text="Refined Kumori" FontWeight="SemiBold" Margin="0,7,0,2" />
+                                    <TextBlock Text="Burgundy, pink, and crisp data surfaces" Style="{StaticResource Text.Muted}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton x:Name="PulseTheme"
+                                         GroupName="Theme"
+                                         Tag="pulse"
+                                         Checked="Theme_Checked"
+                                         Margin="0,0,18,10">
+                                <StackPanel Width="176">
+                                    <Border Height="40" CornerRadius="10" BorderBrush="#FF4EB8" BorderThickness="1">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#51225E"/><GradientStop Color="#20102D" Offset="1"/></LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <TextBlock Text="Pulse" FontWeight="SemiBold" Margin="0,7,0,2" />
+                                    <TextBlock Text="Energetic, rounded, and artwork-forward" Style="{StaticResource Text.Muted}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton x:Name="FluentTheme"
+                                         GroupName="Theme"
+                                         Tag="windows-fluent"
+                                         Checked="Theme_Checked"
+                                         Margin="0,0,0,10">
+                                <StackPanel Width="176">
+                                    <Border Height="40" CornerRadius="8" BorderBrush="#4B4C53" BorderThickness="1" Background="#292A2F">
+                                        <Border Margin="8" Background="#3A2B35" CornerRadius="5" />
+                                    </Border>
+                                    <TextBlock Text="Windows Fluent" FontWeight="SemiBold" Margin="0,7,0,2" />
+                                    <TextBlock Text="Layered charcoal and native restraint" Style="{StaticResource Text.Muted}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </RadioButton>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
                         <TextBlock Text="Companion Automation" Style="{StaticResource SettingsTitle}" />
@@ -176,9 +227,9 @@
                         <TextBlock Text="Controls what Kumori stores while you play." Style="{StaticResource SettingsHint}" />
                         <UniformGrid Columns="2">
                             <CheckBox x:Name="TrackingEnabled" Content="Log plays with tosu metadata" />
-                            <CheckBox x:Name="PacketRecordingEnabled" Content="Record raw tosu packet fixtures" />
                             <CheckBox x:Name="LazerReplayFrameEnabled" Content="Capture osu! replay frames (stable and lazer)" />
                             <CheckBox x:Name="RunAtLogin" Content="Run Kumori when Windows starts" />
+                            <CheckBox x:Name="SuspendOsuDuringDualModeSwitch" Content="Experimentally pause osu! during dual-mode switching" />
                         </UniformGrid>
                         <TextBlock Text="Retention days" Style="{StaticResource SettingsLabel}" />
                         <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" />
@@ -193,22 +244,35 @@
                         <TextBox x:Name="PrimaryMirror" />
                     </StackPanel>
                 </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Developer" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Diagnostic capture options intended for tracker development and debugging." Style="{StaticResource SettingsHint}" />
+                        <CheckBox x:Name="PacketRecordingEnabled" Content="Record raw tosu packet fixtures" />
+                        <TextBlock Text="Writes every raw tosu WebSocket packet to timestamped JSONL fixture files. Leave this disabled during normal use because recordings can consume significant disk space."
+                                   Style="{StaticResource Text.Muted}"
+                                   FontSize="10"
+                                   TextWrapping="Wrap"
+                                   Margin="16,-2,0,0" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="2" BorderBrush="{StaticResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="18,12">
+        <Border Grid.Row="2" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="18,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="ErrorText"
-                           Foreground="{StaticResource Brush.Negative}"
+                           Foreground="{DynamicResource Brush.Negative}"
                            VerticalAlignment="Center"
                            TextWrapping="Wrap"
                            Margin="0,0,14,0" />
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Button Content="Cancel" IsCancel="True" Margin="0,0,8,0" />
+                    <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" />
                     <Button Content="Save" Click="Save_Click" IsDefault="True" Style="{StaticResource Button.Primary}" />
                 </StackPanel>
             </Grid>

@@ -9,12 +9,12 @@
         WindowStartupLocation="CenterOwner"
         WindowStyle="None"
         ResizeMode="NoResize"
-        Background="{StaticResource Brush.AppBackground}"
-        Foreground="{StaticResource Brush.TextPrimary}"
+        Background="{DynamicResource Brush.AppBackground}"
+        Foreground="{DynamicResource Brush.TextPrimary}"
         KeyDown="Window_KeyDown"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
-    <Border Background="{StaticResource Brush.CardBackground}"
-            BorderBrush="{StaticResource Brush.SubtleBorder}"
+    <Border Background="{DynamicResource Brush.CardBackground}"
+            BorderBrush="{DynamicResource Brush.SubtleBorder}"
             BorderThickness="1"
             CornerRadius="4">
         <Grid>
@@ -25,8 +25,8 @@
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
-                    Background="{StaticResource Brush.PanelBackground}"
-                    BorderBrush="{StaticResource Brush.SubtleBorder}"
+                    Background="{DynamicResource Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
                     BorderThickness="0,0,0,1"
                     CornerRadius="4,4,0,0">
                 <Grid>
@@ -35,7 +35,7 @@
                                VerticalAlignment="Center"
                                FontSize="12"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource Brush.TextPrimary}" />
+                               Foreground="{DynamicResource Brush.TextPrimary}" />
                     <Button Content="x"
                             Width="28"
                             MinHeight="24"
@@ -59,8 +59,8 @@
                         Height="28"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Top"
-                        Background="{StaticResource Brush.ControlBackground}"
-                        BorderBrush="{StaticResource Brush.AccentPink}"
+                        Background="{DynamicResource Brush.ControlBackground}"
+                        BorderBrush="{DynamicResource Brush.AccentPink}"
                         BorderThickness="1"
                         CornerRadius="14">
                     <TextBlock x:Name="IconText"
@@ -68,12 +68,12 @@
                                VerticalAlignment="Center"
                                FontSize="15"
                                FontWeight="Bold"
-                               Foreground="{StaticResource Brush.AccentPink}" />
+                               Foreground="{DynamicResource Brush.AccentPink}" />
                 </Border>
                 <StackPanel Grid.Column="1">
                     <TextBlock x:Name="MessageText"
                                FontSize="13"
-                               Foreground="{StaticResource Brush.TextPrimary}"
+                               Foreground="{DynamicResource Brush.TextPrimary}"
                                TextWrapping="Wrap"
                                LineHeight="18" />
                     <TextBox x:Name="InputTextBox"
@@ -84,8 +84,8 @@
             </Grid>
 
             <Border Grid.Row="2"
-                    Background="{StaticResource Brush.PanelBackground}"
-                    BorderBrush="{StaticResource Brush.SubtleBorder}"
+                    Background="{DynamicResource Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
                     BorderThickness="0,1,0,0"
                     Padding="20,12">
                 <StackPanel x:Name="ButtonHost"

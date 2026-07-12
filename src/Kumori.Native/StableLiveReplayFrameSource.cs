@@ -91,7 +91,7 @@ public sealed class StableLiveReplayFrameSource : ILazerReplayFrameSource, ILaze
             }
             if (currentAttempt is null || currentBridge is null)
             {
-                await Task.Delay(pollInterval, cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
                 continue;
             }
 

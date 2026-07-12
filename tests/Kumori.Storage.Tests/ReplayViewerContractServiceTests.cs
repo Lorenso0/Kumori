@@ -44,6 +44,7 @@ public class ReplayViewerContractServiceTests : IDisposable
         Assert.Equal(2, root.GetProperty("judgement_events").GetArrayLength());
         Assert.Equal(500, root.GetProperty("final_hits").GetProperty("n300").GetInt32());
         Assert.Equal(0.8, root.GetProperty("settings").GetProperty("osu_replay_master_volume").GetDouble());
+        Assert.Equal("refined-kumori", root.GetProperty("settings").GetProperty("kumori_theme").GetString());
     }
 
     [Fact]

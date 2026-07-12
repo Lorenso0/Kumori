@@ -12,6 +12,10 @@ public static class DarkTitleBar
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE_LEGACY = 19; // pre-20H1 builds
     private const int DWMWA_CAPTION_COLOR = 35;
     private const int DWMWA_TEXT_COLOR = 36;
+    private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+
+    /// <summary>Enables the Windows 11 Mica backdrop when the active app theme requests it.</summary>
+    public static bool UseMica { get; set; }
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(
@@ -33,5 +37,10 @@ public static class DarkTitleBar
         int white = 0xFFFFFF;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref black, sizeof(int));
         _ = DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, ref white, sizeof(int));
+
+        // DWMSBT_MAINWINDOW (2) is ignored safely on Windows versions that do
+        // not expose the Windows 11 system backdrop API.
+        int backdrop = UseMica ? 2 : 1;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
     }
 }

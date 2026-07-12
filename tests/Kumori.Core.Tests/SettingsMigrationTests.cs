@@ -37,6 +37,17 @@ public class SettingsMigrationTests
         Assert.Equal("https://example.com", s.Media.PrimaryMirror);
         Assert.True(s.OpenTabletDriver.AutoLaunch);
         Assert.True(s.Startup.RunAtLogin);
+        Assert.Equal("refined-kumori", s.Appearance.ThemeId);
+    }
+
+    [Theory]
+    [InlineData("pulse", "pulse")]
+    [InlineData("fluent", "windows-fluent")]
+    [InlineData("anything-else", "refined-kumori")]
+    public void ImportLegacy_MapsTheme(string legacyTheme, string expected)
+    {
+        var s = SettingsService.ImportLegacy($$"""{"theme":"{{legacyTheme}}"}""");
+        Assert.Equal(expected, s.Appearance.ThemeId);
     }
 
     [Fact]
@@ -75,6 +86,31 @@ public class SettingsMigrationTests
             File.WriteAllText(legacy, """{"osu_tracking_retention_days": 99}""");
             var second = new SettingsService(v2, legacy).Load();
             Assert.Equal(7, second.Tracking.RetentionDays);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Appearance_RoundTripsThemeAndNavigationPreference()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.v2.json");
+            var service = new SettingsService(path, Path.Combine(dir.FullName, "missing.json"));
+            service.Load();
+            service.Update(settings =>
+            {
+                settings.Appearance.ThemeId = "pulse";
+                settings.Appearance.NavigationExpanded = false;
+            });
+
+            var loaded = new SettingsService(path, "unused").Load();
+            Assert.Equal("pulse", loaded.Appearance.ThemeId);
+            Assert.False(loaded.Appearance.NavigationExpanded);
         }
         finally
         {

@@ -6,13 +6,13 @@
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource Brush.AppBackground}">
+        Background="{DynamicResource Brush.AppBackground}">
     <Border Padding="24">
         <StackPanel>
-            <TextBlock Text="Preparing your map data" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Brush.TextPrimary}" />
-            <TextBlock x:Name="DetailText" Margin="0,10,0,14" TextWrapping="Wrap" FontSize="13" Foreground="{StaticResource Brush.TextSecondary}" />
+            <TextBlock Text="Preparing your map data" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+            <TextBlock x:Name="DetailText" Margin="0,10,0,14" TextWrapping="Wrap" FontSize="13" Foreground="{DynamicResource Brush.TextSecondary}" />
             <ProgressBar x:Name="Progress" Height="12" Minimum="0" Maximum="1" Value="0" />
-            <TextBlock x:Name="CountText" Margin="0,10,0,0" Foreground="{StaticResource Brush.TextSecondary}" />
+            <TextBlock x:Name="CountText" Margin="0,10,0,0" Foreground="{DynamicResource Brush.TextSecondary}" />
         </StackPanel>
     </Border>
 </Window>

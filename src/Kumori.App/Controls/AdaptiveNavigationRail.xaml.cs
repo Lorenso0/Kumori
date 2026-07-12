@@ -1,0 +1,64 @@
+using System.Windows;
+using System.Windows.Controls;
+
+namespace Kumori.App.Controls;
+
+public partial class AdaptiveNavigationRail : UserControl
+{
+    public static readonly DependencyProperty IsExpandedProperty = DependencyProperty.Register(
+        nameof(IsExpanded), typeof(bool), typeof(AdaptiveNavigationRail), new PropertyMetadata(false));
+
+    public static readonly DependencyProperty CanToggleProperty = DependencyProperty.Register(
+        nameof(CanToggle), typeof(bool), typeof(AdaptiveNavigationRail), new PropertyMetadata(false));
+
+    public static readonly DependencyProperty SelectedPageProperty = DependencyProperty.Register(
+        nameof(SelectedPage), typeof(string), typeof(AdaptiveNavigationRail),
+        new PropertyMetadata("Dashboard", (dependencyObject, _) => ((AdaptiveNavigationRail)dependencyObject).UpdateSelection()));
+
+    public AdaptiveNavigationRail()
+    {
+        InitializeComponent();
+        UpdateSelection();
+    }
+
+    public bool IsExpanded
+    {
+        get => (bool)GetValue(IsExpandedProperty);
+        set => SetValue(IsExpandedProperty, value);
+    }
+
+    public bool CanToggle
+    {
+        get => (bool)GetValue(CanToggleProperty);
+        set => SetValue(CanToggleProperty, value);
+    }
+
+    public string SelectedPage
+    {
+        get => (string)GetValue(SelectedPageProperty);
+        set => SetValue(SelectedPageProperty, value);
+    }
+
+    public event RoutedEventHandler? DashboardRequested;
+    public event RoutedEventHandler? PerformanceRequested;
+    public event RoutedEventHandler? MapsRequested;
+    public event RoutedEventHandler? SettingsRequested;
+    public event RoutedEventHandler? ToggleRequested;
+
+    private void Dashboard_Click(object sender, RoutedEventArgs e) => DashboardRequested?.Invoke(this, e);
+    private void Performance_Click(object sender, RoutedEventArgs e) => PerformanceRequested?.Invoke(this, e);
+    private void Maps_Click(object sender, RoutedEventArgs e) => MapsRequested?.Invoke(this, e);
+    private void Settings_Click(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke(this, e);
+    private void Toggle_Click(object sender, RoutedEventArgs e) => ToggleRequested?.Invoke(this, e);
+
+    private void UpdateSelection()
+    {
+        if (!IsInitialized && DashboardButton is null) return;
+        var normal = (Style)Resources["NavigationButton"];
+        var active = (Style)Resources["ActiveNavigationButton"];
+        DashboardButton.Style = SelectedPage == "Dashboard" ? active : normal;
+        PerformanceButton.Style = SelectedPage == "Performance" ? active : normal;
+        MapsButton.Style = SelectedPage == "Maps" ? active : normal;
+        SettingsButton.Style = SelectedPage == "Settings" ? active : normal;
+    }
+}

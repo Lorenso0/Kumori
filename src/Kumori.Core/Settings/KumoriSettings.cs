@@ -10,6 +10,7 @@ public sealed class KumoriSettings
     public int Version { get; set; } = 2;
     public bool FirstRunCompleted { get; set; }
     public int OnboardingVersion { get; set; }
+    public int OnboardingProgressStep { get; set; }
 
     public TrackingSettings Tracking { get; set; } = new();
     public ReplayViewerSettings ReplayViewer { get; set; } = new();
@@ -19,6 +20,7 @@ public sealed class KumoriSettings
     public DisplaySettings Display { get; set; } = new();
     public StartupSettings Startup { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
+    public AppearanceSettings Appearance { get; set; } = new();
 
     public sealed class TrackingSettings
     {
@@ -57,6 +59,11 @@ public sealed class KumoriSettings
     public sealed class DisplaySettings
     {
         public bool AutoSwitchDualMode { get; set; } = false;
+        /// <summary>
+        /// Keeps osu! alive while the display mode changes. This is opt-in because
+        /// some graphics drivers require a full client restart after a topology change.
+        /// </summary>
+        public bool SuspendOsuDuringDualModeSwitch { get; set; } = false;
     }
 
     public sealed class StartupSettings
@@ -71,5 +78,11 @@ public sealed class KumoriSettings
         public double? Width { get; set; }
         public double? Height { get; set; }
         public bool Maximized { get; set; } = false;
+    }
+
+    public sealed class AppearanceSettings
+    {
+        public string ThemeId { get; set; } = "refined-kumori";
+        public bool NavigationExpanded { get; set; } = false;
     }
 }

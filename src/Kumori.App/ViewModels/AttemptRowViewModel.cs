@@ -12,6 +12,9 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
     public AttemptRowViewModel(AttemptSummary model) => Model = model;
 
     public long Id => Model.Id;
+    public string Artist => Model.Artist;
+    public string Title => Model.Title;
+    public string Difficulty => string.IsNullOrWhiteSpace(Model.Difficulty) ? "Unknown difficulty" : Model.Difficulty;
     public string MapLine => $"{Model.Artist} — {Model.Title}";
     public string DifficultyLine
     {
@@ -25,6 +28,9 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
     public string Grade => Model.Grade ?? "-";
     public double GradeProgress => Math.Clamp(Model.Accuracy / 100d, 0d, 1d);
     public string AccuracyText => Invariant($"{Model.Accuracy:0.00}%");
+    public string ScoreText => Model.Score.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+    public string ProgressText => Invariant($"{Math.Clamp(Model.Progress, 0, 1) * 100:0}%");
+    public string MissesText => Model.Misses.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
     public string PpText => Model.Pp > 0 ? Invariant($"{Model.Pp:0.0}pp") : "";
     public string ComboText => Model.Combo > 0
         ? Model.BeatmapMaxCombo > 0
@@ -34,6 +40,9 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
     public string ModsText => ModDisplayText.FromKey(Model.ModsKey);
     public IReadOnlyList<string> ModAcronyms => ModDisplayText.AcronymsFromKey(Model.ModsKey);
     public string Outcome => Model.Outcome.ToUpperInvariant();
+    public string OutcomeWithProgress => string.Equals(Model.Outcome, "completed", StringComparison.OrdinalIgnoreCase)
+        ? Outcome
+        : Invariant($"{Outcome} ({Math.Clamp(Model.Progress, 0, 1) * 100:0}%)");
     public string StarsText
     {
         get
@@ -45,6 +54,8 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
     public string WhenShort => LocalTimeDisplay.Time(Model.StartedAt);
     public string WhenLong => LocalTimeDisplay.TimeWithSeconds(Model.StartedAt, WhenShort);
     public string WhenText => LocalTimeDisplay.DateTime(Model.StartedAt, Model.StartedAt);
+    public string WhenRelative => LocalTimeDisplay.Relative(Model.StartedAt, fallback: WhenText);
+    public string WhenExact => LocalTimeDisplay.DateTimeWithSeconds(Model.StartedAt, Model.StartedAt);
     public string ImprovementLine => Model.IsPersonalBest ? "NEW BEST" : "";
     public string RowStatusLine
     {

@@ -10,7 +10,7 @@ public sealed class DayRowViewModel : HistoryRowViewModel
         DayKey = dayKey;
         IsCollapsed = isCollapsed;
         HeaderLine = DateTime.TryParse(dayKey, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var day)
-            ? day.ToString("dddd, dd MMMM yyyy", CultureInfo.InvariantCulture)
+            ? day.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
             : dayKey;
 
         var completed = attempts.Count(a => string.Equals(a.Model.Outcome, "completed", StringComparison.OrdinalIgnoreCase));

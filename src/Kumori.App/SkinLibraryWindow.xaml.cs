@@ -8,6 +8,7 @@ namespace Kumori.App;
 public partial class SkinLibraryWindow : Window
 {
     private readonly SettingsService _settings;
+    public event EventHandler? DismissRequested;
 
     public SkinLibraryWindow(SettingsService settings)
     {
@@ -23,7 +24,7 @@ public partial class SkinLibraryWindow : Window
             Title = "Import osu! skin",
             Filter = "osu! skin archives (*.osk)|*.osk|All files (*.*)|*.*",
         };
-        if (dialog.ShowDialog(this) != true)
+        if (dialog.ShowDialog() != true)
         {
             return;
         }
@@ -81,7 +82,11 @@ public partial class SkinLibraryWindow : Window
         Refresh();
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+    private void Close_Click(object sender, RoutedEventArgs e)
+    {
+        if (DismissRequested is not null) DismissRequested.Invoke(this, EventArgs.Empty);
+        else Close();
+    }
 
     private void SkinList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {

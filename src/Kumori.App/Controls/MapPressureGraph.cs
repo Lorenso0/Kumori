@@ -56,14 +56,13 @@ public sealed class MapPressureGraph : FrameworkElement
         DependencyProperty.Register(nameof(HoverReadout), typeof(string), typeof(MapPressureGraph),
             new FrameworkPropertyMetadata(""));
 
-    private static readonly Brush FillBrush = Frozen("#33211A2B");
-    private static readonly Pen LinePen = new(Frozen("#C78BC3"), 1);
-    private static readonly Pen BaselinePen = new(Frozen("#3A3047"), 1);
-    private static readonly Pen MissPen = new(Frozen("#FF4F8B"), 1.5);
-    private static readonly Pen BreakPen = new(Frozen("#FFD84A"), 1.5);
-    private static readonly Pen UrPen = new(Frozen("#82728E"), 1) { DashStyle = new DashStyle(new double[] { 2, 3 }, 0) };
-    private static readonly Brush MissTextBrush = Frozen("#FF4F8B");
-    private static readonly Brush EmptyTextBrush = Frozen("#82728E");
+    public static readonly DependencyProperty FillBrushProperty = BrushProperty(nameof(FillBrush), "#33211A2B");
+    public static readonly DependencyProperty LineBrushProperty = BrushProperty(nameof(LineBrush), "#C78BC3");
+    public static readonly DependencyProperty BaselineBrushProperty = BrushProperty(nameof(BaselineBrush), "#3A3047");
+    public static readonly DependencyProperty MissBrushProperty = BrushProperty(nameof(MissBrush), "#FF4F8B");
+    public static readonly DependencyProperty BreakBrushProperty = BrushProperty(nameof(BreakBrush), "#FFD84A");
+    public static readonly DependencyProperty UrBrushProperty = BrushProperty(nameof(UrBrush), "#82728E");
+    public static readonly DependencyProperty GraphTextBrushProperty = BrushProperty(nameof(GraphTextBrush), "#82728E");
     private int? _hoverTimeMs;
     private (double Left, double Right, double Top, double Bottom, int End) _lastBounds;
 
@@ -74,6 +73,13 @@ public sealed class MapPressureGraph : FrameworkElement
     public bool ShowBreak { get => (bool)GetValue(ShowBreakProperty); set => SetValue(ShowBreakProperty, value); }
     public bool ShowUr { get => (bool)GetValue(ShowUrProperty); set => SetValue(ShowUrProperty, value); }
     public string HoverReadout { get => (string)GetValue(HoverReadoutProperty); set => SetValue(HoverReadoutProperty, value); }
+    public Brush FillBrush { get => (Brush)GetValue(FillBrushProperty); set => SetValue(FillBrushProperty, value); }
+    public Brush LineBrush { get => (Brush)GetValue(LineBrushProperty); set => SetValue(LineBrushProperty, value); }
+    public Brush BaselineBrush { get => (Brush)GetValue(BaselineBrushProperty); set => SetValue(BaselineBrushProperty, value); }
+    public Brush MissBrush { get => (Brush)GetValue(MissBrushProperty); set => SetValue(MissBrushProperty, value); }
+    public Brush BreakBrush { get => (Brush)GetValue(BreakBrushProperty); set => SetValue(BreakBrushProperty, value); }
+    public Brush UrBrush { get => (Brush)GetValue(UrBrushProperty); set => SetValue(UrBrushProperty, value); }
+    public Brush GraphTextBrush { get => (Brush)GetValue(GraphTextBrushProperty); set => SetValue(GraphTextBrushProperty, value); }
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -138,11 +144,11 @@ public sealed class MapPressureGraph : FrameworkElement
                 for (var i = 1; i < curve.Count; i++) ctx.LineTo(new Point(X(curve[i].TimeMs), Y(curve[i].Value)), true, true);
             }
             line.Freeze();
-            dc.DrawGeometry(null, LinePen, line);
+            dc.DrawGeometry(null, new Pen(LineBrush, 1), line);
         }
 
         // Event baseline.
-        dc.DrawLine(BaselinePen, new Point(left, eventY), new Point(right, eventY));
+        dc.DrawLine(new Pen(BaselineBrush, 1), new Point(left, eventY), new Point(right, eventY));
 
         // Slider-break markers.
         if (ShowBreak)
@@ -150,7 +156,7 @@ public sealed class MapPressureGraph : FrameworkElement
             foreach (var t in breakTimes)
             {
                 var x = X(t);
-                dc.DrawLine(BreakPen, new Point(x, eventY - 5), new Point(x, eventY));
+                dc.DrawLine(new Pen(BreakBrush, 1.5), new Point(x, eventY - 5), new Point(x, eventY));
             }
         }
 
@@ -177,11 +183,12 @@ public sealed class MapPressureGraph : FrameworkElement
                     ? Y(PressureAt(curve, avgTime))
                     : bottom;
                 var size = cluster.Count == 1 ? 3.0 : 4.0;
-                dc.DrawLine(MissPen, new Point(x - size, y - size), new Point(x + size, y + size));
-                dc.DrawLine(MissPen, new Point(x - size, y + size), new Point(x + size, y - size));
+                var missPen = new Pen(MissBrush, 1.5);
+                dc.DrawLine(missPen, new Point(x - size, y - size), new Point(x + size, y + size));
+                dc.DrawLine(missPen, new Point(x - size, y + size), new Point(x + size, y - size));
                 if (cluster.Count > 1)
                 {
-                    DrawText(dc, cluster.Count.ToString(CultureInfo.InvariantCulture), MissTextBrush, x, y - 15, center: true);
+                    DrawText(dc, cluster.Count.ToString(CultureInfo.InvariantCulture), MissBrush, x, y - 15, center: true);
                 }
             }
         }
@@ -203,7 +210,7 @@ public sealed class MapPressureGraph : FrameworkElement
                 }
             }
             geo.Freeze();
-            dc.DrawGeometry(null, UrPen, geo);
+            dc.DrawGeometry(null, new Pen(UrBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 3 }, 0) }, geo);
         }
 
         if (_hoverTimeMs is { } hover)
@@ -212,10 +219,10 @@ public sealed class MapPressureGraph : FrameworkElement
             var x = X(clamped);
             var pressure = curve.Count > 0 ? PressureAt(curve, clamped) : 0;
             var y = Y(pressure);
-            var hoverPen = new Pen(EmptyTextBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 2 }, 0) };
+            var hoverPen = new Pen(GraphTextBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 2 }, 0) };
             hoverPen.Freeze();
             dc.DrawLine(hoverPen, new Point(x, top), new Point(x, bottom));
-            dc.DrawEllipse(FillBrush, LinePen, new Point(x, y), 3, 3);
+            dc.DrawEllipse(FillBrush, new Pen(LineBrush, 1), new Point(x, y), 3, 3);
         }
     }
 
@@ -493,7 +500,7 @@ public sealed class MapPressureGraph : FrameworkElement
     private void DrawEmpty(DrawingContext dc, double x, double y)
     {
         var formatted = new FormattedText("No map pressure data", CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-            new Typeface("Segoe UI"), 10, EmptyTextBrush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            new Typeface("Segoe UI"), 10, GraphTextBrush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
         dc.DrawText(formatted, new Point(x, y - formatted.Height / 2));
     }
 
@@ -503,4 +510,8 @@ public sealed class MapPressureGraph : FrameworkElement
         brush.Freeze();
         return brush;
     }
+
+    private static DependencyProperty BrushProperty(string name, string fallback) =>
+        DependencyProperty.Register(name, typeof(Brush), typeof(MapPressureGraph),
+            new FrameworkPropertyMetadata(Frozen(fallback), FrameworkPropertyMetadataOptions.AffectsRender));
 }

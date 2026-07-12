@@ -3,15 +3,16 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Skin Library"
         Width="620" Height="440"
-        WindowStyle="None"
-        ResizeMode="NoResize"
+        MinWidth="480" MinHeight="360"
+        WindowStyle="SingleBorderWindow"
+        ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource Brush.AppBackground}"
-        BorderBrush="{StaticResource Brush.StrongBorder}"
+        Background="{DynamicResource Brush.AppBackground}"
+        BorderBrush="{DynamicResource Brush.StrongBorder}"
         BorderThickness="1"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
-    <Border Background="{StaticResource Brush.AppBackground}"
-            BorderBrush="{StaticResource Brush.SubtleBorder}"
+    <Border Background="{DynamicResource Brush.AppBackground}"
+            BorderBrush="{DynamicResource Brush.SubtleBorder}"
             BorderThickness="1"
             Padding="16">
     <DockPanel>
@@ -37,8 +38,8 @@
             </StackPanel>
             <ListView x:Name="SkinList"
                       Grid.Row="1"
-                      Background="{StaticResource Brush.BackgroundSecondary}"
-                      BorderBrush="{StaticResource Brush.Border}"
+                      Background="{DynamicResource Brush.BackgroundSecondary}"
+                      BorderBrush="{DynamicResource Brush.Border}"
                       SelectionChanged="SkinList_SelectionChanged"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       ScrollViewer.VerticalScrollBarVisibility="Auto">
@@ -74,7 +75,7 @@
                 </ListView.View>
             </ListView>
             <StackPanel Grid.Row="2" Margin="0,10,0,0">
-                <TextBlock x:Name="StatusText" Foreground="{StaticResource Brush.TextSecondary}" TextWrapping="Wrap" />
+                <TextBlock x:Name="StatusText" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" />
                 <TextBox x:Name="ActivePathText"
                          Margin="0,8,0,0"
                          IsReadOnly="True"

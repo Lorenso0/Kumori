@@ -12,8 +12,8 @@ using Point = System.Windows.Point;
 namespace Kumori.App.Controls;
 
 /// <summary>
-/// Hit-offset distribution, ported from osu_tracking._timing_histogram:
-/// centred bars, a centre line, a dashed mean marker, and -/0/+ ms axis labels.
+/// Hit-offset scatter plot: each hit is placed by sequence and timing offset,
+/// matching the compact inspector presentation while retaining hover detail.
 /// </summary>
 public sealed class HitTimingGraph : FrameworkElement
 {
@@ -28,13 +28,14 @@ public sealed class HitTimingGraph : FrameworkElement
         DependencyProperty.Register(nameof(HoverReadout), typeof(string), typeof(HitTimingGraph),
             new FrameworkPropertyMetadata(""));
 
-    private static readonly Brush BarBrush = Frozen("#D89ACF");
-    private static readonly Pen CentrePen = new(Frozen("#3A3047"), 1);
-    private static readonly Pen MeanPen = new(Frozen("#E94FAE"), 1) { DashStyle = new DashStyle(new double[] { 2, 3 }, 0) };
-    private static readonly Pen HoverPen = new(Frozen("#82728E"), 1) { DashStyle = new DashStyle(new double[] { 2, 2 }, 0) };
-    private static readonly Brush AxisBrush = Frozen("#82728E");
+    public static readonly DependencyProperty PointBrushProperty = BrushProperty(nameof(PointBrush), "#E46AA5");
+    public static readonly DependencyProperty GridBrushProperty = BrushProperty(nameof(GridBrush), "#3A3047");
+    public static readonly DependencyProperty MeanBrushProperty = BrushProperty(nameof(MeanBrush), "#E94FAE");
+    public static readonly DependencyProperty HoverBrushProperty = BrushProperty(nameof(HoverBrush), "#82728E");
+    public static readonly DependencyProperty AxisTextBrushProperty = BrushProperty(nameof(AxisTextBrush), "#82728E");
     private double? _hoverOffset;
-    private (double Left, double Right, double BaseY, double Bound, int[] Counts) _lastState;
+    private int? _hoverIndex;
+    private (double Left, double Right, double Top, double Bottom, double Bound, IReadOnlyList<double> Offsets) _lastState;
 
     public IReadOnlyList<double>? Offsets
     {
@@ -43,6 +44,11 @@ public sealed class HitTimingGraph : FrameworkElement
     }
 
     public string HoverReadout { get => (string)GetValue(HoverReadoutProperty); set => SetValue(HoverReadoutProperty, value); }
+    public Brush PointBrush { get => (Brush)GetValue(PointBrushProperty); set => SetValue(PointBrushProperty, value); }
+    public Brush GridBrush { get => (Brush)GetValue(GridBrushProperty); set => SetValue(GridBrushProperty, value); }
+    public Brush MeanBrush { get => (Brush)GetValue(MeanBrushProperty); set => SetValue(MeanBrushProperty, value); }
+    public Brush HoverBrush { get => (Brush)GetValue(HoverBrushProperty); set => SetValue(HoverBrushProperty, value); }
+    public Brush AxisTextBrush { get => (Brush)GetValue(AxisTextBrushProperty); set => SetValue(AxisTextBrushProperty, value); }
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -58,47 +64,34 @@ public sealed class HitTimingGraph : FrameworkElement
         var left = margin;
         var right = width - margin;
         var plotWidth = right - left;
-        var baseY = height - 16;
+        var top = 5d;
+        var bottom = height - 16;
+        var plotHeight = bottom - top;
 
         var bound = Math.Max(10.0, offsets.Max(Math.Abs));
-        var buckets = (int)Math.Clamp(plotWidth / 7.0, 24, 96);
-        var counts = new int[buckets];
-        foreach (var value in offsets)
+        _lastState = (left, right, top, bottom, bound, offsets);
+        for (var i = 0; i < offsets.Count; i++)
         {
-            var index = (int)((value + bound) / (2 * bound) * (buckets - 1));
-            counts[Math.Clamp(index, 0, buckets - 1)]++;
-        }
-        var peak = Math.Max(1, counts.Max());
-        var barWidth = plotWidth / buckets;
-        _lastState = (left, right, baseY, bound, counts);
-        for (var i = 0; i < buckets; i++)
-        {
-            if (counts[i] == 0)
-            {
-                continue;
-            }
-            var barHeight = Math.Max(2, counts[i] / (double)peak * (baseY - 4));
-            var x = left + i * barWidth;
-            dc.DrawRectangle(BarBrush, null,
-                new Rect(x + 1, baseY - barHeight, Math.Max(1, barWidth - 2), barHeight));
+            var x = left + (offsets.Count == 1 ? plotWidth / 2 : i / (double)(offsets.Count - 1) * plotWidth);
+            var y = top + (bound - Math.Clamp(offsets[i], -bound, bound)) / (2 * bound) * plotHeight;
+            dc.DrawEllipse(PointBrush, null, new Point(x, y), 1.6, 1.6);
         }
 
-        var centreX = left + plotWidth / 2;
-        dc.DrawLine(CentrePen, new Point(centreX, 2), new Point(centreX, baseY));
+        var centreY = top + plotHeight / 2;
+        dc.DrawLine(new Pen(GridBrush, 1), new Point(left, centreY), new Point(right, centreY));
 
         var mean = offsets.Average();
-        var meanX = left + (mean + bound) / (2 * bound) * plotWidth;
-        dc.DrawLine(MeanPen, new Point(meanX, 2), new Point(meanX, baseY));
+        var meanY = top + (bound - mean) / (2 * bound) * plotHeight;
+        dc.DrawLine(new Pen(MeanBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 3 }, 0) }, new Point(left, meanY), new Point(right, meanY));
 
-        if (_hoverOffset is { } hover)
+        if (_hoverIndex is { } hoverIndex)
         {
-            var x = left + (hover + bound) / (2 * bound) * plotWidth;
-            dc.DrawLine(HoverPen, new Point(x, 2), new Point(x, baseY));
+            var x = left + (offsets.Count == 1 ? plotWidth / 2 : hoverIndex / (double)(offsets.Count - 1) * plotWidth);
+            dc.DrawLine(new Pen(HoverBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 2 }, 0) }, new Point(x, top), new Point(x, bottom));
         }
 
-        DrawText(dc, Invariant($"-{bound:0}ms"), left, baseY + 2, TextAlignment.Left);
-        DrawText(dc, "0", centreX, baseY + 2, TextAlignment.Center);
-        DrawText(dc, Invariant($"+{bound:0}ms"), right, baseY + 2, TextAlignment.Right);
+        DrawText(dc, "0", left, bottom + 2, TextAlignment.Left);
+        DrawText(dc, Invariant($"{offsets.Count:N0} hits"), right, bottom + 2, TextAlignment.Right);
     }
 
     protected override void OnMouseMove(System.Windows.Input.MouseEventArgs e)
@@ -110,7 +103,7 @@ public sealed class HitTimingGraph : FrameworkElement
         }
 
         var position = e.GetPosition(this);
-        var (left, right, _, bound, counts) = _lastState;
+        var (left, right, _, _, _, offsets) = _lastState;
         if (position.X < left || position.X > right)
         {
             ClearHover();
@@ -118,11 +111,11 @@ public sealed class HitTimingGraph : FrameworkElement
         }
 
         var ratio = (position.X - left) / Math.Max(1, right - left);
-        var offset = ratio * 2 * bound - bound;
+        var index = Math.Clamp((int)Math.Round(ratio * (offsets.Count - 1)), 0, offsets.Count - 1);
+        var offset = offsets[index];
         _hoverOffset = offset;
-        var bucket = Math.Clamp((int)(ratio * counts.Length), 0, counts.Length - 1);
-        var hits = counts[bucket];
-        HoverReadout = Invariant($"offset {offset:+0;-0;0}ms - {hits} hit{(hits == 1 ? "" : "s")}");
+        _hoverIndex = index;
+        HoverReadout = Invariant($"hit {index + 1:N0} · {offset:+0.0;-0.0;0.0}ms");
         ToolTip = HoverReadout;
         InvalidateVisual();
     }
@@ -152,6 +145,7 @@ public sealed class HitTimingGraph : FrameworkElement
         }
 
         _hoverOffset = null;
+        _hoverIndex = null;
         HoverReadout = "";
         ToolTip = null;
         InvalidateVisual();
@@ -165,7 +159,7 @@ public sealed class HitTimingGraph : FrameworkElement
             FlowDirection.LeftToRight,
             new Typeface("Segoe UI"),
             9,
-            AxisBrush,
+            AxisTextBrush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
         var drawX = alignment switch
         {
@@ -184,4 +178,8 @@ public sealed class HitTimingGraph : FrameworkElement
         brush.Freeze();
         return brush;
     }
+
+    private static DependencyProperty BrushProperty(string name, string fallback) =>
+        DependencyProperty.Register(name, typeof(Brush), typeof(HitTimingGraph),
+            new FrameworkPropertyMetadata(Frozen(fallback), FrameworkPropertyMetadataOptions.AffectsRender));
 }

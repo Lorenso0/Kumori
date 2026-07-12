@@ -11,12 +11,26 @@ namespace Kumori.App;
 public partial class SettingsWindow : Window
 {
     private readonly SettingsService _settings;
+    private readonly ThemeManager? _themes;
+    private readonly string _originalThemeId;
+    private bool _loading = true;
+    private bool _accepted;
 
     public SettingsWindow(SettingsService settings)
     {
         _settings = settings;
+        _themes = (Application.Current as App)?.Themes;
+        _originalThemeId = ThemeManager.Resolve(settings.Current.Appearance.ThemeId).Id;
         InitializeComponent();
         LoadValues();
+        _loading = false;
+        Closed += (_, _) =>
+        {
+            if (!_accepted)
+            {
+                _themes?.Apply(_originalThemeId, persist: false);
+            }
+        };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -40,6 +54,26 @@ public partial class SettingsWindow : Window
         PrimaryMirror.Text = s.Media.PrimaryMirror;
         RunAtLogin.IsChecked = s.Startup.RunAtLogin;
         DualModeEnabled.IsChecked = s.Display.AutoSwitchDualMode;
+        SuspendOsuDuringDualModeSwitch.IsChecked = s.Display.SuspendOsuDuringDualModeSwitch;
+        switch (ThemeManager.Resolve(s.Appearance.ThemeId).Id)
+        {
+            case "pulse": PulseTheme.IsChecked = true; break;
+            case "windows-fluent": FluentTheme.IsChecked = true; break;
+            default: RefinedTheme.IsChecked = true; break;
+        }
+    }
+
+    private string SelectedThemeId =>
+        PulseTheme.IsChecked == true ? "pulse" :
+        FluentTheme.IsChecked == true ? "windows-fluent" :
+        ThemeManager.DefaultThemeId;
+
+    private void Theme_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_loading && sender is RadioButton { Tag: string themeId })
+        {
+            _themes?.Apply(themeId, persist: false);
+        }
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -64,7 +98,10 @@ public partial class SettingsWindow : Window
             s.Media.PrimaryMirror = PrimaryMirror.Text.Trim();
             s.Startup.RunAtLogin = RunAtLogin.IsChecked == true;
             s.Display.AutoSwitchDualMode = DualModeEnabled.IsChecked == true;
+            s.Display.SuspendOsuDuringDualModeSwitch = SuspendOsuDuringDualModeSwitch.IsChecked == true;
+            s.Appearance.ThemeId = SelectedThemeId;
         });
+        _themes?.Apply(SelectedThemeId, persist: false);
         try
         {
             StartupRegistration.SetEnabled(RunAtLogin.IsChecked == true);
@@ -74,8 +111,11 @@ public partial class SettingsWindow : Window
             ErrorText.Text = $"Could not update Windows startup: {ex.Message}";
             return;
         }
-        DialogResult = true;
+        _accepted = true;
+        Close();
     }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 
     private void BrowseOtd_Click(object sender, RoutedEventArgs e)
     {
@@ -85,7 +125,7 @@ public partial class SettingsWindow : Window
             FileName = "OpenTabletDriver.UX.Wpf.exe",
             Filter = "OpenTabletDriver|OpenTabletDriver.UX.Wpf.exe|Programs (*.exe)|*.exe|All files (*.*)|*.*",
         };
-        if (dialog.ShowDialog(this) == true)
+        if (dialog.ShowDialog() == true)
         {
             OtdPath.Text = dialog.FileName;
         }
@@ -110,7 +150,7 @@ public partial class SettingsWindow : Window
             Title = "Select osu! skin",
             Filter = "osu! skin archives (*.osk)|*.osk|All files (*.*)|*.*",
         };
-        if (dialog.ShowDialog(this) == true)
+        if (dialog.ShowDialog() == true)
         {
             SkinPath.Text = SkinLibraryService.ImportFile(dialog.FileName);
         }
@@ -118,7 +158,7 @@ public partial class SettingsWindow : Window
 
     private void SkinLibrary_Click(object sender, RoutedEventArgs e)
     {
-        new SkinLibraryWindow(_settings) { Owner = this }.ShowDialog();
+        MainWindow.TryOpenWorkspace(new SkinLibraryWindow(_settings), "Skin library");
         SkinPath.Text = _settings.Current.ReplayViewer.SkinPath;
     }
 

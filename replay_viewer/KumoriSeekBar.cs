@@ -25,10 +25,10 @@ internal partial class KumoriSeekBar : CompositeDrawable
 {
     public const float ReservedBottomHeight = bottom_offset + bar_height + 10;
     // Kumori theme palette (Python_old/osu_tracker/core/themes.py).
-    private static readonly Color4 fill_colour = Color4Extensions.FromHex("#8b5cf6"); // PURPLE
-    private static readonly Color4 miss_colour = Color4Extensions.FromHex("#ff4f7b"); // HIT_MISS
-    private static readonly Color4 meh_colour = Color4Extensions.FromHex("#ffd43b"); // HIT_MEH (50)
-    private static readonly Color4 ok_colour = Color4Extensions.FromHex("#9bdc28"); // HIT_OK (100)
+    private static Color4 fill_colour => AdvancedAnalyzerColours.Accent;
+    private static Color4 miss_colour => AdvancedAnalyzerColours.Miss;
+    private static Color4 meh_colour => AdvancedAnalyzerColours.Meh;
+    private static Color4 ok_colour => AdvancedAnalyzerColours.Ok;
 
     private const float bar_height = 46;
     private const float bottom_offset = 22;

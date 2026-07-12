@@ -29,6 +29,14 @@ public sealed class SessionRowViewModel : HistoryRowViewModel
     public string TimeText => LocalTimeDisplay.Time(Model.StartedAt);
 
     public string TimeColor => IsActive ? "#4ADE80" : "#C4B5FD";
+    public string DateText => LocalTimeDisplay.Parse(Model.StartedAt)?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "Session";
+    public string AttemptCountText => Invariant($"{Model.AttemptCount:N0} plays");
+    public string CompletionText => Model.AttemptCount == 0
+        ? "0% completed"
+        : Invariant($"{Model.CompletedCount * 100.0 / Model.AttemptCount:0}% completed");
+    public string BestPpText => Invariant($"{Model.BestPp:0.0}pp best");
+    public string AverageUrText => Model.AverageUr > 0 ? Invariant($"{Model.AverageUr:0.0} UR") : "UR —";
+    public string ActiveTimeText => FormatElapsed(Model.ActiveSeconds);
 
     public string HeaderLine
     {

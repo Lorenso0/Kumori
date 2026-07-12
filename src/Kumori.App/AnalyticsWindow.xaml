@@ -3,8 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Kumori Analytics"
         Width="640" Height="560"
+        MinWidth="480" MinHeight="360"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource Brush.BackgroundPrimary}">
+        Background="{DynamicResource Brush.BackgroundPrimary}">
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -12,8 +13,8 @@
         </Grid.RowDefinitions>
         <TextBlock x:Name="SummaryText" Text="Loading..." FontSize="16" Margin="0,0,0,12" TextWrapping="Wrap" />
         <ListView Grid.Row="1" x:Name="DailyList"
-                  Background="{StaticResource Brush.BackgroundSecondary}"
-                  BorderBrush="{StaticResource Brush.BorderSubtle}">
+                  Background="{DynamicResource Brush.BackgroundSecondary}"
+                  BorderBrush="{DynamicResource Brush.BorderSubtle}">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Day" DisplayMemberBinding="{Binding Day}" Width="110" />

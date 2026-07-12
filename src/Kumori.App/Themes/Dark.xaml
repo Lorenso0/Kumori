@@ -37,18 +37,18 @@
 
     <!-- Base text -->
     <Style TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
     </Style>
 
     <Style x:Key="Text.Secondary" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
     </Style>
 
     <!-- Toolbar buttons -->
     <Style TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="8,4" />
         <Setter Property="FontSize" Value="11" />
@@ -63,7 +63,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{StaticResource Brush.AccentHover}" />
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource Brush.AccentHover}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.5" />
@@ -76,10 +76,10 @@
 
     <!-- Search box -->
     <Style TargetType="TextBox">
-        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
-        <Setter Property="CaretBrush" Value="{StaticResource Brush.TextPrimary}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="6,3" />
         <Setter Property="FontSize" Value="11" />
@@ -98,23 +98,23 @@
     <Style x:Key="StatusChip" TargetType="Border">
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="Padding" Value="10,3" />
-        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BackgroundPanel}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
     <!-- GridSplitter -->
     <Style TargetType="GridSplitter">
-        <Setter Property="Background" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BorderSubtle}" />
     </Style>
 
     <!-- Slim dark scrollbars -->
     <Style TargetType="ScrollBar">
         <Setter Property="Width" Value="9" />
         <Setter Property="MinWidth" Value="9" />
-        <Setter Property="Background" Value="{StaticResource Brush.BackgroundSecondary}" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.Accent}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BackgroundSecondary}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ScrollBar">
@@ -129,7 +129,7 @@
                                         <ControlTemplate TargetType="Thumb">
                                             <Border Width="7" Margin="1"
                                                     CornerRadius="3.5"
-                                                    Background="{StaticResource Brush.AccentLight}" />
+                                                    Background="{DynamicResource Brush.AccentLight}" />
                                         </ControlTemplate>
                                     </Thumb.Template>
                                 </Thumb>
@@ -146,16 +146,16 @@
 
     <!-- Tooltips themed (plan: no OS-default white surfaces) -->
     <Style TargetType="ToolTip">
-        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
     </Style>
 
     <!-- Context menus themed -->
     <Style TargetType="ContextMenu">
-        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.BorderSubtle}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="4,3" />
         <Setter Property="Template">
@@ -173,8 +173,8 @@
         </Setter>
     </Style>
     <Style TargetType="MenuItem">
-        <Setter Property="Background" Value="{StaticResource Brush.BackgroundPanel}" />
-        <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BackgroundPanel}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
         <Setter Property="Padding" Value="12,5" />
         <Setter Property="MinWidth" Value="180" />
         <Setter Property="Template">
@@ -190,10 +190,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.AccentHover}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.AccentHover}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
                             <Setter Property="Opacity" Value="0.55" />
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -206,7 +206,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Separator">
-                    <Border Height="1" Margin="4,2" Background="{StaticResource Brush.BorderSubtle}" />
+                    <Border Height="1" Margin="4,2" Background="{DynamicResource Brush.BorderSubtle}" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

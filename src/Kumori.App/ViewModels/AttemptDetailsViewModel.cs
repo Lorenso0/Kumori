@@ -70,6 +70,11 @@ public partial class AttemptDetailsViewModel : ObservableObject
     }
 
     public string TitleLine => Details is { } d ? $"{d.Summary.Artist} — {d.Summary.Title}" : "";
+    public string MapTitle => Details?.Summary.Title ?? "";
+    public string MapArtist => Details?.Summary.Artist ?? "";
+    public string MapperLine => Details is { } d ? $"mapped by {(string.IsNullOrWhiteSpace(d.Mapper) ? "Unknown" : d.Mapper)}" : "";
+    public string DifficultyName => Details is { } d && !string.IsNullOrWhiteSpace(d.Summary.Difficulty) ? d.Summary.Difficulty : "Unknown difficulty";
+    public string PlayedLine => Details is { } d ? $"Played {LocalTimeDisplay.Relative(d.Summary.StartedAt, fallback: StartedLine)}" : "";
     public string SubtitleLine => Details is { } d
         ? $"[{(string.IsNullOrEmpty(d.Summary.Difficulty) ? "Unknown" : d.Summary.Difficulty)}]  ·  mapped by {(string.IsNullOrEmpty(d.Mapper) ? "Unknown" : d.Mapper)}"
         : "";
@@ -89,6 +94,11 @@ public partial class AttemptDetailsViewModel : ObservableObject
     };
     public string GradeTextColor => "#FFFFFF";
     public string OutcomeUpper => Details?.Summary.Outcome.ToUpperInvariant() ?? "";
+    public string OutcomeDisplay => Details?.Summary is { } summary
+        ? string.Equals(summary.Outcome, "completed", StringComparison.OrdinalIgnoreCase)
+            ? summary.Outcome.ToUpperInvariant()
+            : $"{summary.Outcome.ToUpperInvariant()} ({summary.Progress.ToString("P0", CultureInfo.InvariantCulture)})"
+        : "";
     // osu!'s in-game HUD truncates accuracy to two decimal places rather than
     // rounding it. Mirror that behavior so the inspector agrees with the HUD.
     public string AccuracyValue => Details is { } d
@@ -144,6 +154,12 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string N100Text => Details is { } d ? d.N100.ToString("N0", CultureInfo.InvariantCulture) : "";
     public string N50Text => Details is { } d ? d.N50.ToString("N0", CultureInfo.InvariantCulture) : "";
     public string MissCountText => Details is { } d ? d.Summary.Misses.ToString("N0", CultureInfo.InvariantCulture) : "";
+    public string GekiText => Details is { } d ? d.Geki.ToString("N0", CultureInfo.InvariantCulture) : "";
+    public string KatuText => Details is { } d ? d.Katu.ToString("N0", CultureInfo.InvariantCulture) : "";
+    public string CurrentPpText => Details is { } d ? Invariant($"{d.Summary.Pp:0.0}pp") : "";
+    public string FcPpText => Details is { } d ? Invariant($"{d.FcPp:0.0}pp") : "";
+    public string TimingMeanText => Details?.Timing is { } t ? Invariant($"{t.Mean:+0.00;-0.00;0.00}ms") : "—";
+    public string TimingDeviationText => Details?.Timing is { } t ? Invariant($"{t.Deviation:0.00}ms") : "—";
     public string LargeTickText => IsStablePlay ? "—" : Details is { } d ? HitTotal(d.LargeTickHits, d.LargeTickMisses) : "";
     public string SmallTickText => Details is { } d ? HitTotal(d.SmallTickHits, d.SmallTickMisses) : "";
     public string SliderTailText => IsStablePlay ? "—" : Details is { } d ? HitTotal(d.SliderTailHits, d.SliderTailMisses) : "";
@@ -287,6 +303,8 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string MovementLine => Details?.Movement is { Available: true } m
         ? Invariant($"{SourceLabel(m.Source)}  ·  {m.SampleCount:N0} samples  ·  {m.SampleRate:F0} Hz  ·  {m.DroppedSamples:N0} dropped")
         : "No cursor movement was captured for this attempt.";
+    public string MovementSamplesText => Details?.Movement is { Available: true } m ? Invariant($"{m.SampleCount:N0}") : "—";
+    public string MovementRateText => Details?.Movement is { Available: true } m ? Invariant($"{m.SampleRate:0} Hz") : "—";
     public Brush MovementBrush => PositiveBrush;
 
     // ── Hit-timing availability ──
@@ -348,6 +366,11 @@ public partial class AttemptDetailsViewModel : ObservableObject
             : new Dictionary<string, DifficultyPair>();
 
         OnPropertyChanged(nameof(TitleLine));
+        OnPropertyChanged(nameof(MapTitle));
+        OnPropertyChanged(nameof(MapArtist));
+        OnPropertyChanged(nameof(MapperLine));
+        OnPropertyChanged(nameof(DifficultyName));
+        OnPropertyChanged(nameof(PlayedLine));
         OnPropertyChanged(nameof(SubtitleLine));
         OnPropertyChanged(nameof(StartedLine));
         OnPropertyChanged(nameof(Grade));
@@ -355,6 +378,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(GradeColor));
         OnPropertyChanged(nameof(GradeTextColor));
         OnPropertyChanged(nameof(OutcomeUpper));
+        OnPropertyChanged(nameof(OutcomeDisplay));
         OnPropertyChanged(nameof(AccuracyValue));
         OnPropertyChanged(nameof(ScoreValue));
         OnPropertyChanged(nameof(ComboValue));
@@ -374,6 +398,12 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(N100Text));
         OnPropertyChanged(nameof(N50Text));
         OnPropertyChanged(nameof(MissCountText));
+        OnPropertyChanged(nameof(GekiText));
+        OnPropertyChanged(nameof(KatuText));
+        OnPropertyChanged(nameof(CurrentPpText));
+        OnPropertyChanged(nameof(FcPpText));
+        OnPropertyChanged(nameof(TimingMeanText));
+        OnPropertyChanged(nameof(TimingDeviationText));
         OnPropertyChanged(nameof(LargeTickText));
         OnPropertyChanged(nameof(SmallTickText));
         OnPropertyChanged(nameof(SliderTailText));
@@ -425,6 +455,8 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(HasMovement));
         OnPropertyChanged(nameof(NoMovement));
         OnPropertyChanged(nameof(MovementLine));
+        OnPropertyChanged(nameof(MovementSamplesText));
+        OnPropertyChanged(nameof(MovementRateText));
         OnPropertyChanged(nameof(MovementBrush));
         OnPropertyChanged(nameof(HasTimingSamples));
         OnPropertyChanged(nameof(NoTimingSamples));
@@ -630,7 +662,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
             }
             var capturedSamples = _replayViewer?.GetMovementSamples(details.Summary.Id) ?? Array.Empty<MovementSample>();
             var result = await Task.Run(() => OsrValidationService.Validate(picker.FileName, details, beatmapPath, capturedSamples));
-            new OsrValidationWindow(result) { Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive) }.ShowDialog();
+            MainWindow.TryOpenWorkspace(new OsrValidationWindow(result), "Replay validation");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or EndOfStreamException)
         {

@@ -3,13 +3,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="tosu status &amp; log"
         Width="800" Height="620"
-        MinWidth="620" MinHeight="420"
+        MinWidth="480" MinHeight="320"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource Brush.BackgroundPrimary}">
+        Background="{DynamicResource Brush.BackgroundPrimary}">
     <Window.Resources>
         <Style TargetType="TabControl">
-            <Setter Property="Background" Value="{StaticResource Brush.BackgroundSecondary}" />
-            <Setter Property="BorderBrush" Value="{StaticResource Brush.SubtleBorder}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.BackgroundSecondary}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -22,8 +22,8 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
-                                <Border Background="{StaticResource Brush.PanelBackground}"
-                                        BorderBrush="{StaticResource Brush.SubtleBorder}"
+                                <Border Background="{DynamicResource Brush.PanelBackground}"
+                                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
                                         BorderThickness="0,0,0,1">
                                     <TabPanel x:Name="HeaderPanel" IsItemsHost="True" Margin="8,8,8,0" />
                                 </Border>
@@ -37,9 +37,9 @@
             </Setter>
         </Style>
         <Style TargetType="TabItem">
-            <Setter Property="Foreground" Value="{StaticResource Brush.TextSecondary}" />
-            <Setter Property="Background" Value="{StaticResource Brush.ControlBackground}" />
-            <Setter Property="BorderBrush" Value="{StaticResource Brush.SubtleBorder}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.ControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
             <Setter Property="Padding" Value="12,7" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -55,13 +55,13 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource Brush.ControlHoverBackground}" />
-                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource Brush.AccentPurple}" />
+                                <Setter TargetName="TabBorder" Property="Background" Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
-                                <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource Brush.CardBackground}" />
-                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource Brush.AccentPink}" />
+                                <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+                                <Setter TargetName="TabBorder" Property="Background" Value="{DynamicResource Brush.CardBackground}" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
                                 <Setter TargetName="TabBorder" Property="BorderThickness" Value="1,2,1,0" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -70,15 +70,15 @@
             </Setter>
         </Style>
         <Style x:Key="DiagnosticsTextBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
-            <Setter Property="Background" Value="#111318" />
-            <Setter Property="Foreground" Value="{StaticResource Brush.TextPrimary}" />
-            <Setter Property="BorderBrush" Value="{StaticResource Brush.SubtleBorder}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
     </Window.Resources>
     <DockPanel Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <TextBlock Text="Updates every 500 ms" Foreground="{StaticResource Brush.TextSecondary}" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <TextBlock Text="Updates every 500 ms" Foreground="{DynamicResource Brush.TextSecondary}" VerticalAlignment="Center" Margin="0,0,12,0" />
             <Button Content="Refresh" Click="Refresh_Click" Margin="0,0,8,0" />
             <Button Content="Copy current tab" Click="Copy_Click" Margin="0,0,8,0" />
             <Button Content="Close" Click="Close_Click" />
@@ -89,9 +89,9 @@
                          IsReadOnly="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto"
-                         Background="{StaticResource Brush.BackgroundSecondary}"
-                         Foreground="{StaticResource Brush.TextPrimary}"
-                         BorderBrush="{StaticResource Brush.Border}"
+                         Background="{DynamicResource Brush.BackgroundSecondary}"
+                         Foreground="{DynamicResource Brush.TextPrimary}"
+                         BorderBrush="{DynamicResource Brush.Border}"
                          FontFamily="Consolas"
                          FontSize="12"
                          Padding="10" />
@@ -111,9 +111,9 @@
                          TextWrapping="NoWrap"
                          VerticalScrollBarVisibility="Auto"
                          HorizontalScrollBarVisibility="Auto"
-                         Background="#111318"
-                         Foreground="#D7DEE9"
-                         BorderBrush="{StaticResource Brush.Border}"
+                         Background="{DynamicResource Brush.CardBackground}"
+                         Foreground="{DynamicResource Brush.TextPrimary}"
+                         BorderBrush="{DynamicResource Brush.Border}"
                          FontFamily="Consolas"
                          FontSize="12"
                          Padding="10" />

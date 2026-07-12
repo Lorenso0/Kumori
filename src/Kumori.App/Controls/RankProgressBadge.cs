@@ -4,7 +4,6 @@ using System.Windows;
 using System.Windows.Media;
 using MediaBrush = System.Windows.Media.Brush;
 using MediaBrushes = System.Windows.Media.Brushes;
-using MediaColor = System.Windows.Media.Color;
 using MediaPen = System.Windows.Media.Pen;
 using WpfSize = System.Windows.Size;
 using WpfPoint = System.Windows.Point;
@@ -24,6 +23,12 @@ public sealed class RankProgressBadge : FrameworkElement
 
     public static readonly DependencyProperty TextBrushProperty =
         DependencyProperty.Register(nameof(TextBrush), typeof(MediaBrush), typeof(RankProgressBadge), new FrameworkPropertyMetadata(MediaBrushes.White, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty TrackBrushProperty =
+        DependencyProperty.Register(nameof(TrackBrush), typeof(MediaBrush), typeof(RankProgressBadge), new FrameworkPropertyMetadata(MediaBrushes.DimGray, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty BackgroundBrushProperty =
+        DependencyProperty.Register(nameof(BackgroundBrush), typeof(MediaBrush), typeof(RankProgressBadge), new FrameworkPropertyMetadata(MediaBrushes.Black, FrameworkPropertyMetadataOptions.AffectsRender));
 
     public string RankText
     {
@@ -49,6 +54,18 @@ public sealed class RankProgressBadge : FrameworkElement
         set => SetValue(TextBrushProperty, value);
     }
 
+    public MediaBrush TrackBrush
+    {
+        get => (MediaBrush)GetValue(TrackBrushProperty);
+        set => SetValue(TrackBrushProperty, value);
+    }
+
+    public MediaBrush BackgroundBrush
+    {
+        get => (MediaBrush)GetValue(BackgroundBrushProperty);
+        set => SetValue(BackgroundBrushProperty, value);
+    }
+
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
@@ -62,9 +79,9 @@ public sealed class RankProgressBadge : FrameworkElement
         var center = new WpfPoint(ActualWidth / 2d, ActualHeight / 2d);
         var radius = Math.Max(0, side / 2d - 2d);
         var progress = Math.Clamp(Progress, 0d, 1d);
-        drawingContext.DrawEllipse(new SolidColorBrush(MediaColor.FromRgb(16, 14, 18)), null, center, radius - 1.4d, radius - 1.4d);
+        drawingContext.DrawEllipse(BackgroundBrush, null, center, radius - 1.4d, radius - 1.4d);
 
-        var outerTrack = new MediaPen(new SolidColorBrush(MediaColor.FromRgb(47, 49, 49)), 4.4d)
+        var outerTrack = new MediaPen(TrackBrush, 4.4d)
         {
             StartLineCap = PenLineCap.Flat,
             EndLineCap = PenLineCap.Flat
@@ -73,12 +90,7 @@ public sealed class RankProgressBadge : FrameworkElement
 
         if (progress > 0.002d)
         {
-            var outerAccuracyBrush = new LinearGradientBrush(
-                MediaColor.FromRgb(124, 246, 255),
-                MediaColor.FromRgb(186, 255, 169),
-                new WpfPoint(0.5d, 0d),
-                new WpfPoint(0.5d, 1d));
-            var outerAccent = new MediaPen(outerAccuracyBrush, 4.4d)
+            var outerAccent = new MediaPen(AccentBrush, 4.4d)
             {
                 StartLineCap = PenLineCap.Flat,
                 EndLineCap = PenLineCap.Flat
@@ -87,15 +99,15 @@ public sealed class RankProgressBadge : FrameworkElement
         }
 
         var innerRadius = Math.Max(2d, radius - 9.1d);
-        var separator = new MediaPen(new SolidColorBrush(MediaColor.FromRgb(26, 28, 29)), 4.4d);
+        var separator = new MediaPen(BackgroundBrush, 4.4d);
         drawingContext.DrawEllipse(null, separator, center, innerRadius, innerRadius);
 
         foreach (var segment in rankSegments)
         {
-            drawSegment(drawingContext, center, innerRadius, segment.Start, segment.End, progress, segment.Colour);
+            drawSegment(drawingContext, center, innerRadius, segment.Start, segment.End, progress, WithOpacity(AccentBrush, segment.Opacity));
         }
 
-        drawingContext.DrawEllipse(null, new MediaPen(new SolidColorBrush(MediaColor.FromRgb(9, 10, 11)), 1.2d), center, innerRadius - 3.1d, innerRadius - 3.1d);
+        drawingContext.DrawEllipse(null, new MediaPen(TrackBrush, 1.2d), center, innerRadius - 3.1d, innerRadius - 3.1d);
 
         var text = string.IsNullOrWhiteSpace(RankText) ? "-" : RankText;
         var formatted = new FormattedText(
@@ -110,17 +122,17 @@ public sealed class RankProgressBadge : FrameworkElement
         drawingContext.DrawText(formatted, new WpfPoint(center.X - formatted.Width / 2d, center.Y - formatted.Height / 2d));
     }
 
-    private static readonly (double Start, double End, MediaColor Colour)[] rankSegments =
+    private static readonly (double Start, double End, double Opacity)[] rankSegments =
     [
-        (0.00d, 0.70d, MediaColor.FromRgb(255, 90, 90)),
-        (0.70d, 0.80d, MediaColor.FromRgb(255, 142, 93)),
-        (0.80d, 0.90d, MediaColor.FromRgb(227, 177, 48)),
-        (0.90d, 0.95d, MediaColor.FromRgb(136, 218, 32)),
-        (0.95d, 0.99d, MediaColor.FromRgb(2, 181, 195)),
-        (0.99d, 1.00d, MediaColor.FromRgb(222, 49, 174)),
+        (0.00d, 0.70d, 0.40d),
+        (0.70d, 0.80d, 0.52d),
+        (0.80d, 0.90d, 0.64d),
+        (0.90d, 0.95d, 0.76d),
+        (0.95d, 0.99d, 0.88d),
+        (0.99d, 1.00d, 1.00d),
     ];
 
-    private static void drawSegment(DrawingContext drawingContext, WpfPoint center, double radius, double start, double end, double progress, MediaColor colour)
+    private static void drawSegment(DrawingContext drawingContext, WpfPoint center, double radius, double start, double end, double progress, MediaBrush brush)
     {
         const double gradeSpacing = 2d / 360d;
         var segmentStart = Math.Min(1d, start + gradeSpacing * 0.5d);
@@ -130,12 +142,20 @@ public sealed class RankProgressBadge : FrameworkElement
             return;
         }
 
-        var pen = new MediaPen(new SolidColorBrush(colour), 2.6d)
+        var pen = new MediaPen(brush, 2.6d)
         {
             StartLineCap = PenLineCap.Flat,
             EndLineCap = PenLineCap.Flat
         };
         drawingContext.DrawGeometry(null, pen, createArcSegmentGeometry(center, radius, segmentStart, segmentEnd));
+    }
+
+    private static MediaBrush WithOpacity(MediaBrush source, double opacity)
+    {
+        var brush = source.CloneCurrentValue();
+        brush.Opacity = opacity;
+        brush.Freeze();
+        return brush;
     }
 
     private static Geometry createArcSegmentGeometry(WpfPoint center, double radius, double startProgress, double endProgress)

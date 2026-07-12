@@ -29,6 +29,25 @@ public sealed record ViewerContract
     [JsonPropertyName("settings")]
     public Dictionary<string, JsonElement> Settings { get; init; } = [];
 
+    [JsonIgnore]
+    public string ThemeId
+    {
+        get
+        {
+            if (Settings.TryGetValue("kumori_theme", out var value)
+                && value.ValueKind == JsonValueKind.String)
+            {
+                return value.GetString() switch
+                {
+                    "pulse" => "pulse",
+                    "windows-fluent" => "windows-fluent",
+                    _ => "refined-kumori",
+                };
+            }
+            return "refined-kumori";
+        }
+    }
+
     [JsonPropertyName("samples")]
     public List<MovementSample> Samples { get; init; } = [];
 

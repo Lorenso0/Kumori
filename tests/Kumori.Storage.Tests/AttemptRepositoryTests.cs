@@ -99,6 +99,14 @@ public class AttemptRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void GetAttemptsForSession_ReturnsEveryPlayInTheSession()
+    {
+        var plays = CreateRepository().GetAttemptsForSession(1);
+        Assert.Equal(250, plays.Count);
+        Assert.All(plays, play => Assert.Equal(1, play.SessionId));
+    }
+
+    [Fact]
     public void MissingDatabase_ReturnsEmptyInsteadOfThrowing()
     {
         var repo = new AttemptRepository(

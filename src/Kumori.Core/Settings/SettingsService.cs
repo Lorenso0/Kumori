@@ -104,6 +104,13 @@ public sealed class SettingsService
 
         s.FirstRunCompleted = B("first_run_completed", s.FirstRunCompleted);
         s.OnboardingVersion = I("onboarding_version", s.OnboardingVersion);
+        s.OnboardingProgressStep = I("onboarding_progress_step", s.OnboardingProgressStep);
+        s.Appearance.ThemeId = S("theme", "purple") switch
+        {
+            "pulse" => "pulse",
+            "windows-fluent" or "fluent" => "windows-fluent",
+            _ => "refined-kumori",
+        };
         s.Tracking.Enabled = B("osu_advanced_tracking_enabled", s.Tracking.Enabled);
         s.Tracking.RetentionDays = I("osu_tracking_retention_days", s.Tracking.RetentionDays);
         s.Tracking.PacketRecordingEnabled = B("tosu_packet_recording_enabled", s.Tracking.PacketRecordingEnabled);

@@ -281,6 +281,7 @@ public sealed class ReplayViewerContractService
         ["osu_replay_hitsound_volume"] = _settings.ReplayViewer.HitsoundVolume,
         ["osu_replay_skin_path"] = _settings.ReplayViewer.SkinPath,
         ["osu_replay_disable_hidden"] = _settings.ReplayViewer.DisableHidden,
+        ["kumori_theme"] = _settings.Appearance.ThemeId,
     };
 
     private static double ClockRate(AttemptDetails details)

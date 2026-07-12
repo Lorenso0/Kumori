@@ -16,12 +16,15 @@ public partial class MainWindow : Window
 {
     private const double DefaultWindowWidth = 1180;
     private const double DefaultWindowHeight = 820;
-    private const double MinimumRestoredWindowWidth = 1080;
-    private const double MinimumRestoredWindowHeight = 760;
-    private const double MaximumRestoredWindowWidth = 1300;
-    private const double MaximumRestoredWindowHeight = 920;
+    private const double MinimumRestoredWindowWidth = 720;
+    private const double MinimumRestoredWindowHeight = 480;
 
     private readonly SettingsService _settings;
+    private ResponsiveLayoutState _layoutState;
+    private bool _compactInspectorOpen;
+    private string _selectedPage = "Dashboard";
+    private WelcomeWindow? _onboardingWindow;
+    private SkinLibraryWindow? _onboardingToolWindow;
 
     /// <summary>Set by App before Shutdown so the tray Exit actually closes the window.</summary>
     public bool ForceClose { get; set; }
@@ -30,8 +33,11 @@ public partial class MainWindow : Window
     {
         _settings = settings;
         DataContext = viewModel;
+        viewModel.WorkspaceWindowRequested += OpenWorkspaceTab;
         InitializeComponent();
         ApplyInitialBounds();
+        SizeChanged += (_, _) => ApplyResponsiveLayout();
+        Loaded += (_, _) => ApplyResponsiveLayout();
         Closing += (_, e) =>
         {
             SaveBounds();
@@ -58,6 +64,11 @@ public partial class MainWindow : Window
         if (sender is ListBox lb && lb.SelectedItem is not null and not AttemptRowViewModel)
         {
             lb.SelectedItem = e.RemovedItems.OfType<AttemptRowViewModel>().FirstOrDefault();
+        }
+        else if (sender is ListBox { SelectedItem: AttemptRowViewModel } && _layoutState.IsCompact)
+        {
+            _compactInspectorOpen = true;
+            ApplyResponsiveLayout();
         }
     }
 
@@ -248,9 +259,351 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
+    private void FilterChip_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string filter } && DataContext is MainViewModel viewModel)
+        {
+            viewModel.SelectedFilterMode = filter;
+        }
+    }
+
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        new SettingsWindow(_settings) { Owner = this }.ShowDialog();
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.OpenSettingsCommand.Execute(null);
+        }
+    }
+
+    private void MinimizeWindow_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void MaximizeWindow_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void CloseWindow_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void DashboardNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        _compactInspectorOpen = false;
+        ShowPage("Dashboard");
+        HistoryList.Focus();
+    }
+
+    private void PerformanceNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Performance");
+    private void MapsNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Maps");
+    private void SettingsNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        ShowPage("Settings");
+        if (WorkspaceTabs.Items.Count == 0 && DataContext is MainViewModel viewModel)
+        {
+            viewModel.OpenSettingsCommand.Execute(null);
+        }
+    }
+    private void ShowPage(string page)
+    {
+        _selectedPage = page;
+        NavigationView.SelectedPage = page;
+        DashboardRoot.Visibility = page == "Dashboard" ? Visibility.Visible : Visibility.Collapsed;
+        PerformancePage.Visibility = page == "Performance" ? Visibility.Visible : Visibility.Collapsed;
+        MapsPage.Visibility = page == "Maps" ? Visibility.Visible : Visibility.Collapsed;
+        WorkspacePage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
+        ApplyResponsiveLayout();
+    }
+
+    public void OpenWorkspaceTab(Window window, string title)
+    {
+        ShowPage("Settings");
+        foreach (TabItem existing in WorkspaceTabs.Items)
+        {
+            if (existing.Tag is Window existingWindow && existingWindow.GetType() == window.GetType())
+            {
+                WorkspaceTabs.SelectedItem = existing;
+                return;
+            }
+        }
+
+        if (window.Content is not UIElement content)
+        {
+            return;
+        }
+
+        window.Content = null;
+        var host = new ContentControl
+        {
+            Content = content,
+            DataContext = window.DataContext,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+        };
+        foreach (var key in window.Resources.Keys)
+        {
+            host.Resources[key] = window.Resources[key];
+        }
+        foreach (var dictionary in window.Resources.MergedDictionaries)
+        {
+            host.Resources.MergedDictionaries.Add(dictionary);
+        }
+
+        var close = new Button
+        {
+            Content = "×",
+            Width = 22,
+            Height = 22,
+            MinHeight = 22,
+            Padding = new Thickness(0),
+            Margin = new Thickness(8, 0, 0, 0),
+            ToolTip = $"Close {title}",
+        };
+        close.Style = (Style)FindResource("HeaderChevronButton");
+        close.Foreground = (System.Windows.Media.Brush)FindResource("Brush.TextMuted");
+        var header = new StackPanel { Orientation = Orientation.Horizontal };
+        header.Children.Add(new TextBlock
+        {
+            Text = title,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+        });
+        header.Children.Add(close);
+        var tab = new TabItem
+        {
+            Header = header,
+            Content = host,
+            Tag = window,
+            Style = (Style)FindResource("WorkspaceTabItem"),
+        };
+        close.Click += (_, _) => window.Close();
+        window.Closed += (_, _) => Dispatcher.InvokeAsync(() =>
+        {
+            WorkspaceTabs.Items.Remove(tab);
+            WorkspaceTabs.Visibility = WorkspaceTabs.Items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            WorkspaceEmptyText.Visibility = WorkspaceTabs.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        });
+        WorkspaceTabs.Items.Add(tab);
+        WorkspaceTabs.SelectedItem = tab;
+        WorkspaceTabs.Visibility = Visibility.Visible;
+        WorkspaceEmptyText.Visibility = Visibility.Collapsed;
+    }
+
+    public static bool TryOpenWorkspace(Window window, string title)
+    {
+        if (Application.Current.MainWindow is not MainWindow mainWindow)
+        {
+            return false;
+        }
+        mainWindow.OpenWorkspaceTab(window, title);
+        return true;
+    }
+
+    public void OpenOnboarding(WelcomeWindow onboarding)
+    {
+        if (_onboardingWindow is not null)
+        {
+            OnboardingOverlay.Visibility = Visibility.Visible;
+            onboarding.ReleaseFromHost();
+            return;
+        }
+        if (onboarding.Content is not UIElement content)
+        {
+            return;
+        }
+
+        _onboardingWindow = onboarding;
+        onboarding.Content = null;
+        OnboardingHost.Resources.Clear();
+        foreach (var key in onboarding.Resources.Keys)
+        {
+            OnboardingHost.Resources[key] = onboarding.Resources[key];
+        }
+        foreach (var dictionary in onboarding.Resources.MergedDictionaries)
+        {
+            OnboardingHost.Resources.MergedDictionaries.Add(dictionary);
+        }
+        OnboardingHost.DataContext = onboarding.DataContext;
+        OnboardingHost.Content = content;
+        OnboardingOverlay.Visibility = Visibility.Visible;
+        onboarding.DismissRequested += (_, _) => CloseOnboarding();
+    }
+
+    public void CloseOnboarding()
+    {
+        CloseOnboardingTool();
+        _onboardingWindow?.ReleaseFromHost();
+        OnboardingHost.Content = null;
+        OnboardingHost.Resources.Clear();
+        OnboardingOverlay.Visibility = Visibility.Collapsed;
+        _onboardingWindow = null;
+    }
+
+    public void OpenOnboardingTool(SkinLibraryWindow tool, string title)
+    {
+        if (_onboardingWindow is null || tool.Content is not UIElement content)
+        {
+            return;
+        }
+        CloseOnboardingTool();
+        _onboardingToolWindow = tool;
+        tool.Content = null;
+        OnboardingToolHost.Resources.Clear();
+        foreach (var key in tool.Resources.Keys)
+        {
+            OnboardingToolHost.Resources[key] = tool.Resources[key];
+        }
+        foreach (var dictionary in tool.Resources.MergedDictionaries)
+        {
+            OnboardingToolHost.Resources.MergedDictionaries.Add(dictionary);
+        }
+        OnboardingToolHost.DataContext = tool.DataContext;
+        OnboardingToolHost.Content = content;
+        OnboardingToolTitle.Text = title;
+        OnboardingToolLayer.Visibility = Visibility.Visible;
+        tool.DismissRequested += (_, _) => CloseOnboardingTool();
+    }
+
+    public void CloseOnboardingTool()
+    {
+        OnboardingToolHost.Content = null;
+        OnboardingToolHost.Resources.Clear();
+        OnboardingToolLayer.Visibility = Visibility.Collapsed;
+        _onboardingToolWindow = null;
+    }
+
+    private void OnboardingToolBack_Click(object sender, RoutedEventArgs e) => CloseOnboardingTool();
+
+    public static bool TryOpenOnboardingTool(SkinLibraryWindow tool, string title)
+    {
+        if (Application.Current.MainWindow is not MainWindow mainWindow)
+        {
+            return false;
+        }
+        mainWindow.OpenOnboardingTool(tool, title);
+        return true;
+    }
+
+    public static bool TryOpenOnboarding(WelcomeWindow onboarding)
+    {
+        if (Application.Current.MainWindow is not MainWindow mainWindow)
+        {
+            return false;
+        }
+        mainWindow.OpenOnboarding(onboarding);
+        return true;
+    }
+
+    private void InspectorBack_Click(object sender, RoutedEventArgs e)
+    {
+        _compactInspectorOpen = false;
+        ApplyResponsiveLayout();
+        HistoryList.Focus();
+    }
+
+    private void NavigationToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_layoutState.IsWide)
+        {
+            return;
+        }
+
+        _settings.Update(settings => settings.Appearance.NavigationExpanded = !settings.Appearance.NavigationExpanded);
+        ApplyResponsiveLayout();
+    }
+
+    private void MapCard_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: MapCardViewModel map } && DataContext is MainViewModel viewModel)
+        {
+            viewModel.ShowAllPlaysForMap(map);
+            _compactInspectorOpen = false;
+            ShowPage("Dashboard");
+            HistoryList.Focus();
+        }
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        _layoutState = ResponsiveLayoutResolver.Resolve(ActualWidth, ActualHeight);
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.IsWideHistoryLayout = ActualWidth >= 1600;
+        }
+        var expandedNavigation = _layoutState.IsWide && _settings.Current.Appearance.NavigationExpanded;
+        NavigationColumn.Width = new GridLength(expandedNavigation ? 176 : 58);
+        NavigationView.CanToggle = _layoutState.IsWide;
+        NavigationView.IsExpanded = expandedNavigation;
+
+        var pageMargin = _layoutState.IsCompact ? new Thickness(10, 10, 8, 10) : new Thickness(22, 18, 22, 18);
+        PerformancePage.Margin = pageMargin;
+        MapsPage.Margin = pageMargin;
+        WorkspacePage.Margin = pageMargin;
+
+        MetricsGrid.Columns = _layoutState.IsCompact ? 3 : 6;
+        MetricsRow.Height = new GridLength(_layoutState.IsCompact ? 122 : 88);
+        TopBarRow.Height = new GridLength(_layoutState.IsShort ? 54 : 72);
+        var showDashboardHeading = ActualWidth >= 900;
+        DashboardTitleText.Visibility = showDashboardHeading ? Visibility.Visible : Visibility.Collapsed;
+        DashboardSubtitleText.Visibility = showDashboardHeading ? Visibility.Visible : Visibility.Collapsed;
+        TopStatusStrip.Visibility = Visibility.Collapsed;
+        InspectorHeaderTitle.Visibility = _layoutState.IsCompact && _compactInspectorOpen
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        GroupRepeatsCheckBox.Visibility = Visibility.Collapsed;
+        ArtworkModeComboBox.Visibility = Visibility.Collapsed;
+        ResultsTextBlock.Visibility = Visibility.Collapsed;
+        ClearFiltersButton.Visibility = Visibility.Collapsed;
+        SyncStatusText.Visibility = _layoutState.IsWide ? Visibility.Visible : Visibility.Collapsed;
+        TopSettingsButton.Visibility = Visibility.Collapsed;
+
+        if (ActualHeight >= 1000)
+        {
+            InspectorHero.Height = 190;
+            ScrollHitTimingRow.Height = new GridLength(108);
+            ScrollMapPressureRow.Height = new GridLength(116);
+        }
+        else if (ActualHeight >= 700)
+        {
+            InspectorHero.Height = 145;
+            ScrollHitTimingRow.Height = new GridLength(78);
+            ScrollMapPressureRow.Height = new GridLength(86);
+        }
+        else
+        {
+            InspectorHero.Height = 122;
+            ScrollHitTimingRow.Height = new GridLength(68);
+            ScrollMapPressureRow.Height = new GridLength(74);
+        }
+
+        ScrollableChartsPanel.Visibility = Visibility.Visible;
+        PinnedChartsPanel.Visibility = Visibility.Collapsed;
+
+        if (_layoutState.IsCompact)
+        {
+            var showInspector = _compactInspectorOpen;
+            HistoryPane.Visibility = showInspector ? Visibility.Collapsed : Visibility.Visible;
+            InspectorPane.Visibility = showInspector ? Visibility.Visible : Visibility.Collapsed;
+            MainGridSplitter.Visibility = Visibility.Collapsed;
+            HistoryColumn.Width = showInspector ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            SplitterColumn.Width = new GridLength(0);
+            InspectorColumn.Width = showInspector ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+            InspectorBackButton.Visibility = showInspector ? Visibility.Visible : Visibility.Collapsed;
+            MainSplitGrid.Margin = new Thickness(6);
+        }
+        else
+        {
+            HistoryPane.Visibility = Visibility.Visible;
+            InspectorPane.Visibility = Visibility.Visible;
+            MainGridSplitter.Visibility = Visibility.Visible;
+            HistoryColumn.Width = new GridLength(48, GridUnitType.Star);
+            SplitterColumn.Width = new GridLength(8);
+            InspectorColumn.Width = new GridLength(52, GridUnitType.Star);
+            InspectorBackButton.Visibility = Visibility.Collapsed;
+            MainSplitGrid.Margin = new Thickness(10);
+        }
     }
 
     /// <summary>
@@ -263,16 +616,21 @@ public partial class MainWindow : Window
         var work = SystemParameters.WorkArea;
         var saved = _settings.Current.Window;
 
-        var useSavedSize = saved.Width is >= MinimumRestoredWindowWidth and <= MaximumRestoredWindowWidth
-            && saved.Height is >= MinimumRestoredWindowHeight and <= MaximumRestoredWindowHeight;
+        var useSavedSize = saved.Width is >= MinimumRestoredWindowWidth
+            && saved.Height is >= MinimumRestoredWindowHeight
+            && double.IsFinite(saved.Width.Value)
+            && double.IsFinite(saved.Height.Value);
         double width = useSavedSize
             ? saved.Width!.Value
             : Math.Min(Math.Max(DefaultWindowWidth, MinWidth), work.Width);
         double height = useSavedSize && saved.Height is { } savedHeight
             ? savedHeight
             : Math.Min(Math.Max(DefaultWindowHeight, MinHeight), work.Height);
-        width = Math.Min(width, work.Width);
-        height = Math.Min(height, work.Height);
+        // Do not squeeze a valid large-monitor window back to the primary
+        // monitor's work area. The virtual desktop bounds preserve 4K and
+        // secondary-monitor restores while still rejecting absurd sizes.
+        width = Math.Min(width, useSavedSize ? SystemParameters.VirtualScreenWidth : work.Width);
+        height = Math.Min(height, useSavedSize ? SystemParameters.VirtualScreenHeight : work.Height);
 
         double left, top;
         if (useSavedSize && saved.Left is { } l && saved.Top is { } t && IsMostlyOnScreen(l, t, width, height))

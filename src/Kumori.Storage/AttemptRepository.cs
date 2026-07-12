@@ -23,7 +23,7 @@ public sealed class AttemptRepository
     /// Optional search matches artist/title/difficulty/mods (case-insensitive).
     /// </summary>
     public List<AttemptSummary> GetRecentAttempts(
-        long? beforeId = null, int limit = 100, string? search = null)
+        long? beforeId = null, int limit = 100, string? search = null, long? sessionId = null)
     {
         var results = new List<AttemptSummary>(limit);
         if (!_factory.DatabaseExists)
@@ -63,6 +63,7 @@ public sealed class AttemptRepository
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
             WHERE (@beforeId IS NULL OR a.id < @beforeId)
+              AND (@sessionId IS NULL OR a.session_id = @sessionId)
               AND (@search IS NULL OR
                    b.artist LIKE @search ESCAPE '\' OR
                    b.title LIKE @search ESCAPE '\' OR
@@ -73,6 +74,7 @@ public sealed class AttemptRepository
             """;
         cmd.Parameters.AddWithValue("@beforeId", (object?)beforeId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@limit", limit);
+        cmd.Parameters.AddWithValue("@sessionId", (object?)sessionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@search",
             string.IsNullOrWhiteSpace(search)
                 ? DBNull.Value
@@ -115,6 +117,9 @@ public sealed class AttemptRepository
         }
         return results;
     }
+
+    public List<AttemptSummary> GetAttemptsForSession(long sessionId, int limit = 100_000) =>
+        GetRecentAttempts(limit: limit, sessionId: sessionId);
 
     private static bool HasColumn(SqliteConnection con, string table, string column)
     {

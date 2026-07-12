@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Kumori.Native;
 
@@ -145,5 +146,67 @@ public static class OsuProcessDetector
                 UseShellExecute = true,
             });
         }
+    }
+
+    /// <summary>
+    /// Suspends the osu! processes currently owned by this user. The returned
+    /// lease always resumes every process it successfully suspended when disposed.
+    /// </summary>
+    public static OsuProcessSuspension? TrySuspendRunning()
+    {
+        var suspended = new List<Process>();
+        foreach (var process in ProcessNames.SelectMany(Process.GetProcessesByName).GroupBy(p => p.Id).Select(g => g.First()))
+        {
+            try
+            {
+                if (!process.HasExited && NativeMethods.NtSuspendProcess(process.Handle) == 0)
+                {
+                    suspended.Add(process);
+                    continue;
+                }
+            }
+            catch
+            {
+            }
+            process.Dispose();
+        }
+
+        if (suspended.Count == 0)
+        {
+            return null;
+        }
+
+        return new OsuProcessSuspension(suspended);
+    }
+
+    public sealed class OsuProcessSuspension : IDisposable
+    {
+        private List<Process>? _processes;
+
+        internal OsuProcessSuspension(List<Process> processes) => _processes = processes;
+
+        public void Dispose()
+        {
+            var processes = Interlocked.Exchange(ref _processes, null);
+            if (processes is null)
+            {
+                return;
+            }
+
+            foreach (var process in processes)
+            {
+                try { _ = NativeMethods.NtResumeProcess(process.Handle); } catch { }
+                process.Dispose();
+            }
+        }
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("ntdll.dll")]
+        internal static extern int NtSuspendProcess(IntPtr processHandle);
+
+        [DllImport("ntdll.dll")]
+        internal static extern int NtResumeProcess(IntPtr processHandle);
     }
 }

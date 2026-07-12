@@ -34,12 +34,14 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>Interleaved session separators + attempt rows bound by the list.</summary>
     public ObservableCollection<object> Rows { get; } = new();
+    public ObservableCollection<PerformanceDayViewModel> PerformanceDays { get; } = new();
+    public ObservableCollection<MapCardViewModel> MapCards { get; } = new();
     public AttemptDetailsViewModel Inspector { get; }
     public IReadOnlyList<string> FilterModeOptions { get; } = new[]
     {
         "All", "Completed", "Failed", "Retried", "Quit"
     };
-    public IReadOnlyList<string> ArtworkModeOptions { get; } = new[] { "Full artwork", "No artwork" };
+    public IReadOnlyList<string> ArtworkModeOptions { get; } = new[] { "Thumbnail cards", "No artwork" };
 
     [ObservableProperty] private AttemptRowViewModel? _selectedAttempt;
     [ObservableProperty] private string _historyStatus = "Loading history...";
@@ -70,14 +72,25 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _bestMetric = "-";
     [ObservableProperty] private string _ppGainedMetric = "-";
     [ObservableProperty] private string _ranksGainedMetric = "-";
+    [ObservableProperty] private string _globalAttemptsMetric = "-";
+    [ObservableProperty] private string _globalAccuracyMetric = "-";
+    [ObservableProperty] private string _globalBestPpMetric = "-";
+    [ObservableProperty] private string _globalPlaytimeMetric = "-";
+    [ObservableProperty] private string _globalCompletionMetric = "-";
+    [ObservableProperty] private string _globalCompletedMetric = "-";
+    [ObservableProperty] private string _globalFailedMetric = "-";
+    [ObservableProperty] private string _globalScoreMetric = "-";
     [ObservableProperty] private string _accountChangeLine = "ACCOUNT CHANGE  ·  PP +0.0  ·  Rank +0  ·  Accuracy +0.000%  ·  Plays +0";
     [ObservableProperty] private string _groupHeader = "Recent plays";
     [ObservableProperty] private string _groupStats = "";
     [ObservableProperty] private bool _isGroupRepeats;
+    [ObservableProperty] private bool _isGroupSessions;
+    [ObservableProperty] private bool _isWideHistoryLayout;
     [ObservableProperty] private string _selectedFilterMode = "All";
-    [ObservableProperty] private string _selectedArtworkMode = "Full artwork";
+    [ObservableProperty] private string _selectedArtworkMode = "Thumbnail cards";
 
     private readonly List<AttemptSummary> _loadedAttempts = new();
+    private readonly List<AttemptSummary> _allMapAttempts = new();
     private readonly Dictionary<long, SessionSummary> _sessions = new();
     private readonly HashSet<string> _collapsedDays = new(StringComparer.Ordinal);
     private readonly HashSet<long> _collapsedSessions = new();
@@ -87,6 +100,7 @@ public partial class MainViewModel : ObservableObject
     private long? _activeSessionId;
     private long? _latestAttemptId;
     private Func<Task<bool>>? _endLiveSession;
+    public event Action<Window, string>? WorkspaceWindowRequested;
     private long? _oldestLoadedId;
     private bool _reachedEnd;
     private string? _mapFilterKey;
@@ -116,15 +130,18 @@ public partial class MainViewModel : ObservableObject
         _maintenance = maintenance ?? new TrackingMaintenanceRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false));
         _sessionsRepo = sessions ?? new SessionRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: true));
         Inspector = new AttemptDetailsViewModel(details, replayViewer);
+        _activeSessionId = store.Current.ActiveSession?.SessionId;
         _store.StateChanged += OnStateChanged;
     }
 
     public void SetEndLiveSessionHandler(Func<Task<bool>> handler) => _endLiveSession = handler;
 
-    public bool IsFullArtwork => SelectedArtworkMode == "Full artwork";
+    public bool IsThumbnailArtwork => SelectedArtworkMode == "Thumbnail cards";
     public string ResultsText => $"{Attempts.Count:N0} results";
     public string ResultsShortText => $"{Attempts.Count:N0}";
     public bool CanLaunchTosu => IsTosuLaunchVisible && !IsLaunchingTosu;
+    public bool HasActiveSession => _activeSessionId is not null;
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "1.0.0"}";
 
     partial void OnIsTosuLaunchVisibleChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -145,10 +162,11 @@ public partial class MainViewModel : ObservableObject
     partial void OnSelectedFilterModeChanged(string value) => ApplyVisibleAttempts();
 
     partial void OnIsGroupRepeatsChanged(bool value) => ApplyVisibleAttempts();
+    partial void OnIsGroupSessionsChanged(bool value) => ApplyVisibleAttempts();
 
     partial void OnSelectedArtworkModeChanged(string value)
     {
-        OnPropertyChanged(nameof(IsFullArtwork));
+        OnPropertyChanged(nameof(IsThumbnailArtwork));
     }
 
     public Task HydrateAsync() => ReloadFirstPageAsync();
@@ -175,8 +193,11 @@ public partial class MainViewModel : ObservableObject
             var load = await Task.Run(() => new
             {
                 Page = _attempts.GetRecentAttempts(null, PageSize, search),
+                AllMapAttempts = search is null || _allMapAttempts.Count == 0
+                    ? _attempts.GetRecentAttempts(limit: 10_000)
+                    : null,
                 Analytics = _analytics.GetSummary(),
-                Sessions = _sessionsRepo.GetRecentSessions(200_000),
+                Sessions = _sessionsRepo.GetRecentSessions(10_000),
                 DbBytes = SafeFileSize(AppPaths.TrackingDatabase),
                 CacheBytes = CacheStorageUsage.GetAdditionalBytes(AppPaths.BeatmapMediaDir),
                 UsingLazerRealm = LazerStorage.GetDiagnostics().RealmOpened,
@@ -195,6 +216,11 @@ public partial class MainViewModel : ObservableObject
             OnPropertyChanged(nameof(LoadOlderVisible));
             _loadedAttempts.Clear();
             _loadedAttempts.AddRange(load.Page);
+            if (load.AllMapAttempts is { } allMapAttempts)
+            {
+                _allMapAttempts.Clear();
+                _allMapAttempts.AddRange(allMapAttempts);
+            }
             ApplyVisibleAttempts(selectFirst: false);
             if (Attempts.Count > 0 && (SelectedAttempt is null || !Attempts.Any(a => a.Id == SelectedAttempt.Id)))
             {
@@ -233,10 +259,20 @@ public partial class MainViewModel : ObservableObject
         KeysMetric = (analytics.ZTotal + analytics.XTotal).ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         Key1Metric = Invariant($"K1 {analytics.ZTotal:N0}");
         Key2Metric = Invariant($"K2 {analytics.XTotal:N0}");
-        KeysBreakdown = Invariant($"K1 {analytics.ZTotal:N0}  -  K2 {analytics.XTotal:N0}");
+        KeysBreakdown = Invariant($"K1 {analytics.ZTotal:N0}  /  K2 {analytics.XTotal:N0}");
         BestMetric = Invariant($"{analytics.BestPp:0.0}pp");
         PpGainedMetric = FormatPpGained(analytics.LatestAccountChange);
         RanksGainedMetric = FormatRanksGained(analytics.LatestAccountChange);
+        GlobalAttemptsMetric = analytics.Attempts.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        GlobalAccuracyMetric = Invariant($"{analytics.AverageAccuracy:0.00}%");
+        GlobalBestPpMetric = Invariant($"{analytics.BestPp:0.0}pp");
+        GlobalPlaytimeMetric = FormatPlaytime(analytics.TotalDurationSeconds);
+        GlobalCompletionMetric = analytics.Attempts == 0
+            ? "0%"
+            : Invariant($"{analytics.Completed * 100.0 / analytics.Attempts:0.0}%");
+        GlobalCompletedMetric = analytics.Completed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        GlobalFailedMetric = analytics.Failed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        GlobalScoreMetric = analytics.TotalScore.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         var synced = analytics.LastSyncedAt is { Length: >= 16 } stamp ? stamp.Substring(11, 5) : "—";
         var mediaStatus = _usingLazerRealm
             ? $"Using Realm ({cacheBytes / 1_048_576.0:0.00} MB local)"
@@ -245,12 +281,18 @@ public partial class MainViewModel : ObservableObject
 
         var first = page.FirstOrDefault();
         GroupHeader = first?.StartedAt.Length >= 10 && DateTime.TryParse(first.StartedAt[..10], out var day)
-            ? day.ToString("dddd, dd MMMM yyyy")
+            ? day.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture)
             : "Recent plays";
         var completed = page.Count(a => a.Outcome == "completed");
         var averageAccuracy = page.Count == 0 ? 0 : page.Average(a => a.Accuracy);
         var bestPp = page.Count == 0 ? 0 : page.Max(a => a.Pp);
         GroupStats = Invariant($"{page.Count} plays  -  {completed} completed  -  {averageAccuracy:0.00}%  -  {bestPp:0.0}pp");
+
+        PerformanceDays.Clear();
+        foreach (var trend in analytics.Daily)
+        {
+            PerformanceDays.Add(new PerformanceDayViewModel(trend));
+        }
     }
 
     private static string FormatPlaytime(double seconds)
@@ -326,6 +368,7 @@ public partial class MainViewModel : ObservableObject
         SearchText = "";
         SelectedFilterMode = "All";
         IsGroupRepeats = false;
+        IsGroupSessions = false;
         _mapFilterKey = null;
         ApplyVisibleAttempts();
     }
@@ -333,56 +376,65 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void OpenHealthDashboard()
     {
-        new HealthDashboardWindow(_appState, _settings) { Owner = ActiveOwner() }.Show();
+        OpenInWorkspace(new HealthDashboardWindow(_appState, _settings), "Health dashboard");
+    }
+
+    [RelayCommand]
+    private void OpenAnalytics()
+    {
+        OpenInWorkspace(new AnalyticsWindow(_analytics), "Analytics");
     }
 
     [RelayCommand]
     private void OpenSetupWizard()
     {
-        new WelcomeWindow(_settings, _appState) { Owner = ActiveOwner() }.Show();
+        MainWindow.TryOpenOnboarding(new WelcomeWindow(_settings, _appState));
     }
 
     [RelayCommand]
     private void OpenSkinLibrary()
     {
-        new SkinLibraryWindow(_settings) { Owner = ActiveOwner() }.ShowDialog();
+        OpenInWorkspace(new SkinLibraryWindow(_settings), "Skin library");
     }
 
     [RelayCommand]
     private void OpenTosuSetup()
     {
-        new TosuSetupWindow { Owner = ActiveOwner() }.Show();
+        OpenInWorkspace(new TosuSetupWindow(), "tosu setup");
     }
 
     [RelayCommand]
     private void OpenTosuDiagnostics()
     {
-        new TosuDiagnosticsWindow(_appState) { Owner = ActiveOwner() }.Show();
+        OpenInWorkspace(new TosuDiagnosticsWindow(_appState), "tosu diagnostics");
     }
 
     [RelayCommand]
     private void OpenSettings()
     {
-        new SettingsWindow(_settings) { Owner = ActiveOwner() }.ShowDialog();
+        OpenInWorkspace(new SettingsWindow(_settings), "Settings");
     }
 
     [RelayCommand]
     private void OpenLazerFrameDebug()
     {
-        new LazerFrameDebugWindow(_settings) { Owner = ActiveOwner() }.Show();
+        OpenInWorkspace(new LazerFrameDebugWindow(_settings), "Lazer frame debug");
     }
 
     [RelayCommand]
     private void OpenStableFrameDebug()
     {
-        new StableFrameDebugWindow { Owner = ActiveOwner() }.Show();
+        OpenInWorkspace(new StableFrameDebugWindow(), "Stable frame debug");
     }
 
     [RelayCommand]
     private void CheckForUpdates()
     {
-        new UpdateCheckWindow { Owner = ActiveOwner() }.Show();
+        OpenInWorkspace(new UpdateCheckWindow(), "Updates");
     }
+
+    private void OpenInWorkspace(Window window, string title)
+        => WorkspaceWindowRequested?.Invoke(window, title);
 
     [RelayCommand]
     private void OpenLogs()
@@ -523,20 +575,28 @@ public partial class MainViewModel : ObservableObject
     {
         var value = KumoriDialog.Input(
             ActiveOwner(),
-            "Delete sessions before this ISO date/time:",
+            "Delete sessions before this date (dd/MM/yyyy):",
             "Delete Entries Before",
-            DateTimeOffset.Now.Date.ToString("yyyy-MM-dd"));
+            DateTimeOffset.Now.Date.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture));
         if (string.IsNullOrWhiteSpace(value))
         {
             return;
         }
 
-        if (!KumoriDialog.Confirm(ActiveOwner(), $"Delete sessions before {value}?", "Kumori", MessageBoxImage.Warning))
+        if (!DateTime.TryParseExact(value.Trim(), "dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var before))
+        {
+            KumoriDialog.Show(ActiveOwner(), "Enter the date as dd/MM/yyyy.", "Invalid date", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!KumoriDialog.Confirm(ActiveOwner(), $"Delete sessions before {before:dd/MM/yyyy}?", "Kumori", MessageBoxImage.Warning))
         {
             return;
         }
 
-        var deleted = await Task.Run(() => _maintenance.DeleteBefore(value.Trim()));
+        var cutoff = before.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var deleted = await Task.Run(() => _maintenance.DeleteBefore(cutoff));
         HistoryStatus = $"Deleted {deleted} old session(s)";
         await ReloadFirstPageAsync();
     }
@@ -608,44 +668,47 @@ public partial class MainViewModel : ObservableObject
     private void ApplyVisibleAttempts(bool selectFirst = true)
     {
         var previousSelectedId = SelectedAttempt?.Id;
-        var filtered = FilterAttempts(_loadedAttempts).ToArray();
+        var source = _mapFilterKey is null ? _loadedAttempts : _allMapAttempts;
+        var filtered = FilterAttempts(source).ToArray();
 
         Attempts.Clear();
         Rows.Clear();
-        foreach (var dayGroup in filtered
-                     .Select(attempt => new AttemptRowViewModel(attempt))
-                     .GroupBy(row => LocalTimeDisplay.DayKey(row.Model.StartedAt))
-                     .OrderByDescending(group => group.Key))
+        var ordered = filtered.OrderByDescending(attempt => attempt.Id).ToArray();
+        var attemptRows = new Dictionary<long, AttemptRowViewModel>();
+        foreach (var model in ordered)
         {
-            var dayRows = dayGroup.OrderByDescending(row => row.Id).ToArray();
-            var dayCollapsed = _collapsedDays.Contains(dayGroup.Key);
-            Rows.Add(new DayRowViewModel(dayGroup.Key, dayRows, dayCollapsed));
-            if (dayCollapsed)
-            {
-                continue;
-            }
+            var row = new AttemptRowViewModel(model);
+            Attempts.Add(row);
+            attemptRows[model.Id] = row;
+        }
 
-            long? lastSessionId = null;
-            foreach (var row in dayRows)
+        if (IsGroupSessions)
+        {
+            foreach (var group in ordered.GroupBy(attempt => attempt.SessionId))
             {
-                if (row.Model.SessionId != lastSessionId)
+                var collapsed = _collapsedSessions.Contains(group.Key);
+                if (_sessions.TryGetValue(group.Key, out var session))
                 {
-                    lastSessionId = row.Model.SessionId;
-                    if (_sessions.TryGetValue(row.Model.SessionId, out var session))
+                    Rows.Add(new SessionRowViewModel(session, collapsed, _activeSessionId));
+                }
+                if (!collapsed)
+                {
+                    foreach (var model in group)
                     {
-                        Rows.Add(new SessionRowViewModel(session, _collapsedSessions.Contains(session.Id), _activeSessionId));
+                        Rows.Add(attemptRows[model.Id]);
                     }
                 }
-
-                if (_collapsedSessions.Contains(row.Model.SessionId))
-                {
-                    continue;
-                }
-
-                Attempts.Add(row);
-                Rows.Add(row);
             }
         }
+        else
+        {
+            foreach (var model in ordered)
+            {
+                Rows.Add(attemptRows[model.Id]);
+            }
+        }
+
+        RebuildSecondaryPages();
 
         SelectedAttempt = Attempts.FirstOrDefault(a => a.Id == previousSelectedId)
             ?? (selectFirst ? Attempts.FirstOrDefault() : SelectedAttempt);
@@ -655,6 +718,19 @@ public partial class MainViewModel : ObservableObject
         HistoryStatus = filtered.Length == 0
             ? "No results match the current filters"
             : $"{filtered.Length} visible attempt(s)";
+    }
+
+    private void RebuildSecondaryPages()
+    {
+        MapCards.Clear();
+        foreach (var group in _allMapAttempts
+                     .GroupBy(MapKey)
+                     .OrderByDescending(group => group.Count())
+                     .ThenByDescending(group => group.Max(attempt => attempt.Id)))
+        {
+            MapCards.Add(new MapCardViewModel(group.Key, group.ToArray()));
+        }
+
     }
 
     public void ToggleDay(DayRowViewModel row)
@@ -715,6 +791,14 @@ public partial class MainViewModel : ObservableObject
     {
         _mapFilterKey = MapKey(row.Model);
         SelectedFilterMode = "All";
+        ApplyVisibleAttempts();
+    }
+
+    public void ShowAllPlaysForMap(MapCardViewModel map)
+    {
+        _mapFilterKey = map.MapKey;
+        SelectedFilterMode = "All";
+        IsGroupSessions = false;
         ApplyVisibleAttempts();
     }
 
@@ -870,6 +954,7 @@ public partial class MainViewModel : ObservableObject
             if (activeSessionId != _activeSessionId)
             {
                 _activeSessionId = activeSessionId;
+                OnPropertyChanged(nameof(HasActiveSession));
                 ApplyVisibleAttempts(selectFirst: false);
             }
 

@@ -8,9 +8,10 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/Colors.xaml" />
+                <ResourceDictionary Source="Themes/Palettes/RefinedKumori.xaml" />
                 <ResourceDictionary Source="Themes/Spacing.xaml" />
                 <ResourceDictionary Source="Themes/Typography.xaml" />
+                <ResourceDictionary Source="Themes/Windows.xaml" />
                 <ResourceDictionary Source="Themes/Controls.xaml" />
                 <ResourceDictionary Source="Themes/PlayRows.xaml" />
                 <ResourceDictionary Source="Themes/DetailPanel.xaml" />

@@ -3,16 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="tosu Setup"
         Width="540" Height="350"
+        MinWidth="420" MinHeight="300"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource Brush.AppBackground}"
+        Background="{DynamicResource Brush.AppBackground}"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType">
     <Window.Resources>
         <Style x:Key="SetupPanel" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource Brush.CardBackground}" />
-            <Setter Property="BorderBrush" Value="{StaticResource Brush.SubtleBorder}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="3" />
         </Style>
@@ -33,9 +34,9 @@
 
         <Border Style="{StaticResource SetupPanel}" Padding="14">
             <StackPanel>
-                <TextBlock Text="Managed tosu" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Brush.TextPrimary}" />
+                <TextBlock Text="Managed tosu" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
                 <TextBlock Text="Kumori manages a local tosu installation for play metadata on 127.0.0.1:24051."
-                           Foreground="{StaticResource Brush.TextSecondary}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                           Foreground="{DynamicResource Brush.TextSecondary}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
             </StackPanel>
         </Border>
 
@@ -57,7 +58,7 @@
                          FontSize="11"
                          Padding="0"
                          Background="Transparent"
-                         Foreground="{StaticResource Brush.TextPrimary}"
+                         Foreground="{DynamicResource Brush.TextPrimary}"
                          BorderThickness="0" />
             </Grid>
         </Border>
