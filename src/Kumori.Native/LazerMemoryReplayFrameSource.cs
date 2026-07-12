@@ -215,6 +215,7 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         foreach (var name in ProcessNames)
         {
             var process = Process.GetProcessesByName(name)
+                .Where(IsLikelyLazer)
                 .OrderByDescending(p =>
                 {
                     try { return p.StartTime; }
@@ -228,6 +229,21 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         }
 
         return null;
+    }
+
+    private static bool IsLikelyLazer(Process process)
+    {
+        try
+        {
+            string? directory = Path.GetDirectoryName(process.MainModule?.FileName);
+            // Stable installations own Songs and Data/r next to osu!.exe.
+            // Lazer may use the same process name, so never attach its 64-bit
+            // reader to an obvious stable installation.
+            return directory is not null
+                   && !Directory.Exists(Path.Combine(directory, "Songs"))
+                   && !Directory.Exists(Path.Combine(directory, "Data", "r"));
+        }
+        catch { return false; }
     }
 }
 
@@ -959,7 +975,7 @@ internal sealed record LazerMemoryOffsets(
     }
 }
 
-internal sealed class ProcessMemory : IDisposable
+public sealed class ProcessMemory : IDisposable
 {
     private const int ProcessVmRead = 0x0010;
     private const int ProcessQueryInformation = 0x0400;
@@ -986,6 +1002,7 @@ internal sealed class ProcessMemory : IDisposable
     public float ReadFloat(nint address) => BitConverter.ToSingle(Read(address, 4));
     public double ReadDouble(nint address) => BitConverter.ToDouble(Read(address, 8));
     public nint ReadIntPtr(nint address) => (nint)BitConverter.ToInt64(Read(address, 8));
+    public byte[] ReadBytes(nint address, int count) => Read(address, count);
 
     public IEnumerable<MemoryRegion> Regions()
     {
@@ -994,7 +1011,9 @@ internal sealed class ProcessMemory : IDisposable
         {
             if (info.State == 0x1000 && (info.Protect & 0x100) == 0 && (info.Protect & 0x01) == 0)
             {
-                yield return new MemoryRegion(info.BaseAddress, (long)info.RegionSize);
+                bool writable = (info.Protect & (0x04 | 0x08 | 0x40 | 0x80)) != 0;
+                bool executable = (info.Protect & (0x10 | 0x20 | 0x40 | 0x80)) != 0;
+                yield return new MemoryRegion(info.BaseAddress, (long)info.RegionSize, writable, executable, unchecked((uint)info.Type));
             }
 
             var next = info.BaseAddress.ToInt64() + (long)info.RegionSize;
@@ -1165,7 +1184,7 @@ internal sealed class ProcessMemory : IDisposable
     private static extern bool CloseHandle(nint handle);
 }
 
-internal readonly record struct MemoryRegion(nint BaseAddress, long RegionSize);
+public readonly record struct MemoryRegion(nint BaseAddress, long RegionSize, bool Writable, bool Executable, uint Type);
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct MemoryBasicInformation

@@ -7,6 +7,9 @@ public static class LazerStorage
 
     public static LazerStorageDiagnostics GetDiagnostics() => LazerMediaStore.GetDiagnostics();
 
+    public static string? ResolveReplayFile(string beatmapHash, DateTimeOffset startedAt, string? gameFolder = null, DateTimeOffset? endedAt = null)
+        => LazerMediaStore.ResolveReplayFile(beatmapHash, startedAt, gameFolder, endedAt);
+
     public static LazerBeatmapAssets? ResolveBeatmapAssets(long? beatmapId, long? beatmapSetId, string? difficulty = null)
     {
         if (beatmapId is not > 0 || beatmapSetId is not > 0) return null;

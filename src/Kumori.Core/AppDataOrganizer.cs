@@ -66,7 +66,7 @@ public static class AppDataOrganizer
         MoveRootDirectory(root, "fixtures", Path.Combine(root, "runtime", "fixtures"));
         MoveRootDirectory(root, "viewer-contracts", Path.Combine(root, "runtime", "viewer-contracts"));
         MoveRootDirectory(root, "tosu", Path.Combine(root, "tools", "tosu"));
-        MoveRootFiles(root, Path.Combine(root, "runtime", "status"), "lazer_replay_frame_status.json", "capture_status.json", "tracker_status.json", "otd_telemetry_status");
+        MoveRootFiles(root, Path.Combine(root, "runtime", "status"), "lazer_replay_frame_status.json", "stable_replay_frame_status.json", "capture_status.json", "tracker_status.json", "otd_telemetry_status");
         MoveRootFiles(root, Path.Combine(root, "runtime", "status"), "osu-history-ui.json");
         MoveRootFiles(root, Path.Combine(root, "data", "tracking"), "osu_key_history.jsonl");
         MoveRootFiles(root, Path.Combine(root, "reports"), "diagnostics-*.txt", "problem-report-*");

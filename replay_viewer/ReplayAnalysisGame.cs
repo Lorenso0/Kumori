@@ -184,10 +184,9 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
 
     protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
     {
-        var dependencies = base.CreateChildDependencies(parent);
         Mods.Value = sourceScore.ScoreInfo.Mods;
         Ruleset.Value = sourceScore.ScoreInfo.Ruleset;
-        return dependencies;
+        return base.CreateChildDependencies(parent);
     }
 
     protected override void LoadComplete()

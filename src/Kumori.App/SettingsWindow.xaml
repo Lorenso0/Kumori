@@ -177,7 +177,7 @@
                         <UniformGrid Columns="2">
                             <CheckBox x:Name="TrackingEnabled" Content="Log plays with tosu metadata" />
                             <CheckBox x:Name="PacketRecordingEnabled" Content="Record raw tosu packet fixtures" />
-                            <CheckBox x:Name="LazerReplayFrameEnabled" Content="Capture osu!lazer replay frames" />
+                            <CheckBox x:Name="LazerReplayFrameEnabled" Content="Capture osu! replay frames (stable and lazer)" />
                             <CheckBox x:Name="RunAtLogin" Content="Run Kumori when Windows starts" />
                         </UniformGrid>
                         <TextBlock Text="Retention days" Style="{StaticResource SettingsLabel}" />

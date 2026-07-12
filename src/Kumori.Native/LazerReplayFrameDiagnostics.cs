@@ -89,4 +89,8 @@ public sealed record LazerReplayFrameStatus
     public int? ProcessId { get; set; }
     public string? ProcessName { get; set; }
     public string? ProcessPath { get; set; }
+    public string LocalReplayState { get; set; } = "idle";
+    public string? LocalReplayPath { get; set; }
+    public int LocalReplayFrames { get; set; }
+    public string? LocalReplayError { get; set; }
 }

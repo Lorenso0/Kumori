@@ -28,6 +28,24 @@
     <ProjectReference Include="..\Kumori.Tracking\Kumori.Tracking.csproj" />
     <ProjectReference Include="..\Kumori.Native\Kumori.Native.csproj" />
   </ItemGroup>
+  <Target Name="BuildStableFrameBridge" BeforeTargets="Build">
+    <MSBuild Projects="..\Kumori.StableFrameBridge\Kumori.StableFrameBridge.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);UseAppHost=true"
+             RemoveProperties="OutDir" />
+  </Target>
+  <Target Name="CopyStableFrameBridge" AfterTargets="Build" DependsOnTargets="BuildStableFrameBridge">
+    <ItemGroup>
+      <StableFrameBridgeFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0-windows10.0.17763.0\win-x86\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(StableFrameBridgeFiles)" DestinationFiles="@(StableFrameBridgeFiles->'$(OutDir)stable-frame-bridge\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyStableFrameBridgeToPublish" AfterTargets="Publish" DependsOnTargets="BuildStableFrameBridge">
+    <ItemGroup>
+      <StableFrameBridgePublishFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0-windows10.0.17763.0\win-x86\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(StableFrameBridgePublishFiles)" DestinationFiles="@(StableFrameBridgePublishFiles->'$(PublishDir)stable-frame-bridge\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
   <ItemGroup Condition="Exists('Assets\logo.ico')">
     <Content Include="Assets\logo.ico"
              Link="assets\logo.ico"

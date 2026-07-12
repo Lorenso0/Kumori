@@ -22,6 +22,7 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
     private readonly Func<long?> _currentAttemptId;
     private readonly IReplayFrameStatusSink _status;
     private readonly string _sourceName;
+    private readonly OsuClientKind _clientKind;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _gate = new();
     private readonly List<LazerReplayFrame> _frames = new();
@@ -41,7 +42,8 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
         Func<long?> currentAttemptId,
         ILazerReplayFrameSource? source = null,
         IReplayFrameStatusSink? status = null,
-        string sourceName = "lazer_replay_frame")
+        string sourceName = "lazer_replay_frame",
+        OsuClientKind clientKind = OsuClientKind.Lazer)
     {
         _store = store;
         _movementStore = new MovementCaptureStore(factory);
@@ -50,6 +52,7 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
         _source = source ?? new TcpLazerReplayFrameSource();
         _status = status ?? new DelegatingReplayFrameStatusSink();
         _sourceName = string.IsNullOrWhiteSpace(sourceName) ? "lazer_replay_frame" : sourceName;
+        _clientKind = clientKind;
     }
 
     public void Start()
@@ -68,25 +71,38 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
 
     public void StartAttempt(AttemptStart start)
     {
+        if (start.ClientKind != _clientKind &&
+            !(_clientKind == OsuClientKind.Lazer && start.ClientKind == OsuClientKind.Unknown))
+        {
+            return;
+        }
+        long? attemptId = _currentAttemptId();
         lock (_gate)
         {
-            var attemptId = _currentAttemptId();
-            if (_activeAttemptId == attemptId && _frames.Count > 0)
+            if (_activeAttemptId is not null && _activeAttemptId == attemptId)
             {
                 _status.Update(s =>
                 {
                     s.ActiveAttemptId = _activeAttemptId;
                     s.FramesBufferedForAttempt = _frames.Count;
                     s.State = "attempt_armed";
-                    s.Detail = $"Attempt {_activeAttemptId} is already armed for lazer replay frames.";
+                    s.Detail = $"Attempt {_activeAttemptId} is already armed for {_sourceName} frames.";
                 });
                 return;
             }
+        }
+        if (_source is IAttemptAwareReplayFrameSource attemptAware)
+        {
+            attemptAware.StartAttempt(start);
+        }
+        lock (_gate)
+        {
 
             _activeAttemptId = attemptId;
             _storeStarted = false;
             _frames.Clear();
-            _frames.AddRange(CurrentReplaySeedFrames());
+            if (_source is not IAttemptAwareReplayFrameSource)
+                _frames.AddRange(CurrentReplaySeedFrames());
         }
         _status.Update(s =>
         {
@@ -95,18 +111,22 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
             s.State = "attempt_armed";
             s.Detail = _activeAttemptId is null
                 ? "Attempt started, but database attempt id is not available yet."
-                : $"Attempt {_activeAttemptId} armed for lazer replay frames.";
+                : $"Attempt {_activeAttemptId} armed for {_sourceName} frames.";
         });
         PublishCaptureStatus(HealthLevel.Ok, running: true, error: null);
-        Log.Debug("Lazer replay-frame capture armed for attempt {AttemptId}", _activeAttemptId);
+        Log.Debug("{Source} replay-frame capture armed for attempt {AttemptId}", _sourceName, _activeAttemptId);
     }
 
     public void Checkpoint(AttemptCheckpoint checkpoint)
     {
+        if (_activeAttemptId is not null && _source is IAttemptAwareReplayFrameSource attemptAware)
+            attemptAware.UpdateAttempt(checkpoint.Snapshot);
     }
 
     public void DiscardIfEmpty(AttemptDiscard discard)
     {
+        if (_activeAttemptId is null) return;
+        if (_source is IAttemptAwareReplayFrameSource attemptAware) attemptAware.EndAttempt();
         lock (_gate)
         {
             _activeAttemptId = null;
@@ -124,6 +144,12 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
 
     public void Finalize(AttemptFinalization finalization)
     {
+        if (_activeAttemptId is null) return;
+        IReadOnlyList<LazerReplayFrame>? finalizedSourceSnapshot = null;
+        if (_source is IFinalizableReplayFrameSource finalizable)
+            finalizedSourceSnapshot = finalizable.FinalizeAttemptSnapshot();
+        else if (_source is IAttemptAwareReplayFrameSource attemptAware)
+            attemptAware.EndAttempt();
         List<LazerReplayFrame> frames;
         long? attemptId;
         lock (_gate)
@@ -134,16 +160,15 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
             _frames.Clear();
         }
 
-        if (attemptId is null || frames.Count == 0)
+        if (attemptId is null)
         {
+            string? sourceDiagnostic = _status.Load().Detail;
             _status.Update(s =>
             {
                 s.ActiveAttemptId = null;
                 s.FramesBufferedForAttempt = 0;
                 s.State = "finalized_without_frames";
-                s.Detail = attemptId is null
-                    ? "Attempt finalized before a database attempt id was available."
-                    : $"Attempt {attemptId} finalized with no lazer frames.";
+                s.Detail = "Attempt finalized before a database attempt id was available.";
             });
             Log.Warning(
                 "Lazer replay-frame capture finalized without frames for attempt {AttemptId}; active id missing: {MissingAttemptId}",
@@ -157,7 +182,23 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
         // shared buffer and replace this attempt's frames with those from the next play.
         // The memory source exposes the complete current replay list at this boundary;
         // for streaming sources we retain the already-buffered frames instead.
-        frames = PreferFinalSnapshot(attemptId.Value, frames, finalization.Snapshot);
+        frames = finalizedSourceSnapshot is { Count: > 0 }
+            ? PreferSnapshot(attemptId.Value, frames, finalizedSourceSnapshot, finalization.Snapshot)
+            : PreferFinalSnapshot(attemptId.Value, frames, finalization.Snapshot);
+
+        if (frames.Count == 0)
+        {
+            string? sourceDiagnostic = _status.Load().Detail;
+            _status.Update(s =>
+            {
+                s.ActiveAttemptId = null;
+                s.FramesBufferedForAttempt = 0;
+                s.State = "finalized_without_frames";
+                s.Detail = $"Attempt {attemptId} finalized with no {_sourceName} frames. Last source diagnostic: {sourceDiagnostic ?? "none"}";
+            });
+            Log.Warning("Replay-frame capture finalized without {Source} frames for attempt {AttemptId}", _sourceName, attemptId);
+            return;
+        }
 
         var replayFrames = PreserveReplayFrameOrder(frames);
         var samples = replayFrames
@@ -168,7 +209,7 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
             _status.Update(s =>
             {
                 s.State = "finalized_without_samples";
-                s.Detail = $"Attempt {attemptId} had lazer frames, but none normalized into samples.";
+                s.Detail = $"Attempt {attemptId} had {_sourceName} frames, but none normalized into samples.";
             });
             return;
         }
@@ -184,7 +225,7 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
                 s.ActiveAttemptId = null;
                 s.FramesBufferedForAttempt = 0;
                 s.State = "finalized_lazer_rejected";
-                s.Detail = $"Rejected {samples.Length} lazer frames over {duration:0.##}ms for attempt {attemptId}; preserved existing {existing.Source} capture with {existing.SampleCount} samples.";
+                s.Detail = $"Rejected {samples.Length} {_sourceName} frames over {duration:0.##}ms for attempt {attemptId}; preserved existing {existing.Source} capture with {existing.SampleCount} samples.";
             });
             Log.Warning(
                 "Rejected {Count} lazer replay frames over {Duration}ms for attempt {AttemptId}; preserved existing {Source} movement with {ExistingCount} samples",
@@ -205,7 +246,9 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
             finalization.Snapshot.LiveTimeMs,
             finalization.Snapshot.DurationSeconds * 1000);
         var tailShortfallMs = Math.Max(0, expectedEndMs - samples[^1].MapTimeMs);
-        var tailToleranceMs = Math.Max(2000, expectedEndMs * 0.05);
+        var tailToleranceMs = _sourceName.Equals("stable_memory", StringComparison.OrdinalIgnoreCase)
+            ? Math.Max(5000, expectedEndMs * 0.10)
+            : Math.Max(2000, expectedEndMs * 0.05);
         var captureComplete = expectedEndMs <= 0 || tailShortfallMs <= tailToleranceMs;
         var estimatedDroppedSamples = captureComplete || duration <= 0
             ? 0
@@ -236,12 +279,12 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
             s.FramesStored += samples.Length;
             s.State = captureComplete ? "stored" : "stored_incomplete";
             s.Detail = captureComplete
-                ? $"Stored {samples.Length} lazer replay-frame samples for attempt {attemptId}."
+                ? $"Stored {samples.Length} {_sourceName} replay-frame samples for attempt {attemptId}."
                 : $"Stored {samples.Length} frames for attempt {attemptId}, but the tail is short by {tailShortfallMs:0.##}ms.";
         });
         PublishCaptureStatus(HealthLevel.Ok, running: true, error: null);
 
-        Log.Information("Stored {Count} lazer replay frames for attempt {AttemptId}", samples.Length, attemptId);
+        Log.Information("Stored {Count} {Source} replay frames for attempt {AttemptId}", samples.Length, _sourceName, attemptId);
         if (!captureComplete)
         {
             Log.Warning(
@@ -262,8 +305,21 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
 
         try
         {
-            var snapshotFrames = PreserveReplayFrameOrder(snapshotSource.ReadCurrentFramesSnapshot())
-                .ToList();
+            var snapshotFrames = snapshotSource.ReadCurrentFramesSnapshot();
+            return PreferSnapshot(attemptId, bufferedFrames, snapshotFrames, snapshot);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Could not read final lazer replay frame snapshot for attempt {AttemptId}", attemptId);
+            return bufferedFrames;
+        }
+    }
+
+    private List<LazerReplayFrame> PreferSnapshot(long attemptId, List<LazerReplayFrame> bufferedFrames, IReadOnlyList<LazerReplayFrame> sourceFrames, AttemptSnapshot snapshot)
+    {
+        try
+        {
+            var snapshotFrames = PreserveReplayFrameOrder(sourceFrames).ToList();
             if (snapshotFrames.Count == 0)
             {
                 return bufferedFrames;
@@ -358,6 +414,7 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
                         s.LastFrameY = frame.Y;
                         s.LastFrameLeftPressed = frame.LeftPressed;
                         s.LastFrameRightPressed = frame.RightPressed;
+                        s.FramesEmitted = _receivedFrames;
                     });
                     PublishCaptureStatus(HealthLevel.Ok, running: true, error: null);
                 }

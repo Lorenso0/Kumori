@@ -56,8 +56,9 @@ public static class Program
                 replay_last_ms = replay.Frames.Count > 0 ? replay.Frames[^1].Time : (double?)null,
                 replay_action_frames = replay.Frames.OfType<OsuReplayFrame>().Count(f => f.Actions.Count > 0),
             }));
-            var mods = LazerReplayAdapter.DecodedScore?.ScoreInfo.Mods
-                       ?? LazerReplayAdapter.CreateCapturedMods(contract.Attempt);
+            var mods = LazerReplayAdapter.ResolveMods(
+                contract.Attempt,
+                LazerReplayAdapter.DecodedScore?.ScoreInfo.Mods);
             BeatmapAnalysis analysis = LazerBeatmapAnalyzer.Decode(contract.BeatmapPath, mods);
             NativeViewerLog.Write($"Decoded beatmap \"{analysis.Artist} - {analysis.Title} [{analysis.Difficulty}]\" objects={analysis.Objects.Count}");
 

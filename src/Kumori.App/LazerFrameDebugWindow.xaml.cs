@@ -77,6 +77,12 @@ public partial class LazerFrameDebugWindow : Window
               osu! process: {status.ProcessName ?? "none"} pid={status.ProcessId?.ToString() ?? "n/a"}
               osu! path: {status.ProcessPath ?? "n/a"}
 
+            Persisted lazer replay override
+              State: {status.LocalReplayState}
+              Replay path: {status.LocalReplayPath ?? "n/a"}
+              Frames decoded: {status.LocalReplayFrames}
+              Error: {status.LocalReplayError ?? "none"}
+
             Raw status
             {statusJson}
             """;

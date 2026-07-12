@@ -166,6 +166,13 @@ public sealed class ReplayViewerContractService
         string? viewerExecutable = null,
         CancellationToken cancellationToken = default)
     {
+        if (UsesAuthoritativeCapturedJudgements(contractPath))
+        {
+            string preparedPath = contractPath + ".analysis.json";
+            if (File.Exists(preparedPath)) File.Delete(preparedPath);
+            AppendViewerLog($"Skipping lazer judgement simulation for stable memory contract {contractPath}; captured stable judgements are authoritative.");
+            return;
+        }
         viewerExecutable ??= ResolveViewerExecutable();
         if (!File.Exists(viewerExecutable))
             throw new FileNotFoundException("Replay viewer executable not found.", viewerExecutable);
@@ -219,6 +226,22 @@ public sealed class ReplayViewerContractService
                     : error.Trim());
         if (!File.Exists(contractPath + ".analysis.json"))
             throw new InvalidOperationException("Replay analysis completed without producing judgement data.");
+    }
+
+    private static bool UsesAuthoritativeCapturedJudgements(string contractPath)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(contractPath));
+            string? source = document.RootElement.GetProperty("attempt").GetProperty("movement_source").GetString();
+            return source is not null && (source.Equals("stable_memory", StringComparison.OrdinalIgnoreCase)
+                                           || source.Equals("stable_live", StringComparison.OrdinalIgnoreCase)
+                                           || source.Equals("stable_replay", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     public static string ResolveViewerExecutable()

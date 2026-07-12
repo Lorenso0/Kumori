@@ -97,6 +97,35 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void StableResultModReset_DoesNotDiscardGameplayMods()
+    {
+        var classic = new AttemptMod("CL");
+        var doubleTime = new AttemptMod("DT");
+        _tracker.Ingest(Play(0, live: 0) with
+        {
+            ClientKind = OsuClientKind.Stable,
+            ModsKey = "DTCL",
+            Mods = [doubleTime, classic],
+        });
+        _tracker.Ingest(Play(3.5, live: 3500, score: 50_000, n300: 100, progress: 1) with
+        {
+            ClientKind = OsuClientKind.Stable,
+            ModsKey = "DTCL",
+            Mods = [doubleTime, classic],
+        });
+        _tracker.Ingest(Results(3.8, score: 50_000, n300: 100, progress: 1) with
+        {
+            ClientKind = OsuClientKind.Stable,
+            ModsKey = "CL",
+            Mods = [classic],
+        });
+
+        var final = Assert.Single(_sink.Finals).Snapshot;
+        Assert.Equal("DTCL", final.ModsKey);
+        Assert.Equal(["DT", "CL"], final.Mods.Select(mod => mod.Acronym));
+    }
+
+    [Fact]
     public void ResultsScreenRichHitCounts_AreFinalized()
     {
         _tracker.Ingest(Play(0, live: 0));

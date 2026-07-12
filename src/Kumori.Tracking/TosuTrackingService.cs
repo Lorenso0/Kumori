@@ -175,6 +175,13 @@ public sealed class TosuTrackingService : IAsyncDisposable
         {
             return;
         }
+        // Stable owns durable, directly-addressable files in its Songs folder.
+        // AttemptSqliteSink persists those paths for later replay analysis, so
+        // copying the map, audio, background and samples into Kumori is wasteful.
+        if (snapshot.ClientKind == OsuClientKind.Stable)
+        {
+            return;
+        }
 
         var key = snapshot.Checksum ?? snapshot.BeatmapId?.ToString() ?? snapshot.BeatmapIdentity;
         lock (_cachedMediaKeys)

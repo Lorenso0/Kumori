@@ -73,6 +73,7 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         insert.Parameters.AddWithValue("@base_stars", (object?)start.BeatmapStats.BaseStars ?? DBNull.Value);
         insert.Parameters.AddWithValue("@adjusted_stars", (object?)start.BeatmapStats.Stars ?? DBNull.Value);
         _attemptId = (long)insert.ExecuteScalar()!;
+        UpsertSourceContext(con, tx, _attemptId.Value, start);
 
         for (var i = 0; i < start.Mods.Count; i++)
         {
@@ -102,6 +103,8 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         using var con = _factory.Open();
         using var tx = con.BeginTransaction();
         UpdateAttempt(con, tx, attemptId, checkpoint.Snapshot);
+        if (checkpoint.Snapshot.Mods.Count > 0 || !checkpoint.Snapshot.ModsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
+            ReplaceMods(con, tx, attemptId, checkpoint.Snapshot.ModsKey, checkpoint.Snapshot.Mods);
         foreach (var evt in checkpoint.Events)
         {
             InsertEvent(con, tx, attemptId, checkpoint.Snapshot, evt);
@@ -139,6 +142,8 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         using var con = _factory.Open();
         using var tx = con.BeginTransaction();
         UpdateAttempt(con, tx, attemptId, finalization.Snapshot);
+        if (finalization.Snapshot.Mods.Count > 0 || !finalization.Snapshot.ModsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
+            ReplaceMods(con, tx, attemptId, finalization.Snapshot.ModsKey, finalization.Snapshot.Mods);
 
         using var cmd = con.CreateCommand();
         cmd.Transaction = tx;
@@ -570,6 +575,41 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         cmd.ExecuteNonQuery();
     }
 
+    private static void ReplaceMods(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId,
+        string modsKey,
+        IReadOnlyList<AttemptMod> mods)
+    {
+        using (var update = con.CreateCommand())
+        {
+            update.Transaction = tx;
+            update.CommandText = "UPDATE attempts SET mods_key = @mods_key WHERE id = @id";
+            update.Parameters.AddWithValue("@mods_key", string.IsNullOrWhiteSpace(modsKey) ? "NM" : modsKey);
+            update.Parameters.AddWithValue("@id", attemptId);
+            update.ExecuteNonQuery();
+        }
+        using (var delete = con.CreateCommand())
+        {
+            delete.Transaction = tx;
+            delete.CommandText = "DELETE FROM attempt_mods WHERE attempt_id = @id";
+            delete.Parameters.AddWithValue("@id", attemptId);
+            delete.ExecuteNonQuery();
+        }
+        for (var position = 0; position < mods.Count; position++)
+        {
+            using var insert = con.CreateCommand();
+            insert.Transaction = tx;
+            insert.CommandText = "INSERT INTO attempt_mods(attempt_id, position, acronym, settings_json) VALUES(@id, @position, @acronym, @settings)";
+            insert.Parameters.AddWithValue("@id", attemptId);
+            insert.Parameters.AddWithValue("@position", position);
+            insert.Parameters.AddWithValue("@acronym", mods[position].Acronym);
+            insert.Parameters.AddWithValue("@settings", mods[position].SettingsJson);
+            insert.ExecuteNonQuery();
+        }
+    }
+
     private static void InsertEvent(
         SqliteConnection con,
         SqliteTransaction tx,
@@ -679,6 +719,59 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
             },
         }));
         cmd.ExecuteNonQuery();
+    }
+
+    private static void UpsertSourceContext(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId,
+        AttemptStart start)
+    {
+        string? beatmapPath = start.ClientKind == OsuClientKind.Stable ? ResolveStableBeatmapPath(start) : null;
+        string? mediaDirectory = beatmapPath is null ? null : Path.GetDirectoryName(beatmapPath);
+        using var cmd = con.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO attempt_context(attempt_id, source_json, pp_json, beatmap_json,
+                                        score_json, session_json, multiplayer_json)
+            VALUES(@attempt_id, @source_json, '{}', '{}', '{}', '{}', '{}')
+            ON CONFLICT(attempt_id) DO UPDATE SET source_json = excluded.source_json
+            """;
+        cmd.Parameters.AddWithValue("@attempt_id", attemptId);
+        cmd.Parameters.AddWithValue("@source_json", JsonSerializer.Serialize(new
+        {
+            client_kind = start.ClientKind.ToString().ToLowerInvariant(),
+            beatmap_path = beatmapPath,
+            media_directory = mediaDirectory,
+            game_folder = start.GameFolder,
+            songs_folder = start.SongsFolder,
+        }));
+        cmd.ExecuteNonQuery();
+    }
+
+    private static string? ResolveStableBeatmapPath(AttemptStart start)
+    {
+        if (string.IsNullOrWhiteSpace(start.BeatmapFile))
+            return null;
+        string file = start.BeatmapFile;
+        var candidates = new List<string>();
+        if (Path.IsPathRooted(file))
+            candidates.Add(file);
+        string? songs = start.SongsFolder;
+        if (!string.IsNullOrWhiteSpace(songs) && !Path.IsPathRooted(songs) && !string.IsNullOrWhiteSpace(start.GameFolder))
+            songs = Path.Combine(start.GameFolder, songs);
+        if (!string.IsNullOrWhiteSpace(songs))
+            candidates.Add(Path.Combine(songs, file));
+        if (!string.IsNullOrWhiteSpace(start.BeatmapFolder))
+        {
+            string folder = start.BeatmapFolder;
+            if (!Path.IsPathRooted(folder) && !string.IsNullOrWhiteSpace(songs))
+                folder = Path.Combine(songs, folder);
+            candidates.Add(Path.Combine(folder, Path.GetFileName(file)));
+        }
+        if (!string.IsNullOrWhiteSpace(start.GameFolder))
+            candidates.Add(Path.Combine(start.GameFolder, "Songs", file));
+        return candidates.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).FirstOrDefault(File.Exists);
     }
 
     private static string BeatmapContextJson(BeatmapStats stats)

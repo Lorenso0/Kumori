@@ -144,6 +144,7 @@ public partial class ReplayViewerGame : OsuGameBase
             RequestWindowClose = () => gameHost?.Exit(),
             PlaybackEndTime = contract.ReplayPlaybackEnd,
             PlaybackRestartTime = firstHitTime,
+            RecordedAccuracyOverride = usesAuthoritativeStableJudgements() ? contract.Attempt.Accuracy : null,
         };
         currentPlayer = player;
 
@@ -177,7 +178,8 @@ public partial class ReplayViewerGame : OsuGameBase
 
         player.SeekBar = seekBar;
 
-        MissAnalysisModel initialModel = preparedAnalysis != null
+        bool authoritativeStableJudgements = usesAuthoritativeStableJudgements();
+        MissAnalysisModel initialModel = preparedAnalysis != null && !authoritativeStableJudgements
             ? MissAnalysisBuilder.BuildFromPrepared(
                 analysis,
                 score.Replay.Frames.OfType<OsuReplayFrame>(),
@@ -188,7 +190,7 @@ public partial class ReplayViewerGame : OsuGameBase
                 contract,
                 analysis,
                 score.Replay.Frames.OfType<OsuReplayFrame>());
-        if (preparedAnalysis != null)
+        if (preparedAnalysis != null && !authoritativeStableJudgements)
         {
             seekBar.SetMarkers(initialModel.Markers);
             Logger.Log($"Kumori: loaded {initialModel.Entries.Count} exact judgements from prepared replay analysis.");
@@ -203,7 +205,7 @@ public partial class ReplayViewerGame : OsuGameBase
             advancedAnalyzerViewModel.Select(entry);
         });
         player.OpenMissAnalyzer = advancedAnalyzerOverlay.Open;
-        if (preparedAnalysis == null)
+        if (preparedAnalysis == null && !authoritativeStableJudgements)
             player.AnalysisJudgementsReady = snapshots => Schedule(() =>
         {
             int expectedEvents = contract.JudgementEvents
@@ -229,6 +231,11 @@ public partial class ReplayViewerGame : OsuGameBase
 
         screenStack.Push(player);
     }
+
+    private bool usesAuthoritativeStableJudgements()
+        => contract.Attempt.MovementSource.Equals("stable_memory", StringComparison.OrdinalIgnoreCase)
+           || contract.Attempt.MovementSource.Equals("stable_live", StringComparison.OrdinalIgnoreCase)
+           || contract.Attempt.MovementSource.Equals("stable_replay", StringComparison.OrdinalIgnoreCase);
 
     private void reloadReplayScreen()
     {
@@ -471,17 +478,20 @@ internal static class ReplayScoreFactory
         var replay = LazerReplayAdapter.CreateReplay(contract);
         if (LazerReplayAdapter.DecodedScore is Score decoded)
         {
+            Mod[] decodedPlaybackMods = filterMods(
+                LazerReplayAdapter.ResolveMods(contract.Attempt, decoded.ScoreInfo.Mods),
+                disableHidden);
             return new Score
             {
                 Replay = decoded.Replay,
                 ScoreInfo = decoded.ScoreInfo.DeepClone()
-            }.WithFilteredMods(filterMods(decoded.ScoreInfo.Mods, disableHidden));
+            }.WithFilteredMods(decodedPlaybackMods);
         }
 
         (double firstHitTime, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
         LazerReplayAdapter.FitCapturedReplay(replay, firstHitTime, lastHitTime, contract.Attempt.ClockRate);
 
-        Mod[] mods = filterMods(LazerReplayAdapter.CreateCapturedMods(contract.Attempt), disableHidden);
+        Mod[] mods = filterMods(LazerReplayAdapter.ResolveMods(contract.Attempt), disableHidden);
         return new Score
         {
             Replay = replay,

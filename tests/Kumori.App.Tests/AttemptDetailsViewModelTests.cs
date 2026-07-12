@@ -19,4 +19,30 @@ public sealed class AttemptDetailsViewModelTests
 
         Assert.Equal("90.08%", viewModel.AccuracyValue);
     }
+
+    [Fact]
+    public void Stable_slider_overview_remains_visible_but_is_marked_unsupported()
+    {
+        var viewModel = new AttemptDetailsViewModel(null!)
+        {
+            Details = new AttemptDetails
+            {
+                ClientKind = "stable",
+                Mods = [new ModEntry("HD", "{}"), new ModEntry("CL", "{}")],
+            },
+        };
+
+        Assert.True(viewModel.HasRichSliderData);
+        Assert.True(viewModel.IsStablePlay);
+        Assert.Equal("—", viewModel.LargeTickText);
+        Assert.Equal("—", viewModel.SliderTailText);
+        Assert.Equal("—", viewModel.SliderBreakText);
+        Assert.Equal(0.38, viewModel.SliderStatsOpacity);
+        Assert.Contains("not available", viewModel.SliderStatsToolTip);
+
+        viewModel.Details = new AttemptDetails { ClientKind = "lazer", Mods = [new ModEntry("HD", "{}")] };
+        Assert.True(viewModel.HasRichSliderData);
+        Assert.False(viewModel.IsStablePlay);
+        Assert.Equal(1, viewModel.SliderStatsOpacity);
+    }
 }

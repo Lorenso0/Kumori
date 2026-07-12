@@ -27,6 +27,11 @@ public sealed record AttemptStart
     public BeatmapStats BeatmapStats { get; init; } = new();
     public string ModsKey { get; init; } = "NM";
     public IReadOnlyList<AttemptMod> Mods { get; init; } = Array.Empty<AttemptMod>();
+    public OsuClientKind ClientKind { get; init; }
+    public string? GameFolder { get; init; }
+    public string? BeatmapFile { get; init; }
+    public string? SongsFolder { get; init; }
+    public string? BeatmapFolder { get; init; }
 }
 
 public sealed record AttemptMod(string Acronym, string SettingsJson = "{}");
@@ -78,6 +83,8 @@ public sealed record AttemptSnapshot
     public double Progress { get; init; }
     public IReadOnlyList<double> TimingOffsets { get; init; } = Array.Empty<double>();
     public BeatmapStats BeatmapStats { get; init; } = new();
+    public string ModsKey { get; init; } = "NM";
+    public IReadOnlyList<AttemptMod> Mods { get; init; } = Array.Empty<AttemptMod>();
 }
 
 public sealed class AttemptTracker
@@ -101,6 +108,8 @@ public sealed class AttemptTracker
     private long _attemptStartMapTimeMs;
     private int _attemptOrdinal;
     private AttemptSnapshot? _latestSnapshot;
+    private IReadOnlyList<AttemptMod> _attemptMods = Array.Empty<AttemptMod>();
+    private string _attemptModsKey = "NM";
 
     public AttemptTracker(
         IAttemptSink sink,
@@ -118,6 +127,11 @@ public sealed class AttemptTracker
         public JudgementCapture.PlayValues Play { get; init; } = new();
         public double WallTime { get; init; }
         public bool IsStandardMode { get; init; } = true;
+        public OsuClientKind ClientKind { get; init; }
+        public string? GameFolder { get; init; }
+        public string? BeatmapFile { get; init; }
+        public string? SongsFolder { get; init; }
+        public string? BeatmapFolder { get; init; }
         public int Score { get; init; }
         public string? Grade { get; init; }
         public string? Artist { get; init; }
@@ -302,6 +316,8 @@ public sealed class AttemptTracker
         _latestSnapshot = Snapshot(frame);
         _pendingQuitFrame = null;
         _judgements.Reset();
+        _attemptMods = frame.Mods;
+        _attemptModsKey = frame.ModsKey;
         _sink.StartAttempt(new AttemptStart
         {
             Identity = frame.Packet.Identity,
@@ -319,6 +335,11 @@ public sealed class AttemptTracker
             BeatmapStats = frame.BeatmapStats,
             ModsKey = frame.ModsKey,
             Mods = frame.Mods,
+            ClientKind = frame.ClientKind,
+            GameFolder = frame.GameFolder,
+            BeatmapFile = frame.BeatmapFile,
+            SongsFolder = frame.SongsFolder,
+            BeatmapFolder = frame.BeatmapFolder,
         });
         _machine.AttemptStarted(frame.Packet.Identity, frame.Packet.LiveTimeMs);
     }
@@ -426,6 +447,7 @@ public sealed class AttemptTracker
 
     private AttemptSnapshot Snapshot(Frame frame)
     {
+        RememberAttemptMods(frame);
         var mapElapsed = Math.Max(0, (frame.Packet.LiveTimeMs - _attemptStartMapTimeMs) / 1000.0);
         var duration = Math.Max(0, Math.Max(frame.Packet.MonoTime - _attemptStartedMonoTime, mapElapsed));
         var snapshot = new AttemptSnapshot
@@ -459,6 +481,8 @@ public sealed class AttemptTracker
             Progress = frame.Play.Progress ?? 0,
             TimingOffsets = frame.Play.HitErrors,
             BeatmapStats = frame.BeatmapStats,
+            ModsKey = _attemptModsKey,
+            Mods = _attemptMods,
         };
         _latestSnapshot = snapshot;
         return snapshot;
@@ -470,9 +494,30 @@ public sealed class AttemptTracker
         _attemptStartedMonoTime = 0;
         _attemptStartMapTimeMs = 0;
         _lastCheckpointMonoTime = 0;
+        _attemptMods = Array.Empty<AttemptMod>();
+        _attemptModsKey = "NM";
         if (decrementOrdinal)
         {
             _attemptOrdinal = Math.Max(0, _attemptOrdinal - 1);
+        }
+    }
+
+    private void RememberAttemptMods(Frame frame)
+    {
+        var incomingHasGameplayMod = frame.Mods.Any(mod =>
+            !mod.Acronym.Equals("CL", StringComparison.OrdinalIgnoreCase));
+        var rememberedHasGameplayMod = _attemptMods.Any(mod =>
+            !mod.Acronym.Equals("CL", StringComparison.OrdinalIgnoreCase));
+
+        // osu!stable resets play.mods on the result transition. Once a real
+        // gameplay mod has been observed, never downgrade that attempt to CL-only.
+        if (frame.ClientKind == OsuClientKind.Stable && rememberedHasGameplayMod && !incomingHasGameplayMod)
+            return;
+
+        if (frame.Mods.Count > 0 || !frame.ModsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
+        {
+            _attemptMods = frame.Mods;
+            _attemptModsKey = frame.ModsKey;
         }
     }
 

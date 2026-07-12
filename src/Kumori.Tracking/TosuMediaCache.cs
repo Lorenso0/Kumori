@@ -40,12 +40,6 @@ internal static class TosuMediaCache
                 return null;
             }
 
-            var lazer = LazerStorage.ResolveBeatmapAssets(media.BeatmapId, media.BeatmapSetId);
-            if (lazer is not null)
-            {
-                return ParseBeatmapMedia(lazer.BeatmapPath, key, beatmapId, media.BeatmapSetId ?? 0);
-            }
-
             var existing = ReadCachedMedia(key);
             if (existing is not null)
             {
@@ -54,6 +48,11 @@ internal static class TosuMediaCache
 
             if (beatmapSource is null || !File.Exists(beatmapSource))
             {
+                var lazer = LazerStorage.ResolveBeatmapAssets(media.BeatmapId, media.BeatmapSetId);
+                if (lazer is not null)
+                {
+                    return ParseBeatmapMedia(lazer.BeatmapPath, key, beatmapId, media.BeatmapSetId ?? 0);
+                }
                 Log.Debug("tosu media local beatmap missing; trying mirrors for beatmap {BeatmapId}", beatmapId);
                 return CacheFromLazer(media, key)
                     ?? DownloadMedia(media, key, primaryMirror, fallbackMirrors);

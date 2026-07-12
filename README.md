@@ -33,7 +33,7 @@ These diagnoses are evidence-based helpers, not a replacement for judgement data
 
 ### Tracking and capture
 
-Kumori uses [tosu](https://github.com/tosuapp/tosu) to receive live osu! state and play metadata over a local connection. The app can also capture osu!lazer replay frames while you play, allowing later replay inspection instead of relying only on final score data.
+Kumori uses [tosu](https://github.com/tosuapp/tosu) to receive live osu! state and play metadata over a local connection. The app can also capture replay frames from osu!stable and osu!lazer while you play, allowing later replay inspection instead of relying only on final score data.
 
 Other optional companion features include startup registration, OpenTabletDriver launch when osu! starts, and LG monitor dual-mode switching on compatible hardware.
 

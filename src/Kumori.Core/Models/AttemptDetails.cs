@@ -49,6 +49,9 @@ public sealed record AttemptDetails
     public IReadOnlyList<JudgementEvent> Events { get; init; } = Array.Empty<JudgementEvent>();
     public InputSummary? Input { get; init; }
     public MovementSummary? Movement { get; init; }
+    public string? LocalBeatmapPath { get; init; }
+    public string? LocalMediaDirectory { get; init; }
+    public string ClientKind { get; init; } = "unknown";
 
     /// <summary>
     /// Per-attempt captured map values from attempt_context.beatmap_json, keyed

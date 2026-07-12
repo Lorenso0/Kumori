@@ -373,6 +373,12 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void OpenStableFrameDebug()
+    {
+        new StableFrameDebugWindow { Owner = ActiveOwner() }.Show();
+    }
+
+    [RelayCommand]
     private void CheckForUpdates()
     {
         new UpdateCheckWindow { Owner = ActiveOwner() }.Show();
@@ -453,6 +459,7 @@ public partial class MainViewModel : ObservableObject
             CopyIfExists(AppPaths.SettingsFile, Path.Combine(tempDir, "settings.v2.json"));
             CopyIfExists(AppPaths.LegacySettingsFile, Path.Combine(tempDir, "settings.legacy.json"));
             CopyIfExists(LazerReplayFrameDiagnostics.StatusPath, Path.Combine(tempDir, "lazer_replay_frame_status.json"));
+            CopyIfExists(StableReplayFrameDiagnostics.StatusPath, Path.Combine(tempDir, "stable_replay_frame_status.json"));
             CopyDirectoryIfExists(AppPaths.LogDir, Path.Combine(tempDir, "logs"));
             if (includeDatabase)
             {

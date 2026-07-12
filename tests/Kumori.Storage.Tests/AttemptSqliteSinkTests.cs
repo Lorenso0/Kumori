@@ -177,6 +177,39 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
+    public void StableAttempt_PersistsOriginalSongsPathForReplayAnalysis()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"kumori-stable-map-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string beatmap = Path.Combine(directory, "map.osu");
+        File.WriteAllText(beatmap, "osu file format v14");
+        try
+        {
+            var sink = CreateSink();
+            sink.StartAttempt(new AttemptStart
+            {
+                Identity = "stable-map",
+                WallTime = 1_788_000_000,
+                ClientKind = OsuClientKind.Stable,
+                BeatmapFile = beatmap,
+                GameFolder = Path.GetDirectoryName(directory),
+                SongsFolder = directory,
+            });
+
+            long id = Assert.IsType<long>(sink.CurrentAttemptId);
+            AttemptDetails details = new AttemptDetailsRepository(new SqliteConnectionFactory(_dbPath)).GetDetails(id)!;
+
+            Assert.Equal(beatmap, details.LocalBeatmapPath);
+            Assert.Equal(directory, details.LocalMediaDirectory);
+            Assert.Equal("stable", details.ClientKind);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SessionTracker_PersistsActiveSeconds()
     {
         var sink = CreateSink();

@@ -57,6 +57,14 @@ public sealed class MovementCaptureStore
 
         using var con = _factory.Open();
         using var tx = con.BeginTransaction();
+        Execute(con, tx,
+            """
+            UPDATE sessions
+            SET z_count = MAX(0, z_count - COALESCE((SELECT key1_presses FROM attempt_input_summary WHERE attempt_id = @id), 0)),
+                x_count = MAX(0, x_count - COALESCE((SELECT key2_presses FROM attempt_input_summary WHERE attempt_id = @id), 0))
+            WHERE id = (SELECT session_id FROM attempts WHERE id = @id)
+            """,
+            ("@id", attemptId));
         Execute(con, tx, "DELETE FROM attempt_movement_chunks WHERE attempt_id = @id", ("@id", attemptId));
         Execute(con, tx, "DELETE FROM attempt_movement WHERE attempt_id = @id", ("@id", attemptId));
         Execute(con, tx, "DELETE FROM attempt_input_summary WHERE attempt_id = @id", ("@id", attemptId));

@@ -45,6 +45,8 @@ public static class AppPaths
 
     public static string ViewerRuntimeDir => Path.Combine(RuntimeDir, "replay-viewer");
 
+    public static string StableReplayComparisonsDir => Path.Combine(RuntimeDir, "debug", "stable-replay-comparisons");
+
     public static string FixturesDir => Path.Combine(RuntimeDir, "fixtures");
 
     public static string ReportsDir => Path.Combine(AppDataDir, "reports");
@@ -86,4 +88,6 @@ public static class AppPaths
     public static string TosuEnvFile => Path.Combine(TosuDir, "tosu.env");
 
     public static string LazerReplayFrameStatusFile => Path.Combine(StatusDir, "lazer_replay_frame_status.json");
+
+    public static string StableReplayFrameStatusFile => Path.Combine(StatusDir, "stable_replay_frame_status.json");
 }

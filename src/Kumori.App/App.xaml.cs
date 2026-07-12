@@ -29,6 +29,7 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private TosuTrackingService? _tracking;
     private LazerReplayFrameCaptureService? _lazerReplayFrames;
+    private LazerReplayFrameCaptureService? _stableReplayFrames;
     private AppStateStore? _store;
     private CancellationTokenSource? _companionMonitorCts;
     private Task? _companionMonitorTask;
@@ -88,7 +89,6 @@ public partial class App : Application
         // Shell first — no data work before first paint.
         _mainWindow = new MainWindow(viewModel, settings);
         _mainWindow.Show();
-        new LazerStorageDiagnosticsWindow(LazerStorage.GetDiagnostics()) { Owner = _mainWindow }.Show();
         _ = RecoverHistoricalBeatmapsAsync(attempts, settings);
         if (!settings.Current.FirstRunCompleted ||
             settings.Current.OnboardingVersion < WelcomeWindow.CurrentOnboardingVersion)
@@ -155,13 +155,38 @@ public partial class App : Application
                     new LazerMemoryReplayFrameSource(),
                     sourceName: "lazer_memory");
                 _lazerReplayFrames.Start();
+                var stableCaptureStatus = new StableCaptureStatusSink();
+                _stableReplayFrames = new LazerReplayFrameCaptureService(
+                    store,
+                    factory,
+                    () => trackingSink.CurrentAttemptId,
+                    new StableLiveReplayFrameSource(status: stableCaptureStatus),
+                    stableCaptureStatus,
+                    sourceName: "stable_memory",
+                    clientKind: OsuClientKind.Stable);
+                _stableReplayFrames.Start();
                 attemptSink = new CompositeAttemptSink(
                     new StatePublishingAttemptSink(
                         trackingSink,
                         () => trackingSink.CurrentAttemptId,
                         HasReplayData,
                         store),
-                    new BestEffortAttemptSink(_lazerReplayFrames, "lazer replay-frame capture"));
+                    new BestEffortAttemptSink(
+                        new LazerReplayFrameRecoverySink(
+                            factory,
+                            () => trackingSink.CurrentAttemptId,
+                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id))),
+                        "lazer Realm replay-frame recovery"),
+                    new BestEffortAttemptSink(_lazerReplayFrames, "lazer replay-frame capture"),
+                    new BestEffortAttemptSink(
+                        new StableReplayFrameRecoverySink(
+                            factory,
+                            () => trackingSink.CurrentAttemptId,
+                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id))),
+                        "stable replay-frame recovery"),
+                    // Composite sinks finalize in reverse order. Store the live
+                    // buffer first, then let an exact Data/r replay replace it.
+                    new BestEffortAttemptSink(_stableReplayFrames, "stable live replay-frame capture"));
             }
             else
             {
@@ -193,6 +218,12 @@ public partial class App : Application
                 fallbackMediaMirrors: settings.Current.Media.FallbackMirrors,
                 recordPackets: settings.Current.Tracking.PacketRecordingEnabled);
             _tracking.Start();
+            if (settings.Current.Capture.LazerReplayFrameEnabled)
+            {
+                _ = Task.Run(() => new PersistedReplayReconciliationService(
+                    factory,
+                    id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id))).Run());
+            }
             viewModel.SetEndLiveSessionHandler(() => Task.Run(() => _tracking?.EndSession() ?? false));
 
             bool HasReplayData(long attemptId) =>
@@ -313,6 +344,11 @@ public partial class App : Application
         {
             var dispose = _lazerReplayFrames.DisposeAsync().AsTask();
             dispose.Wait(TimeSpan.FromSeconds(3));
+        }
+        if (_stableReplayFrames is not null)
+        {
+            var dispose = _stableReplayFrames.DisposeAsync().AsTask();
+            try { dispose.Wait(TimeSpan.FromSeconds(3)); } catch { }
         }
         _companionMonitorCts?.Cancel();
         try { _companionMonitorTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }

@@ -128,6 +128,36 @@ public class ReplayViewerContractServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task PrepareAnalysis_StableMemoryUsesCapturedJudgementsWithoutLaunchingViewer()
+    {
+        string contract = Path.Combine(_contractDirectory, "stable-memory.json");
+        Directory.CreateDirectory(_contractDirectory);
+        File.WriteAllText(contract, """
+            { "attempt": { "movement_source": "stable_memory" } }
+            """);
+        File.WriteAllText(contract + ".analysis.json", "stale");
+
+        await CreateService().PrepareAnalysisAsync(contract, Path.Combine(_contractDirectory, "missing-viewer.exe"));
+
+        Assert.False(File.Exists(contract + ".analysis.json"));
+    }
+
+    [Fact]
+    public async Task PrepareAnalysis_StableReplayUsesCapturedStableJudgementsWithoutLaunchingViewer()
+    {
+        string contract = Path.Combine(_contractDirectory, "stable-replay.json");
+        Directory.CreateDirectory(_contractDirectory);
+        File.WriteAllText(contract, """
+            { "attempt": { "movement_source": "stable_replay" } }
+            """);
+        File.WriteAllText(contract + ".analysis.json", "stale");
+
+        await CreateService().PrepareAnalysisAsync(contract, Path.Combine(_contractDirectory, "missing-viewer.exe"));
+
+        Assert.False(File.Exists(contract + ".analysis.json"));
+    }
+
     private ReplayViewerContractService CreateService()
     {
         var factory = new SqliteConnectionFactory(_dbPath, readOnly: false);

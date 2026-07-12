@@ -237,6 +237,7 @@
                                 <MenuItem Header="Developer tools" IsEnabled="False" />
                                 <MenuItem Header="tosu status &amp; log" Command="{Binding OpenTosuDiagnosticsCommand}" />
                                 <MenuItem Header="Lazer Frame Debug" Command="{Binding OpenLazerFrameDebugCommand}" />
+                                <MenuItem Header="Stable Frame Debug" Command="{Binding OpenStableFrameDebugCommand}" />
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
@@ -1005,7 +1006,8 @@
                                             </Border>
                                         </UniformGrid>
 
-                                        <Border BorderBrush="#2A1220" BorderThickness="0,1,0,0">
+                                        <Border BorderBrush="#2A1220" BorderThickness="0,1,0,0"
+                                                Visibility="{Binding HasRichSliderData, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
                                             <UniformGrid Columns="6">
                                                 <Border Style="{StaticResource StatCellSecondary}">
                                                     <StackPanel>
@@ -1073,7 +1075,9 @@
                                             </UniformGrid>
                                         </Border>
 
-                                        <Border BorderBrush="#2A1220" BorderThickness="0,1,0,0">
+                                        <Border BorderBrush="#2A1220" BorderThickness="0,1,0,0"
+                                                Opacity="{Binding SliderStatsOpacity}"
+                                                ToolTip="{Binding SliderStatsToolTip}">
                                             <UniformGrid Columns="3">
                                                 <Border Style="{StaticResource StatCellSecondary}">
                                                     <StackPanel>
@@ -1351,17 +1355,20 @@
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
                                             <TextBlock Text="{Binding TechnicalAttemptNumber}" Foreground="{StaticResource Brush.AccentPink}" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,0" />
                                             <TextBlock Text="{Binding TechnicalSessionNumber}" Foreground="{StaticResource Brush.TextSecondary}" FontSize="11" FontWeight="SemiBold" />
                                         </StackPanel>
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
-                                            <TextBlock Text="{Binding TechnicalProgress}" Foreground="{StaticResource Brush.Success}" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,0" />
-                                            <TextBlock Text="-" Foreground="{StaticResource Brush.TextMuted}" FontSize="11" Margin="0,0,10,0" />
-                                            <TextBlock Text="{Binding TechnicalDuration}" Foreground="{StaticResource Brush.TextSecondary}" FontSize="11" Margin="0,0,10,0" />
-                                            <TextBlock Text="-" Foreground="{StaticResource Brush.TextMuted}" FontSize="11" Margin="0,0,10,0" />
-                                            <TextBlock Text="{Binding TechnicalTermination}" Foreground="{StaticResource Brush.TextSecondary}" FontSize="11" FontWeight="SemiBold" />
-                                        </StackPanel>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding TechnicalMapLine}"
+                                                   Foreground="{StaticResource Brush.TextSecondary}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right"
+                                                   TextAlignment="Right"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,0,12,0" />
                                         <Button Grid.Column="2"
                                                 Content="Replay Analyzer"
                                                 Command="{Binding DataContext.OpenSelectedReplayInspectorCommand, RelativeSource={RelativeSource AncestorType=Window}}"

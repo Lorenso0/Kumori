@@ -80,6 +80,42 @@ internal static class LazerMediaStore
     public static string? FindStorageRoot() => CandidateRoots(new TosuMediaInfo())
         .FirstOrDefault(root => File.Exists(Path.Combine(root, "client.realm")) && Directory.Exists(Path.Combine(root, "files")));
 
+    public static string? ResolveReplayFile(string beatmapHash, DateTimeOffset startedAt, string? gameFolder = null, DateTimeOffset? endedAt = null)
+    {
+        if (string.IsNullOrWhiteSpace(beatmapHash)) return null;
+        var media = new TosuMediaInfo { GameFolder = gameFolder };
+        foreach (var root in CandidateRoots(media))
+        {
+            var realmPath = Path.Combine(root, "client.realm");
+            var filesRoot = Path.Combine(root, "files");
+            if (!File.Exists(realmPath) || !Directory.Exists(filesRoot)) continue;
+            try
+            {
+                using var realm = Realm.GetInstance(createScoreConfiguration(realmPath));
+                realm.Refresh();
+                var score = realm.All<LazerScore>()
+                    .Where(s => s.BeatmapHash == beatmapHash && !s.DeletePending)
+                    .AsEnumerable()
+                    .Where(s => s.Date >= startedAt.AddSeconds(-5))
+                    .Where(s => endedAt is null || s.Date <= endedAt.Value.AddMinutes(5))
+                    .OrderBy(s => Math.Abs((s.Date - (endedAt ?? startedAt)).TotalMilliseconds))
+                    .FirstOrDefault(s => s.Files.Any(file => file.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase)));
+                var replay = score?.Files.FirstOrDefault(file => file.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase));
+                var hash = replay?.File.Hash;
+                if (!string.IsNullOrWhiteSpace(hash) && hash.Length >= 2)
+                {
+                    var path = Path.Combine(filesRoot, hash[..1], hash[..2], hash);
+                    if (File.Exists(path)) return path;
+                }
+            }
+            catch (Exception ex) when (ex is RealmException or IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                Serilog.Log.Debug(ex, "Could not read osu!lazer replay store at {Root}", root);
+            }
+        }
+        return null;
+    }
+
     public static LazerStorageDiagnostics GetDiagnostics()
     {
         var defaultRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "osu");
@@ -115,6 +151,13 @@ internal static class LazerMediaStore
         IsReadOnly = true,
         SchemaVersion = lazer_realm_schema_version,
         Schema = new[] { typeof(LazerBeatmapSet), typeof(LazerNamedFileUsage), typeof(LazerRealmFile) },
+    };
+
+    private static RealmConfiguration createScoreConfiguration(string realmPath) => new(realmPath)
+    {
+        IsReadOnly = true,
+        SchemaVersion = lazer_realm_schema_version,
+        Schema = new[] { typeof(LazerScore), typeof(LazerNamedFileUsage), typeof(LazerRealmFile) },
     };
 
     public static bool TryLink(string source, string destination)
@@ -237,4 +280,17 @@ internal partial class LazerRealmFile : RealmObject
     [PrimaryKey]
     [MapTo("Hash")]
     public string Hash { get; set; } = string.Empty;
+}
+
+[MapTo("Score")]
+internal partial class LazerScore : RealmObject
+{
+    [PrimaryKey]
+    [MapTo("ID")]
+    public Guid Id { get; set; }
+    [Indexed]
+    public string BeatmapHash { get; set; } = string.Empty;
+    public DateTimeOffset Date { get; set; }
+    public bool DeletePending { get; set; }
+    public IList<LazerNamedFileUsage> Files { get; } = null!;
 }

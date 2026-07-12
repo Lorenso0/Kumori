@@ -144,10 +144,16 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string N100Text => Details is { } d ? d.N100.ToString("N0", CultureInfo.InvariantCulture) : "";
     public string N50Text => Details is { } d ? d.N50.ToString("N0", CultureInfo.InvariantCulture) : "";
     public string MissCountText => Details is { } d ? d.Summary.Misses.ToString("N0", CultureInfo.InvariantCulture) : "";
-    public string LargeTickText => Details is { } d ? HitTotal(d.LargeTickHits, d.LargeTickMisses) : "";
+    public string LargeTickText => IsStablePlay ? "—" : Details is { } d ? HitTotal(d.LargeTickHits, d.LargeTickMisses) : "";
     public string SmallTickText => Details is { } d ? HitTotal(d.SmallTickHits, d.SmallTickMisses) : "";
-    public string SliderTailText => Details is { } d ? HitTotal(d.SliderTailHits, d.SliderTailMisses) : "";
-    public string SliderBreakText => Details is { } d ? d.SliderBreaks.ToString("N0", CultureInfo.InvariantCulture) : "";
+    public string SliderTailText => IsStablePlay ? "—" : Details is { } d ? HitTotal(d.SliderTailHits, d.SliderTailMisses) : "";
+    public string SliderBreakText => IsStablePlay ? "—" : Details is { } d ? d.SliderBreaks.ToString("N0", CultureInfo.InvariantCulture) : "";
+    public bool HasRichSliderData => Details is not null;
+    public bool IsStablePlay => Details?.ClientKind.Equals("stable", StringComparison.OrdinalIgnoreCase) == true;
+    public double SliderStatsOpacity => IsStablePlay ? 0.38 : 1;
+    public string? SliderStatsToolTip => IsStablePlay
+        ? "Slider tick, slider-end, and slider-break statistics are not available from osu!stable telemetry."
+        : null;
 
     // ── Sliders · keys line ──
     public string SlidersLine
@@ -281,8 +287,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string MovementLine => Details?.Movement is { Available: true } m
         ? Invariant($"{SourceLabel(m.Source)}  ·  {m.SampleCount:N0} samples  ·  {m.SampleRate:F0} Hz  ·  {m.DroppedSamples:N0} dropped")
         : "No cursor movement was captured for this attempt.";
-    public Brush MovementBrush => Details?.Movement?.Source == "opentabletdriver+fallback"
-        ? WarningBrush : PositiveBrush;
+    public Brush MovementBrush => PositiveBrush;
 
     // ── Hit-timing availability ──
     public bool HasTimingSamples => Details?.Timing is { } t && t.Offsets.Count > 0;
@@ -373,6 +378,10 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(SmallTickText));
         OnPropertyChanged(nameof(SliderTailText));
         OnPropertyChanged(nameof(SliderBreakText));
+        OnPropertyChanged(nameof(HasRichSliderData));
+        OnPropertyChanged(nameof(IsStablePlay));
+        OnPropertyChanged(nameof(SliderStatsOpacity));
+        OnPropertyChanged(nameof(SliderStatsToolTip));
         OnPropertyChanged(nameof(SlidersLine));
         OnPropertyChanged(nameof(TechnicalDetailsLine));
         OnPropertyChanged(nameof(TechnicalInputLine));
@@ -559,15 +568,22 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
         try
         {
-            var lazer = LazerStorage.ResolveBeatmapAssets(details.Summary.OsuBeatmapId, details.Summary.BeatmapSetId, details.Summary.Difficulty);
-            var beatmapPath = lazer?.BeatmapPath ?? BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
+            string? stableBeatmap = !string.IsNullOrWhiteSpace(details.LocalBeatmapPath) && File.Exists(details.LocalBeatmapPath)
+                ? details.LocalBeatmapPath
+                : null;
+            var lazer = stableBeatmap is null
+                ? LazerStorage.ResolveBeatmapAssets(details.Summary.OsuBeatmapId, details.Summary.BeatmapSetId, details.Summary.Difficulty)
+                : null;
+            var beatmapPath = stableBeatmap ?? lazer?.BeatmapPath ?? BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
             if (string.IsNullOrWhiteSpace(beatmapPath))
             {
                 LoadError = "Replay Analyzer needs cached beatmap media for this play";
                 return;
             }
 
-            var mediaDirectory = BeatmapArtworkResolver.ResolveMediaDirectory(details.Summary);
+            var mediaDirectory = stableBeatmap is not null && Directory.Exists(details.LocalMediaDirectory)
+                ? details.LocalMediaDirectory
+                : BeatmapArtworkResolver.ResolveMediaDirectory(details.Summary);
             var contract = await Task.Run(() => _replayViewer.WriteContract(
                 details.Summary.Id,
                 beatmapPath,
@@ -705,8 +721,16 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
     }
 
+    public async Task RefreshAfterMovementReplacementAsync(long attemptId)
+    {
+        _cache.Remove(attemptId);
+        if (_requestedAttemptId == attemptId || Details?.Summary.Id == attemptId)
+        {
+            await LoadAsync(attemptId);
+        }
+    }
+
     private static readonly Brush PositiveBrush = FrozenBrush("#4ade80");
-    private static readonly Brush WarningBrush = FrozenBrush("#f59e0b");
 
     private static readonly Dictionary<string, string> SettingAliases = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -886,9 +910,11 @@ public partial class AttemptDetailsViewModel : ObservableObject
         "replay" => "Authoritative Replay",
         "lazer_replay_frame" => "Lazer Replay",
         "lazer_memory" => "Lazer Memory",
-        "opentabletdriver" => "Tablet",
-        "opentabletdriver+fallback" => "Tablet (Gaps)",
-        _ => "Mouse",
+        "stable_replay" => "Stable Replay",
+        "stable_memory" => "Stable Memory",
+        "stable_live" => "Stable Memory",
+        "lazer_replay" => "Lazer Local Replay",
+        _ => string.IsNullOrWhiteSpace(source) ? "Unknown" : source,
     };
 
     private static string FormatStarted(string started)

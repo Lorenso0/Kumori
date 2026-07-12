@@ -27,36 +27,23 @@ public static class LazerReplayAdapter
 
     public static Mod[] CreateCapturedMods(string modsKey)
     {
-        var result = new List<Mod>();
-        ModEntry[] entries = parseModEntries(modsKey);
-        string value = modsKey.ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(modsKey) || modsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
+            return [];
+        if (modsKey.TrimStart().StartsWith("[", StringComparison.Ordinal))
+        {
+            var parsed = parseModEntries(modsKey);
+            if (parsed.Length == 0) return createModsFromApiJson(modsKey);
+            var structured = parsed.Select(entry => new
+            {
+                acronym = entry.Acronym,
+                settings = NormaliseSettings(entry.Settings),
+            });
+            return createModsFromApiJson(System.Text.Json.JsonSerializer.Serialize(structured));
+        }
 
-        if (hasMod(entries, value, "EZ"))
-            result.Add(new OsuModEasy());
-        if (hasMod(entries, value, "HR"))
-            result.Add(new OsuModHardRock());
-        if (hasMod(entries, value, "HT"))
-            result.Add(configureRate(new OsuModHalfTime(), entries, 0.75));
-        if (hasMod(entries, value, "NC"))
-            result.Add(configureRate(new OsuModNightcore(), entries, 1.5));
-        else if (hasMod(entries, value, "DT"))
-            result.Add(configureRate(new OsuModDoubleTime(), entries, 1.5));
-        if (hasMod(entries, value, "DA"))
-            result.Add(configureDifficultyAdjust(new OsuModDifficultyAdjust(), entries));
-        if (hasMod(entries, value, "HD"))
-            result.Add(new OsuModHidden());
-        if (hasMod(entries, value, "FL"))
-            result.Add(new OsuModFlashlight());
-        if (hasMod(entries, value, "NF"))
-            result.Add(new OsuModNoFail());
-        if (hasMod(entries, value, "SO"))
-            result.Add(new OsuModSpunOut());
-
-        if (result.Count > 0)
-            return result.ToArray();
-
-        Mod[] apiMods = createModsFromApiJson(modsKey);
-        return apiMods.Length > 0 ? apiMods : result.ToArray();
+        var entries = Enumerable.Range(0, modsKey.Length / 2)
+            .Select(index => new { acronym = modsKey.Substring(index * 2, 2), settings = new Dictionary<string, object>() });
+        return createModsFromApiJson(System.Text.Json.JsonSerializer.Serialize(entries));
     }
 
     public static Mod[] CreateCapturedMods(AttemptContract attempt)
@@ -64,56 +51,53 @@ public static class LazerReplayAdapter
         if (attempt.Mods.Count == 0)
             return CreateCapturedMods(attempt.ModsKey);
 
-        var result = new List<Mod>();
-        foreach (var entry in attempt.Mods)
+        var entries = attempt.Mods.Select(entry => new
         {
-            var acronym = entry.Acronym.Trim().ToUpperInvariant();
-            switch (acronym)
-            {
-                case "EZ":
-                    result.Add(new OsuModEasy());
-                    break;
+            acronym = entry.Acronym.Trim().ToUpperInvariant(),
+            settings = NormaliseSettings(entry.Settings),
+        });
+        var converted = createModsFromApiJson(System.Text.Json.JsonSerializer.Serialize(entries));
+        return converted.Length == 0 ? CreateCapturedMods(attempt.ModsKey) : converted;
+    }
 
-                case "HR":
-                    result.Add(new OsuModHardRock());
-                    break;
+    /// <summary>
+    /// Resolves the mods used by playback and analysis. The structured Kumori
+    /// contract is authoritative because legacy replay flags cannot represent
+    /// configurable settings such as a custom clock rate or Difficulty Adjust.
+    /// Decoded replay mods remain a fallback for older contracts.
+    /// </summary>
+    public static Mod[] ResolveMods(AttemptContract attempt, IEnumerable<Mod>? decodedMods = null)
+    {
+        Mod[] contractMods = CreateCapturedMods(attempt);
+        if (decodedMods == null)
+            return contractMods;
 
-                case "HT":
-                case "DC":
-                    result.Add(configureRate(new OsuModHalfTime(), rateFromSettings(entry.Settings) ?? 0.75));
-                    break;
-
-                case "NC":
-                    result.Add(configureRate(new OsuModNightcore(), rateFromSettings(entry.Settings) ?? 1.5));
-                    break;
-
-                case "DT":
-                    result.Add(configureRate(new OsuModDoubleTime(), rateFromSettings(entry.Settings) ?? 1.5));
-                    break;
-
-                case "DA":
-                    result.Add(configureDifficultyAdjust(new OsuModDifficultyAdjust(), entry.Settings));
-                    break;
-
-                case "HD":
-                    result.Add(new OsuModHidden());
-                    break;
-
-                case "FL":
-                    result.Add(new OsuModFlashlight());
-                    break;
-
-                case "NF":
-                    result.Add(new OsuModNoFail());
-                    break;
-
-                case "SO":
-                    result.Add(new OsuModSpunOut());
-                    break;
-            }
+        var resolved = contractMods.ToList();
+        foreach (Mod decoded in decodedMods)
+        {
+            if (resolved.All(existing => !existing.Acronym.Equals(decoded.Acronym, StringComparison.OrdinalIgnoreCase)))
+                resolved.Add(decoded);
         }
 
-        return result.Count == 0 ? CreateCapturedMods(attempt.ModsKey) : result.ToArray();
+        return resolved.ToArray();
+    }
+
+    private static IReadOnlyDictionary<string, JsonElement> NormaliseSettings(IReadOnlyDictionary<string, JsonElement> settings)
+    {
+        var result = new Dictionary<string, JsonElement>(settings, StringComparer.OrdinalIgnoreCase);
+        CopyAlias(result, "cs", "circle_size");
+        CopyAlias(result, "ar", "approach_rate");
+        CopyAlias(result, "od", "overall_difficulty");
+        CopyAlias(result, "accuracy", "overall_difficulty");
+        CopyAlias(result, "hp", "drain_rate");
+        CopyAlias(result, "hp_drain", "drain_rate");
+        return result;
+    }
+
+    private static void CopyAlias(Dictionary<string, JsonElement> settings, string alias, string canonical)
+    {
+        if (!settings.ContainsKey(canonical) && settings.TryGetValue(alias, out var value))
+            settings[canonical] = value;
     }
 
     private static Mod[] createModsFromApiJson(string modsKey)
@@ -125,7 +109,13 @@ public static class LazerReplayAdapter
                 return [];
 
             var ruleset = new OsuRuleset();
-            return apiMods.Select(m => m.ToMod(ruleset)).ToArray();
+            var result = new List<Mod>();
+            foreach (var apiMod in apiMods)
+            {
+                try { result.Add(apiMod.ToMod(ruleset)); }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NotSupportedException) { }
+            }
+            return result.ToArray();
         }
         catch (Newtonsoft.Json.JsonException)
         {
@@ -355,8 +345,12 @@ public static class LazerReplayAdapter
     private static NormalizedReplaySample[] normalizeSamples(ViewerContract contract, bool importedReplay)
     {
         bool tabletSource = contract.Attempt.MovementSource.Contains("tablet", StringComparison.OrdinalIgnoreCase);
-        bool statefulReplayFrameSource = contract.Attempt.MovementSource.Contains("lazer_memory", StringComparison.OrdinalIgnoreCase)
-                                         || contract.Attempt.MovementSource.Contains("replay_frame", StringComparison.OrdinalIgnoreCase);
+        bool statefulReplayFrameSource = contract.Attempt.MovementSource.Equals("lazer_memory", StringComparison.OrdinalIgnoreCase)
+                                         || contract.Attempt.MovementSource.Equals("lazer_replay", StringComparison.OrdinalIgnoreCase)
+                                         || contract.Attempt.MovementSource.Equals("lazer_replay_frame", StringComparison.OrdinalIgnoreCase)
+                                         || contract.Attempt.MovementSource.Equals("stable_memory", StringComparison.OrdinalIgnoreCase)
+                                         || contract.Attempt.MovementSource.Equals("stable_live", StringComparison.OrdinalIgnoreCase)
+                                         || contract.Attempt.MovementSource.Equals("stable_replay", StringComparison.OrdinalIgnoreCase);
 
         IEnumerable<MovementSample> source = contract.Samples;
         var unpaused = contract.Samples.Where(s => (s.Flags & paused_flag) == 0).ToArray();

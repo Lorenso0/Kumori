@@ -5,6 +5,68 @@ namespace Kumori.Tracking.Tests;
 
 public class TosuClientTests
 {
+    [Fact]
+    public void Ingest_StableAddsClassicAndSuppressesLazerSliderCounters()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {"client":"stable","play":{"mods":[{"acronym":"HD"}],"hits":{
+              "sliderBreaks":3,"largeTickHits":20,"largeTickMisses":2,
+              "sliderTailHits":9,"sliderTailMisses":1}}}
+            """));
+
+        var snapshot = client.LastSnapshot!;
+        Assert.Equal(OsuClientKind.Stable, snapshot.ClientKind);
+        Assert.Equal("HDCL", snapshot.ModsKey);
+        Assert.Equal(["HD", "CL"], snapshot.Mods.Select(mod => mod.Acronym));
+        Assert.Equal(0, snapshot.Play.SliderBreak);
+        Assert.Equal(0, snapshot.Play.LargeTickHit);
+        Assert.Equal(0, snapshot.Play.SliderTailHit);
+    }
+
+    [Fact]
+    public void Ingest_StablePackedModsArePreservedAlongsideClassic()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"client":"stable","play":{"mods":{"number":1,"name":"NF","array":[]}}}"""));
+
+        Assert.Equal("NFCL", client.LastSnapshot!.ModsKey);
+        Assert.Equal(["NF", "CL"], client.LastSnapshot.Mods.Select(mod => mod.Acronym));
+    }
+
+    [Fact]
+    public void Ingest_StableDoesNotDuplicateClassic()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"client":"stable","play":{"mods":[{"acronym":"CL"}]}}"""));
+
+        Assert.Equal("CL", client.LastSnapshot!.ModsKey);
+        Assert.Single(client.LastSnapshot.Mods);
+    }
+
+    [Fact]
+    public void Ingest_RemembersStableClientAcrossPacketsWithoutClientField()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"client":"stable"}"""));
+        client.Ingest(Packet("""{"play":{"mods":[{"acronym":"HD"}]}}"""));
+
+        Assert.Equal(OsuClientKind.Stable, client.LastSnapshot!.ClientKind);
+        Assert.Equal("HDCL", client.LastSnapshot.ModsKey);
+    }
+
+    [Fact]
+    public void Ingest_LazerKeepsRichSliderCounters()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"client":"lazer","play":{"hits":{"sliderBreaks":2,"largeTickHits":8}}}"""));
+
+        Assert.Equal(OsuClientKind.Lazer, client.LastSnapshot!.ClientKind);
+        Assert.Equal("NM", client.LastSnapshot.ModsKey);
+        Assert.Equal(2, client.LastSnapshot.Play.SliderBreak);
+        Assert.Equal(8, client.LastSnapshot.Play.LargeTickHit);
+    }
+
     private static TosuPacket Packet(string raw, double mono = 100.0) =>
         new(raw, 1_700_000_000.0, mono);
 

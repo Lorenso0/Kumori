@@ -26,6 +26,23 @@ public interface ILazerReplayFrameSnapshotSource
     IReadOnlyList<LazerReplayFrame> ReadCurrentFramesSnapshot();
 }
 
+public interface IAttemptAwareReplayFrameSource
+{
+    void StartAttempt(AttemptStart start);
+    void UpdateAttempt(AttemptSnapshot snapshot);
+    void EndAttempt();
+}
+
+/// <summary>
+/// Allows an attempt-aware source to finish consuming its native stream before
+/// the capture service tears it down. This is intentionally synchronous because
+/// attempt finalisation itself is ordered synchronously by the tracker.
+/// </summary>
+public interface IFinalizableReplayFrameSource
+{
+    IReadOnlyList<LazerReplayFrame> FinalizeAttemptSnapshot();
+}
+
 public static class LazerReplayFrameMapper
 {
     public const int Key1Button = 0x10;

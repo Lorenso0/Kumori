@@ -15,6 +15,11 @@ internal static class TrackingFrameMapper
     {
         WallTime = snapshot.WallTime,
         IsStandardMode = snapshot.IsStandardMode,
+        ClientKind = snapshot.ClientKind,
+        GameFolder = snapshot.Media?.GameFolder,
+        BeatmapFile = snapshot.Media?.BeatmapFile,
+        SongsFolder = snapshot.Media?.SongsFolder,
+        BeatmapFolder = snapshot.Media?.BeatmapFolder,
         Artist = snapshot.Artist,
         Title = snapshot.Title,
         Mapper = snapshot.Mapper,

@@ -54,7 +54,9 @@ public sealed class TosuClient
             snapshot = ParseSnapshot(
                 doc.RootElement,
                 packet,
-                LastSnapshot?.IsStandardMode ?? false);
+                LastSnapshot?.IsStandardMode ?? false,
+                LastSnapshot?.ClientKind ?? OsuClientKind.Unknown,
+                LastSnapshot?.Mods ?? []);
         }
         catch (JsonException ex)
         {
@@ -78,9 +80,13 @@ public sealed class TosuClient
     private static TosuSnapshot ParseSnapshot(
         JsonElement root,
         TosuPacket packet,
-        bool fallbackStandardMode)
+        bool fallbackStandardMode,
+        OsuClientKind fallbackClientKind,
+        IReadOnlyList<AttemptMod> fallbackMods)
     {
         var state = NormalizedState(root);
+        var parsedClientKind = ParseClientKind(root);
+        var clientKind = parsedClientKind == OsuClientKind.Unknown ? fallbackClientKind : parsedClientKind;
         var beatmap = root.TryGetProperty("beatmap", out var bm) && bm.ValueKind == JsonValueKind.Object
             ? bm
             : default;
@@ -150,13 +156,17 @@ public sealed class TosuClient
         {
             progress = 1;
         }
-        var mods = ParseMods(play);
+        var parsedMods = ParseMods(play);
+        if (parsedMods.Count == 0 && !HasExplicitMods(play) && fallbackMods.Count > 0)
+            parsedMods = fallbackMods;
+        var mods = NormalizeMods(parsedMods, clientKind);
         var hitErrors = ParseHitErrors(play);
         var richHits = ParseRichHits(play, root);
 
         return new TosuSnapshot
         {
             State = state,
+            ClientKind = clientKind,
             IsPlaying = PlayingStates.Contains(state),
             IsResults = ResultStates.Contains(state),
             IsStandardMode = TryGetStandardMode(root, out var isStandardMode)
@@ -196,13 +206,16 @@ public sealed class TosuClient
                 Miss = GetDouble(hits, "0") ?? 0,
                 Geki = richHits.Geki,
                 Katu = richHits.Katu,
-                SliderBreak = GetDouble(hits, "sliderBreaks") ?? 0,
-                LargeTickHit = richHits.LargeTickHits,
-                LargeTickMiss = richHits.LargeTickMisses,
-                SmallTickHit = richHits.SmallTickHits,
-                SmallTickMiss = richHits.SmallTickMisses,
-                SliderTailHit = richHits.SliderTailHits,
-                SliderTailMiss = richHits.SliderTailMisses,
+                // Stable does not expose lazer's rich slider judgement model.
+                // Zero is retained for storage compatibility, but the client kind/CL
+                // marker tells consumers that these values are unavailable.
+                SliderBreak = clientKind == OsuClientKind.Stable ? 0 : GetDouble(hits, "sliderBreaks") ?? 0,
+                LargeTickHit = clientKind == OsuClientKind.Stable ? 0 : richHits.LargeTickHits,
+                LargeTickMiss = clientKind == OsuClientKind.Stable ? 0 : richHits.LargeTickMisses,
+                SmallTickHit = clientKind == OsuClientKind.Stable ? 0 : richHits.SmallTickHits,
+                SmallTickMiss = clientKind == OsuClientKind.Stable ? 0 : richHits.SmallTickMisses,
+                SliderTailHit = clientKind == OsuClientKind.Stable ? 0 : richHits.SliderTailHits,
+                SliderTailMiss = clientKind == OsuClientKind.Stable ? 0 : richHits.SliderTailMisses,
                 Combo = GetDouble(combo, "max") ?? GetDouble(play, "combo") ?? 0,
                 PpPeak = performance.Max ?? performance.Current ?? 0,
                 PpCurrent = performance.Current ?? 0,
@@ -213,6 +226,36 @@ public sealed class TosuClient
                 HitErrors = hitErrors,
             },
         };
+    }
+
+    private static bool HasExplicitMods(JsonElement play)
+        => play.ValueKind == JsonValueKind.Object && play.TryGetProperty("mods", out _);
+
+    internal static OsuClientKind ParseClientKind(JsonElement root)
+    {
+        var client = GetString(root, "client");
+        if (client?.Equals("stable", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return OsuClientKind.Stable;
+        }
+        if (client?.Equals("lazer", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return OsuClientKind.Lazer;
+        }
+        return OsuClientKind.Unknown;
+    }
+
+    internal static IReadOnlyList<AttemptMod> NormalizeMods(
+        IReadOnlyList<AttemptMod> mods,
+        OsuClientKind clientKind)
+    {
+        if (clientKind != OsuClientKind.Stable ||
+            mods.Any(mod => mod.Acronym.Equals("CL", StringComparison.OrdinalIgnoreCase)))
+        {
+            return mods;
+        }
+
+        return mods.Concat([new AttemptMod("CL")]).ToArray();
     }
 
     /// <summary>Port of _normalized_state: state.name (or scalar), casefolded, alphanumeric only.</summary>
@@ -439,7 +482,26 @@ public sealed class TosuClient
             && mods.TryGetProperty("array", out var array)
             && array.ValueKind == JsonValueKind.Array)
         {
-            mods = array;
+            var parsedArray = ParseModArray(array);
+            if (parsedArray.Count > 0)
+            {
+                return parsedArray;
+            }
+
+            // Stable may expose an empty array while still supplying its
+            // legacy packed acronym string (for example "NF" or "HDHR").
+            var packed = GetString(mods, "name") ?? GetString(mods, "str");
+            return ParsePackedMods(packed);
+        }
+
+        if (mods.ValueKind == JsonValueKind.Object)
+        {
+            return ParsePackedMods(GetString(mods, "name") ?? GetString(mods, "str"));
+        }
+
+        if (mods.ValueKind == JsonValueKind.String)
+        {
+            return ParsePackedMods(mods.GetString());
         }
 
         if (mods.ValueKind != JsonValueKind.Array)
@@ -447,6 +509,11 @@ public sealed class TosuClient
             return Array.Empty<AttemptMod>();
         }
 
+        return ParseModArray(mods);
+    }
+
+    private static IReadOnlyList<AttemptMod> ParseModArray(JsonElement mods)
+    {
         var result = new List<AttemptMod>();
         foreach (var mod in mods.EnumerateArray())
         {
@@ -471,6 +538,17 @@ public sealed class TosuClient
                 }
             }
         }
+        return result;
+    }
+
+    private static IReadOnlyList<AttemptMod> ParsePackedMods(string? packed)
+    {
+        if (string.IsNullOrWhiteSpace(packed) || packed.Equals("NM", StringComparison.OrdinalIgnoreCase))
+            return [];
+        var value = packed.Trim().ToUpperInvariant().Replace(" ", "");
+        var result = new List<AttemptMod>();
+        for (var index = 0; index + 1 < value.Length; index += 2)
+            result.Add(new AttemptMod(value.Substring(index, 2)));
         return result;
     }
 
@@ -627,8 +705,16 @@ public sealed class TosuClient
 }
 
 /// <summary>Parsed view of one tosu packet - what the GUI/status layer needs.</summary>
+public enum OsuClientKind
+{
+    Unknown,
+    Stable,
+    Lazer,
+}
+
 public sealed record TosuSnapshot
 {
+    public OsuClientKind ClientKind { get; init; }
     public string State { get; init; } = "";
     public bool IsPlaying { get; init; }
     public bool IsResults { get; init; }

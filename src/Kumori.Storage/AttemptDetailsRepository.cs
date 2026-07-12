@@ -32,6 +32,7 @@ public sealed class AttemptDetailsRepository
         {
             return null;
         }
+        var source = ReadSourceContext(con, attemptId);
         return details with
         {
             Mods = ReadMods(con, attemptId),
@@ -40,7 +41,40 @@ public sealed class AttemptDetailsRepository
             Input = ReadInput(con, attemptId),
             Movement = ReadMovement(con, attemptId),
             CapturedDifficulty = ReadCapturedDifficulty(con, attemptId),
+            LocalBeatmapPath = source.BeatmapPath,
+            LocalMediaDirectory = source.MediaDirectory,
+            ClientKind = source.ClientKind,
         };
+    }
+
+    private static (string? BeatmapPath, string? MediaDirectory, string ClientKind) ReadSourceContext(SqliteConnection con, long attemptId)
+    {
+        if (!TableExists(con, "attempt_context"))
+            return (null, null, "unknown");
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = "SELECT source_json FROM attempt_context WHERE attempt_id = @id";
+        cmd.Parameters.AddWithValue("@id", attemptId);
+        string? json = cmd.ExecuteScalar() as string;
+        if (string.IsNullOrWhiteSpace(json))
+            return (null, null, "unknown");
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            string? beatmap = document.RootElement.TryGetProperty("beatmap_path", out var beatmapElement)
+                ? beatmapElement.GetString()
+                : null;
+            string? media = document.RootElement.TryGetProperty("media_directory", out var mediaElement)
+                ? mediaElement.GetString()
+                : null;
+            string clientKind = document.RootElement.TryGetProperty("client_kind", out var clientElement)
+                ? clientElement.GetString() ?? "unknown"
+                : "unknown";
+            return (beatmap, media, clientKind);
+        }
+        catch (JsonException)
+        {
+            return (null, null, "unknown");
+        }
     }
 
     public IReadOnlyList<AttemptTrendSummary> GetRecentSameMapAttempts(long attemptId, int limit = 6)

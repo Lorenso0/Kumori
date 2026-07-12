@@ -1,5 +1,6 @@
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
 using osu.Framework.Logging;
 using osu.Framework.Testing;
 using osu.Game.Rulesets.Objects;
@@ -52,6 +53,15 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     /// <summary>Map time to return to when Play is pressed at the cutoff.</summary>
     public double PlaybackRestartTime { get; init; }
 
+    /// <summary>
+    /// Stable cursor/replay frames are exact movement evidence, but lazer's
+    /// Classic hit simulation can differ from stable at hit-area boundaries,
+    /// including when playing the original .osr.
+    /// When supplied, show the stable-recorded accuracy instead of presenting
+    /// lazer's reconstructed value as authoritative.
+    /// </summary>
+    public double? RecordedAccuracyOverride { get; init; }
+
     private readonly List<ReplayJudgementSnapshot> analysisJudgements = [];
     private bool analysisMode;
     private bool playbackEndReached;
@@ -73,17 +83,15 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
 
     protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
     {
-        var dependencies = base.CreateChildDependencies(parent);
-
         // Player's BackgroundDependencyLoader reads Mods.Value to build the
         // playable beatmap and apply IApplicableToTrack mods. OnEntering() is
-        // too late here; the raw screen is already loaded by then. This mirrors
-        // the important part of ReplayPlayerLoader without using its full
-        // loading UI/state machine.
+        // too late here, and base.CreateChildDependencies() must not cache the
+        // previous empty values. This mirrors the important part of
+        // ReplayPlayerLoader without using its full loading UI/state machine.
         Mods.Value = sourceScore.ScoreInfo.Mods;
         Ruleset.Value = sourceScore.ScoreInfo.Ruleset;
 
-        return dependencies;
+        return base.CreateChildDependencies(parent);
     }
 
     protected override void LoadComplete()
@@ -113,6 +121,10 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
             // change; keep it suppressed so only Kumori's bar is visible.
             Scheduler.AddDelayed(hideSkinProgress, 500, true);
             hideSkinProgress();
+            if (RecordedAccuracyOverride is not null)
+            {
+                addRecordedAccuracy();
+            }
 
             if (AttachKumoriHud)
             {
@@ -280,6 +292,23 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     {
         foreach (SongProgress progress in HUDOverlay.ChildrenOfType<SongProgress>())
             progress.Alpha = 0;
+    }
+
+    private void addRecordedAccuracy()
+    {
+        if (RecordedAccuracyOverride is not { } accuracy)
+            return;
+        double truncated = Math.Floor(accuracy * 100) / 100;
+        AddInternal(new SpriteText
+        {
+            Text = $"lazer may not reproduce osu!stable accuracy exactly  ·  stable {truncated:0.00}%",
+            Anchor = Anchor.TopRight,
+            Origin = Anchor.TopRight,
+            Position = new osuTK.Vector2(-20, 48),
+            Font = FontUsage.Default.With(size: 12),
+            Colour = Colour4.White.Opacity(0.72f),
+            Depth = -1000,
+        });
     }
 
     private void beginAnalysisCollection()
