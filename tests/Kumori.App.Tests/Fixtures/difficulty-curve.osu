@@ -1,0 +1,32 @@
+osu file format v14
+
+[General]
+AudioFilename: test.mp3
+Mode: 0
+
+[Metadata]
+Title:Kumori Difficulty Curve Test
+TitleUnicode:Kumori Difficulty Curve Test
+Artist:Kumori
+ArtistUnicode:Kumori
+Creator:Kumori Tests
+Version:Normal
+
+[Difficulty]
+HPDrainRate:5
+CircleSize:4
+OverallDifficulty:8
+ApproachRate:9
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[TimingPoints]
+0,500,4,2,1,60,1,0
+
+[HitObjects]
+64,192,1000,1,0,0:0:0:0:
+448,192,1800,1,0,0:0:0:0:
+256,64,2600,1,0,0:0:0:0:
+256,320,3400,1,0,0:0:0:0:
+96,96,4200,1,0,0:0:0:0:
+416,288,5000,1,0,0:0:0:0:

@@ -13,13 +13,10 @@ public sealed class MapPressureGraphTests
         var root = FindRepositoryRoot();
         var beatmapPath = Path.Combine(
             root,
-            "third_party",
-            "osu",
-            "osu.Game.Rulesets.Osu.Tests",
-            "Resources",
-            "Testing",
-            "Beatmaps",
-            "diffcalc-test.osu");
+            "tests",
+            "Kumori.App.Tests",
+            "Fixtures",
+            "difficulty-curve.osu");
         var firstObjectTime = ReadFirstHitObjectTime(beatmapPath);
         var mods = new[] { new ModEntry("DT", """{"speed_change":1.5}""") };
 
