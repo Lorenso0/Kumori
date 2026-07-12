@@ -32,6 +32,8 @@ public partial class App : Application
     private TosuTrackingService? _tracking;
     private LazerReplayFrameCaptureService? _lazerReplayFrames;
     private LazerReplayFrameCaptureService? _stableReplayFrames;
+    private bool _lazerReplayCaptureStarted;
+    private bool _stableReplayCaptureStarted;
     private AppStateStore? _store;
     private CancellationTokenSource? _companionMonitorCts;
     private Task? _companionMonitorTask;
@@ -45,8 +47,6 @@ public partial class App : Application
     private bool? _trayDualModeToggleEnabled;
     private bool _exitRequested;
     private bool _shutdownCleanupCompleted;
-    private bool _lazerReplayCaptureStarted;
-    private bool _stableReplayCaptureStarted;
     private readonly object _osuCompanionGate = new();
 
     protected override void OnStartup(StartupEventArgs e)
