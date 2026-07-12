@@ -17,8 +17,11 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="AutoMapper" Version="15.1.1" />
     <PackageReference Include="Serilog" Version="4.0.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+    <PackageReference Include="System.Net.Http" Version="4.3.4" />
+    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="ppy.osu.Game" Version="2026.621.0" />
     <PackageReference Include="ppy.osu.Game.Rulesets.Osu" Version="2026.621.0" />
   </ItemGroup>
@@ -32,19 +35,23 @@
     <MSBuild Projects="..\Kumori.StableFrameBridge\Kumori.StableFrameBridge.csproj"
              Targets="Build"
              Properties="Configuration=$(Configuration);UseAppHost=true"
-             RemoveProperties="OutDir" />
+             RemoveProperties="OutDir;RuntimeIdentifier;PlatformTarget;SelfContained" />
   </Target>
   <Target Name="CopyStableFrameBridge" AfterTargets="Build" DependsOnTargets="BuildStableFrameBridge">
     <ItemGroup>
-      <StableFrameBridgeFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0-windows10.0.17763.0\win-x86\**\*" />
+      <StableFrameBridgeFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0\win-x86\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(StableFrameBridgeFiles)" DestinationFiles="@(StableFrameBridgeFiles->'$(OutDir)stable-frame-bridge\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
-  <Target Name="CopyStableFrameBridgeToPublish" AfterTargets="Publish" DependsOnTargets="BuildStableFrameBridge">
+  <Target Name="IncludeStableFrameBridgeInPublish" BeforeTargets="_ComputeFilesToBundle" DependsOnTargets="BuildStableFrameBridge">
     <ItemGroup>
-      <StableFrameBridgePublishFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0-windows10.0.17763.0\win-x86\**\*" />
+      <StableFrameBridgePublishFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0\win-x86\**\*" />
+      <ResolvedFileToPublish Include="@(StableFrameBridgePublishFiles)">
+        <RelativePath>stable-frame-bridge\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
     </ItemGroup>
-    <Copy SourceFiles="@(StableFrameBridgePublishFiles)" DestinationFiles="@(StableFrameBridgePublishFiles->'$(PublishDir)stable-frame-bridge\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <ItemGroup Condition="Exists('Assets\logo.ico')">
     <Content Include="Assets\logo.ico"

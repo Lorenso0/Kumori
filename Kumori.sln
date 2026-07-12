@@ -30,6 +30,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.ReplayFrameTool", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.StableFrameBridge", "src\Kumori.StableFrameBridge\Kumori.StableFrameBridge.csproj", "{AB62E0C1-76DD-4240-8BB9-10AB4A90F3EF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.ReplayViewer", "replay_viewer\Kumori.ReplayViewer.csproj", "{CA8C4542-7858-462F-8D57-48236487FB9D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -84,6 +86,10 @@ Global
 		{AB62E0C1-76DD-4240-8BB9-10AB4A90F3EF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AB62E0C1-76DD-4240-8BB9-10AB4A90F3EF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AB62E0C1-76DD-4240-8BB9-10AB4A90F3EF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CA8C4542-7858-462F-8D57-48236487FB9D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CA8C4542-7858-462F-8D57-48236487FB9D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CA8C4542-7858-462F-8D57-48236487FB9D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CA8C4542-7858-462F-8D57-48236487FB9D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8} = {03D161BE-62EF-4B54-BE6F-0074D90EE034}

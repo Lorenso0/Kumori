@@ -102,8 +102,8 @@ internal partial class KumoriSelectedClickMarker : CompositeDrawable
     {
         yield return drawable;
         foreach (DrawableHitObject nested in drawable.NestedHitObjects)
-        foreach (DrawableHitObject descendant in flatten(nested))
-            yield return descendant;
+            foreach (DrawableHitObject descendant in flatten(nested))
+                yield return descendant;
     }
 
     private static bool matchesObjectType(DrawableOsuHitObject drawable, string objectType) => objectType switch

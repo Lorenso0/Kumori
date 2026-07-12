@@ -287,6 +287,7 @@ public sealed class TosuTrackingService : IAsyncDisposable
                 try { await task; } catch { /* cancellation */ }
             }
         }
+        await _source.DisposeAsync();
         _cts.Dispose();
     }
 

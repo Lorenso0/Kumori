@@ -97,12 +97,12 @@ public class SessionTrackerTests
         double t,
         bool playing,
         bool osuRunning = true) => new()
-    {
-        WallTime = 1_788_000_000 + t,
-        MonoTime = t,
-        IsPlaying = playing,
-        OsuRunning = osuRunning,
-    };
+        {
+            WallTime = 1_788_000_000 + t,
+            MonoTime = t,
+            IsPlaying = playing,
+            OsuRunning = osuRunning,
+        };
 
     private sealed class RecordingSessionSink : ISessionSink
     {

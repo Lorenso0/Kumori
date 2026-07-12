@@ -41,9 +41,15 @@ public sealed class SettingsService
                         File.ReadAllText(_settingsFile), JsonOptions) ?? new KumoriSettings();
                     return Current;
                 }
-                catch
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
                 {
-                    // Corrupt v2 file: fall through to legacy import / defaults.
+                    // Preserve the unreadable file before defaults are written so a
+                    // user or support engineer can recover it.
+                    if (!TryPreserveCorruptSettings())
+                    {
+                        Current = new KumoriSettings();
+                        return Current;
+                    }
                 }
             }
 
@@ -71,6 +77,24 @@ public sealed class SettingsService
         var tmp = _settingsFile + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(Current, JsonOptions));
         File.Move(tmp, _settingsFile, overwrite: true);
+    }
+
+    private bool TryPreserveCorruptSettings()
+    {
+        try
+        {
+            var backup = $"{_settingsFile}.corrupt-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
+            File.Move(_settingsFile, backup);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Maps legacy flat Python keys to the typed model. Unknown keys are ignored.</summary>

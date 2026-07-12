@@ -1,10 +1,15 @@
 using System.Diagnostics;
 using Kumori.Tracking;
+#if STABLE_FRAME_BRIDGE
 using Microsoft.Diagnostics.Runtime;
+#endif
+#if !STABLE_FRAME_BRIDGE
 using Serilog;
+#endif
 
 namespace Kumori.Native;
 
+#if !STABLE_FRAME_BRIDGE
 /// <summary>
 /// Reads osu!stable's own in-progress List&lt;ReplayFrame&gt; from the CLR heap.
 /// Stable obfuscates its game types on every update, so discovery deliberately
@@ -130,7 +135,7 @@ public sealed class StableLiveReplayFrameSource : ILazerReplayFrameSource, ILaze
     {
         string path = Path.Combine(AppContext.BaseDirectory, "stable-frame-bridge", "Kumori.StableFrameBridge.exe");
         if (!File.Exists(path))
-            path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Kumori.StableFrameBridge", "bin", "Debug", "net8.0-windows10.0.17763.0", "win-x86", "Kumori.StableFrameBridge.exe"));
+            path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Kumori.StableFrameBridge", "bin", "Debug", "net8.0", "win-x86", "Kumori.StableFrameBridge.exe"));
         if (!File.Exists(path))
         {
             status.Update(s => { s.State = "stable_bridge_missing"; s.Detail = $"Stable frame bridge was not found at {path}."; s.LastError = s.Detail; });
@@ -172,7 +177,9 @@ public sealed class StableLiveReplayFrameSource : ILazerReplayFrameSource, ILaze
         return ValueTask.CompletedTask;
     }
 }
+#endif
 
+#if STABLE_FRAME_BRIDGE
 public sealed class StableClrReplayReader : IDisposable
 {
     public static string LastAttachDiagnostic { get; private set; } = "not attempted";
@@ -498,26 +505,26 @@ public sealed class StableClrReplayReader : IDisposable
             return false;
 
         foreach (ClrInstanceField time in ints)
-        foreach (ClrInstanceField buttons in ints.Where(f => f != time))
-        foreach (ClrInstanceField x in floats)
-        foreach (ClrInstanceField y in floats.Where(f => f != x))
-        {
-            try
-            {
-                int[] times = samples.Select(s => s.ReadField<int>(time.Name!)).ToArray();
-                int[] states = samples.Select(s => s.ReadField<int>(buttons.Name!)).ToArray();
-                float[] xs = samples.Select(s => s.ReadField<float>(x.Name!)).ToArray();
-                float[] ys = samples.Select(s => s.ReadField<float>(y.Name!)).ToArray();
-                if (times.Zip(times.Skip(1)).Count(pair => pair.First <= pair.Second) < times.Length - 2) continue;
-                if (times.Max() - times.Min() < 10) continue;
-                if (states.Any(v => (v & ~0x1f) != 0)) continue;
-                if (xs.Any(v => !float.IsFinite(v) || v is < -10_000 or > 10_000)) continue;
-                if (ys.Any(v => !float.IsFinite(v) || v is < -10_000 or > 10_000)) continue;
-                timeField = time.Name!; buttonsField = buttons.Name!; xField = x.Name!; yField = y.Name!;
-                return true;
-            }
-            catch { }
-        }
+            foreach (ClrInstanceField buttons in ints.Where(f => f != time))
+                foreach (ClrInstanceField x in floats)
+                    foreach (ClrInstanceField y in floats.Where(f => f != x))
+                    {
+                        try
+                        {
+                            int[] times = samples.Select(s => s.ReadField<int>(time.Name!)).ToArray();
+                            int[] states = samples.Select(s => s.ReadField<int>(buttons.Name!)).ToArray();
+                            float[] xs = samples.Select(s => s.ReadField<float>(x.Name!)).ToArray();
+                            float[] ys = samples.Select(s => s.ReadField<float>(y.Name!)).ToArray();
+                            if (times.Zip(times.Skip(1)).Count(pair => pair.First <= pair.Second) < times.Length - 2) continue;
+                            if (times.Max() - times.Min() < 10) continue;
+                            if (states.Any(v => (v & ~0x1f) != 0)) continue;
+                            if (xs.Any(v => !float.IsFinite(v) || v is < -10_000 or > 10_000)) continue;
+                            if (ys.Any(v => !float.IsFinite(v) || v is < -10_000 or > 10_000)) continue;
+                            timeField = time.Name!; buttonsField = buttons.Name!; xField = x.Name!; yField = y.Name!;
+                            return true;
+                        }
+                        catch { }
+                    }
         return false;
     }
 
@@ -536,19 +543,19 @@ public sealed class StableClrReplayReader : IDisposable
     private static Process? findStableProcess(string? expectedGameFolder)
     {
         foreach (string name in new[] { "osu!", "osu" })
-        foreach (Process process in Process.GetProcessesByName(name))
-        {
-            try
+            foreach (Process process in Process.GetProcessesByName(name))
             {
-                string? directory = Path.GetDirectoryName(process.MainModule?.FileName);
-                bool expected = !string.IsNullOrWhiteSpace(expectedGameFolder) && directory is not null
-                    && Path.GetFullPath(directory).Equals(Path.GetFullPath(expectedGameFolder), StringComparison.OrdinalIgnoreCase);
-                bool stable = directory is not null && Directory.Exists(Path.Combine(directory, "Songs"));
-                if (!process.HasExited && (expected || stable)) return process;
+                try
+                {
+                    string? directory = Path.GetDirectoryName(process.MainModule?.FileName);
+                    bool expected = !string.IsNullOrWhiteSpace(expectedGameFolder) && directory is not null
+                        && Path.GetFullPath(directory).Equals(Path.GetFullPath(expectedGameFolder), StringComparison.OrdinalIgnoreCase);
+                    bool stable = directory is not null && Directory.Exists(Path.Combine(directory, "Songs"));
+                    if (!process.HasExited && (expected || stable)) return process;
+                }
+                catch { }
+                process.Dispose();
             }
-            catch { }
-            process.Dispose();
-        }
         return null;
     }
 
@@ -558,3 +565,4 @@ public sealed class StableClrReplayReader : IDisposable
         target.Dispose();
     }
 }
+#endif

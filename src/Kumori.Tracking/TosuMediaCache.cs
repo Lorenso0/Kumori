@@ -62,8 +62,9 @@ internal static class TosuMediaCache
             Directory.CreateDirectory(target);
 
             var parsed = ParseBeatmapMedia(beatmapSource, key, beatmapId, media.BeatmapSetId ?? 0)
-                with { BeatmapFile = $"{(beatmapId > 0 ? beatmapId : "map")}.osu" };
-            File.Copy(beatmapSource, Path.Combine(target, parsed.BeatmapFile), overwrite: true);
+                with
+            { BeatmapFile = $"{(beatmapId > 0 ? beatmapId : "map")}.osu" };
+            CopyIntoCache(beatmapSource, Path.Combine(target, parsed.BeatmapFile), "local-beatmap");
 
             var copied = new FileInfo(Path.Combine(target, parsed.BeatmapFile)).Length;
             var names = parsed.SampleEvents.Select(e => e.Filename)
@@ -99,7 +100,7 @@ internal static class TosuMediaCache
                     continue;
                 }
 
-                File.Copy(source, Path.Combine(target, safe), overwrite: true);
+                CopyIntoCache(source, Path.Combine(target, safe), "local-beatmap-media");
                 copied += size;
             }
 
@@ -405,7 +406,10 @@ internal static class TosuMediaCache
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         });
-        File.WriteAllText(Path.Combine(target, "manifest.json"), json);
+        var path = Path.Combine(target, "manifest.json");
+        var isNew = !File.Exists(path);
+        File.WriteAllText(path, json);
+        if (isNew) CacheActivityLog.RecordAddition(path, "beatmap-manifest");
     }
 
     private static CachedMedia? ReadCachedMedia(string key)
@@ -516,9 +520,10 @@ internal static class TosuMediaCache
             var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
             Directory.CreateDirectory(target);
             var osuPath = Path.Combine(target, $"{beatmapId}.osu");
-            osuEntry.ExtractToFile(osuPath, overwrite: true);
+            ExtractIntoCache(osuEntry, osuPath, $"mirror:{mirror}");
             var parsed = ParseBeatmapMedia(osuPath, key, beatmapId, setId)
-                with { BeatmapFile = $"{beatmapId}.osu" };
+                with
+            { BeatmapFile = $"{beatmapId}.osu" };
             var wanted = parsed.SampleEvents.Select(e => e.Filename)
                 .Append(parsed.AudioFile)
                 .Append(parsed.BackgroundFile)
@@ -540,7 +545,7 @@ internal static class TosuMediaCache
                 {
                     continue;
                 }
-                entry.ExtractToFile(Path.Combine(target, name), overwrite: true);
+                ExtractIntoCache(entry, Path.Combine(target, name), $"mirror:{mirror}");
                 copied += entry.Length;
             }
             WriteManifest(target, parsed);
@@ -592,6 +597,20 @@ internal static class TosuMediaCache
             }
             output.Write(buffer, 0, read);
         }
+    }
+
+    private static void CopyIntoCache(string source, string destination, string origin)
+    {
+        var isNew = !File.Exists(destination);
+        File.Copy(source, destination, overwrite: true);
+        if (isNew) CacheActivityLog.RecordAddition(destination, origin);
+    }
+
+    private static void ExtractIntoCache(ZipArchiveEntry entry, string destination, string origin)
+    {
+        var isNew = !File.Exists(destination);
+        entry.ExtractToFile(destination, overwrite: true);
+        if (isNew) CacheActivityLog.RecordAddition(destination, origin);
     }
 
     private static string MirrorDownloadUrl(string mirrorBase, long setId)

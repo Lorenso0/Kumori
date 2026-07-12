@@ -10,8 +10,17 @@ public sealed record AppState
     public CaptureStatus Capture { get; init; } = new();
     public CompanionStatus Companions { get; init; } = new();
     public MediaStatus Media { get; init; } = new();
+    public ApplicationUpdateStatus ApplicationUpdate { get; init; } = new();
     public ActiveSessionInfo? ActiveSession { get; init; }
     public IReadOnlyList<string> Notifications { get; init; } = Array.Empty<string>();
+}
+
+public sealed record ApplicationUpdateStatus
+{
+    public bool IsAvailable { get; init; }
+    public string Version { get; init; } = string.Empty;
+    public string ReleaseUrl { get; init; } = string.Empty;
+    public DateTimeOffset? PublishedAt { get; init; }
 }
 
 public enum HealthLevel { Unknown, Ok, Degraded, Error }

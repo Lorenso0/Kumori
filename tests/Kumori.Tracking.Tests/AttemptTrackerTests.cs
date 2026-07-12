@@ -361,44 +361,44 @@ public class AttemptTrackerTests
         double miss = 0,
         double hp = 1,
         double progress = 0) => new()
-    {
-        WallTime = 1_000 + t,
-        Packet = new PacketView
         {
-            MonoTime = t,
-            State = "play",
-            IsPlaying = true,
-            Identity = id,
-            LiveTimeMs = live,
-            Health = hp,
-        },
-        Score = score,
-        Play = new JudgementCapture.PlayValues
-        {
-            Hit300 = n300,
-            Hit100 = n100,
-            Hit50 = n50,
-            Miss = miss,
-            Health = hp,
-            Progress = progress,
-            Accuracy = n300 + n100 + n50 + miss == 0
+            WallTime = 1_000 + t,
+            Packet = new PacketView
+            {
+                MonoTime = t,
+                State = "play",
+                IsPlaying = true,
+                Identity = id,
+                LiveTimeMs = live,
+                Health = hp,
+            },
+            Score = score,
+            Play = new JudgementCapture.PlayValues
+            {
+                Hit300 = n300,
+                Hit100 = n100,
+                Hit50 = n50,
+                Miss = miss,
+                Health = hp,
+                Progress = progress,
+                Accuracy = n300 + n100 + n50 + miss == 0
                 ? 0
                 : (300 * n300 + 100 * n100 + 50 * n50) / (300 * (n300 + n100 + n50 + miss)),
-        },
-    };
+            },
+        };
 
     private static AttemptTracker.Frame Menu(
         double t,
         string state = "songselect") => new()
-    {
-        WallTime = 1_000 + t,
-        Packet = new PacketView
         {
-            MonoTime = t,
-            State = state,
-            Identity = "mapA",
-        },
-    };
+            WallTime = 1_000 + t,
+            Packet = new PacketView
+            {
+                MonoTime = t,
+                State = state,
+                Identity = "mapA",
+            },
+        };
 
     private static AttemptTracker.Frame Results(
         double t,
@@ -410,27 +410,27 @@ public class AttemptTrackerTests
         double n50 = 0,
         double miss = 0,
         double progress = 1) => new()
-    {
-        WallTime = 1_000 + t,
-        Packet = new PacketView
         {
-            MonoTime = t,
-            State = "resultscreen",
-            IsResults = true,
-            Identity = id,
+            WallTime = 1_000 + t,
+            Packet = new PacketView
+            {
+                MonoTime = t,
+                State = "resultscreen",
+                IsResults = true,
+                Identity = id,
+                Grade = grade,
+            },
+            Score = score,
             Grade = grade,
-        },
-        Score = score,
-        Grade = grade,
-        Play = new JudgementCapture.PlayValues
-        {
-            Hit300 = n300,
-            Hit100 = n100,
-            Hit50 = n50,
-            Miss = miss,
-            Progress = progress,
-        },
-    };
+            Play = new JudgementCapture.PlayValues
+            {
+                Hit300 = n300,
+                Hit100 = n100,
+                Hit50 = n50,
+                Miss = miss,
+                Progress = progress,
+            },
+        };
 
     private sealed class RecordingAttemptSink : IAttemptSink
     {

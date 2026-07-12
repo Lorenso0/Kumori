@@ -62,10 +62,9 @@ public static class AppPaths
     /// <summary>Tracking database written by the Python tracker (and later by .NET).</summary>
     public static string TrackingDatabase => Path.Combine(TrackingDataDir, "osu_tracking.sqlite3");
 
-    /// <summary>Parallel Phase 3 database written by the .NET tracker before ownership flips.</summary>
-    public static string TrackingShadowDatabase => Path.Combine(TrackingDataDir, "osu_tracking.net.sqlite3");
-
     public static string LogDir => Path.Combine(AppDataDir, "logs");
+
+    public static string CacheActivityLog => Path.Combine(LogDir, "cache-additions.jsonl");
 
     public static string AppLogDir => Path.Combine(LogDir, "app");
 
@@ -84,6 +83,8 @@ public static class AppPaths
     public static string TosuExecutable => Path.Combine(TosuDir, "tosu.exe");
 
     public static string TosuVersionFile => Path.Combine(TosuDir, "version.txt");
+
+    public static string TosuDigestFile => Path.Combine(TosuDir, "sha256.txt");
 
     public static string TosuEnvFile => Path.Combine(TosuDir, "tosu.env");
 

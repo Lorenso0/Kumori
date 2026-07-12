@@ -83,11 +83,11 @@ Update the pinned osu! NuGet package versions only after validating the replay v
 
 ## Creating a GitHub Release
 
-Pushing a version tag such as `v0.1.0` runs the GitHub Actions release workflow. It builds a self-contained Windows x64 publish and creates a GitHub Release containing one file: `Kumori.exe`.
+Pushing a version tag such as `v0.2.0` runs the GitHub Actions release workflow. It builds a self-contained Windows x64 publish and creates a GitHub Release containing one file: `Kumori.exe`.
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Run the downloaded `Kumori.exe` directly. The replay viewer is embedded in the executable and is extracted automatically into Kumori's private runtime storage when advanced replay analysis is used; users do not need to manage a companion folder. You can also run the workflow manually from GitHub's **Actions** tab to download a test build as an artifact without creating a Release.

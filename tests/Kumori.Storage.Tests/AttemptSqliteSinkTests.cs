@@ -162,6 +162,27 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
+    public void MovementCaptureStore_PreservesExistingCaptureUntilReplacementCompletes()
+    {
+        var factory = new SqliteConnectionFactory(_dbPath, readOnly: false);
+        var sink = new AttemptSqliteSink(factory);
+        sink.StartAttempt(new AttemptStart { Identity = "atomic-map", WallTime = 1_788_000_000 });
+        var attemptId = Assert.IsType<long>(sink.CurrentAttemptId);
+        var initial = new MovementCaptureStore(factory);
+        initial.Start(attemptId);
+        initial.AddSamples([new MovementSample { MapTimeMs = 1, MonotonicMs = 1 }]);
+        initial.Complete(0, "stable_memory", "{}");
+
+        var replacement = new MovementCaptureStore(factory);
+        replacement.Start(attemptId);
+        replacement.AddSamples([new MovementSample { MapTimeMs = 2, MonotonicMs = 2 }]);
+
+        var repository = new MovementRepository(factory);
+        Assert.Equal("stable_memory", repository.GetMetadata(attemptId)!.Source);
+        Assert.Equal(1, repository.GetSamples(attemptId).Single().MapTimeMs);
+    }
+
+    [Fact]
     public void SharedBeatmapMetadata_StoresBaseRatherThanModAdjustedStars()
     {
         var sink = CreateSink();
@@ -264,37 +285,37 @@ public class AttemptSqliteSinkTests : IDisposable
         double n300 = 0,
         double miss = 0,
         double progress = 0) => new()
-    {
-        WallTime = 1_788_000_000 + t,
-        Artist = "Artist",
-        Title = "Song",
-        Difficulty = "Insane",
-        Mapper = "Mapper",
-        ModsKey = "HDDT",
-        Mods =
+        {
+            WallTime = 1_788_000_000 + t,
+            Artist = "Artist",
+            Title = "Song",
+            Difficulty = "Insane",
+            Mapper = "Mapper",
+            ModsKey = "HDDT",
+            Mods =
         [
             new AttemptMod("HD"),
             new AttemptMod("DT"),
         ],
-        Packet = new PacketView
-        {
-            MonoTime = t,
-            State = "play",
-            IsPlaying = true,
-            Identity = "mapA",
-            LiveTimeMs = live,
-            Health = 1,
-        },
-        Score = score,
-        Play = new JudgementCapture.PlayValues
-        {
-            Hit300 = n300,
-            Miss = miss,
-            Combo = n300,
-            Progress = progress,
-            Accuracy = n300 + miss == 0 ? 0 : n300 / (n300 + miss),
-        },
-    };
+            Packet = new PacketView
+            {
+                MonoTime = t,
+                State = "play",
+                IsPlaying = true,
+                Identity = "mapA",
+                LiveTimeMs = live,
+                Health = 1,
+            },
+            Score = score,
+            Play = new JudgementCapture.PlayValues
+            {
+                Hit300 = n300,
+                Miss = miss,
+                Combo = n300,
+                Progress = progress,
+                Accuracy = n300 + miss == 0 ? 0 : n300 / (n300 + miss),
+            },
+        };
 
     private static AttemptTracker.Frame Menu(double t) => new()
     {
@@ -313,27 +334,27 @@ public class AttemptSqliteSinkTests : IDisposable
         double n300,
         double miss = 0,
         double progress = 1) => new()
-    {
-        WallTime = 1_788_000_000 + t,
-        Packet = new PacketView
         {
-            MonoTime = t,
-            State = "resultscreen",
-            IsResults = true,
-            Identity = "mapA",
+            WallTime = 1_788_000_000 + t,
+            Packet = new PacketView
+            {
+                MonoTime = t,
+                State = "resultscreen",
+                IsResults = true,
+                Identity = "mapA",
+                Grade = "A",
+            },
+            Score = score,
             Grade = "A",
-        },
-        Score = score,
-        Grade = "A",
-        Play = new JudgementCapture.PlayValues
-        {
-            Hit300 = n300,
-            Miss = miss,
-            Combo = n300,
-            Progress = progress,
-            Accuracy = n300 + miss == 0 ? 0 : n300 / (n300 + miss),
-        },
-    };
+            Play = new JudgementCapture.PlayValues
+            {
+                Hit300 = n300,
+                Miss = miss,
+                Combo = n300,
+                Progress = progress,
+                Accuracy = n300 + miss == 0 ? 0 : n300 / (n300 + miss),
+            },
+        };
 
     public void Dispose()
     {

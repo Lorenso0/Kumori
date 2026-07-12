@@ -281,13 +281,14 @@
                     <ColumnDefinition Width="24" />
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0" Width="62" Height="58" Margin="5,6"
-                        Background="{Binding ArtworkBrush}" CornerRadius="7" ClipToBounds="True">
+                <Border Grid.Column="0" Width="62" Height="40" Margin="5,0"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource Brush.ControlBackground}" CornerRadius="7" ClipToBounds="True">
                     <Grid>
-                        <Image Source="{Binding ArtworkSource, Converter={x:Static vm:PanelArtworkSourceConverter.Instance}}"
+                        <Image Source="{Binding ArtworkSource}"
                                Stretch="UniformToFill"
                                Visibility="{Binding DataContext.IsThumbnailArtwork, RelativeSource={RelativeSource AncestorType=Window}, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
-                        <Border Background="#18000000" />
+                        <Border Background="#0C000000" />
                     </Grid>
                 </Border>
 
@@ -410,6 +411,17 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="118,0,0,0">
                     <Ellipse Width="6" Height="6" Margin="0,0,6,0"><Ellipse.Fill><SolidColorBrush Color="{Binding TosuChipColor}"/></Ellipse.Fill></Ellipse>
                     <TextBlock Text="{Binding TosuChipText}" FontSize="10" Foreground="{DynamicResource Brush.TextSecondary}"/>
+                    <Button Content="{Binding UpdateAvailableText}"
+                            Command="{Binding OpenAvailableUpdateCommand}"
+                            Style="{StaticResource TopActionButtonOutline}"
+                            Height="24"
+                            MinHeight="24"
+                            Padding="9,0"
+                            Margin="12,0,0,0"
+                            FontSize="10"
+                            ToolTip="Open the latest Kumori release on GitHub"
+                            Visibility="{Binding IsUpdateAvailable, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"
+                            shell:WindowChrome.IsHitTestVisibleInChrome="True" />
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                     <TextBlock Text="{Binding AppVersionText}"
@@ -430,6 +442,7 @@
                                          DashboardRequested="DashboardNavigation_Click"
                                          PerformanceRequested="PerformanceNavigation_Click"
                                          MapsRequested="MapsNavigation_Click"
+                                         DiscordRequested="DiscordNavigation_Click"
                                          SettingsRequested="SettingsNavigation_Click"
                                          ToggleRequested="NavigationToggle_Click" />
 
@@ -503,7 +516,7 @@
                                Foreground="{DynamicResource Brush.TextSecondary}"
                                TextTrimming="CharacterEllipsis"
                                Margin="0,0,10,0" />
-                    <Button x:Name="RefreshButton" Content="End Session"
+                    <Button x:Name="EndSessionButton" Content="End Session"
                             Command="{Binding EndSessionCommand}"
                             Style="{StaticResource Button.Primary}"
                             Height="32"
@@ -550,6 +563,15 @@
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
+                    <Button x:Name="RefreshButton"
+                            Content="&#x21BB;"
+                            Command="{Binding RefreshCommand}"
+                            Style="{StaticResource TopActionButton}"
+                            Width="34"
+                            Padding="0"
+                            FontSize="17"
+                            ToolTip="Refresh dashboard"
+                            AutomationProperties.Name="Refresh dashboard" />
                 </StackPanel>
             </Grid>
         </Border>

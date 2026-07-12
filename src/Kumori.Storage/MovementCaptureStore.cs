@@ -12,6 +12,7 @@ public sealed class MovementCaptureStore
 
     private readonly SqliteConnectionFactory _factory;
     private readonly List<double> _pressTimes = new();
+    private readonly List<PendingChunk> _pendingChunks = new();
     private long? _attemptId;
     private int _position;
     private int _sampleCount;
@@ -54,21 +55,7 @@ public sealed class MovementCaptureStore
         _key1HoldMs = 0;
         _key2HoldMs = 0;
         _pressTimes.Clear();
-
-        using var con = _factory.Open();
-        using var tx = con.BeginTransaction();
-        Execute(con, tx,
-            """
-            UPDATE sessions
-            SET z_count = MAX(0, z_count - COALESCE((SELECT key1_presses FROM attempt_input_summary WHERE attempt_id = @id), 0)),
-                x_count = MAX(0, x_count - COALESCE((SELECT key2_presses FROM attempt_input_summary WHERE attempt_id = @id), 0))
-            WHERE id = (SELECT session_id FROM attempts WHERE id = @id)
-            """,
-            ("@id", attemptId));
-        Execute(con, tx, "DELETE FROM attempt_movement_chunks WHERE attempt_id = @id", ("@id", attemptId));
-        Execute(con, tx, "DELETE FROM attempt_movement WHERE attempt_id = @id", ("@id", attemptId));
-        Execute(con, tx, "DELETE FROM attempt_input_summary WHERE attempt_id = @id", ("@id", attemptId));
-        tx.Commit();
+        _pendingChunks.Clear();
     }
 
     public void AddSamples(IReadOnlyList<MovementSample> samples)
@@ -83,20 +70,12 @@ public sealed class MovementCaptureStore
             ObserveKeys(sample);
         }
 
-        using var con = _factory.Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO attempt_movement_chunks(attempt_id, position, first_map_time_ms,
-                                                last_map_time_ms, sample_count, payload_zlib)
-            VALUES(@attempt_id, @position, @first, @last, @count, @payload)
-            """;
-        cmd.Parameters.AddWithValue("@attempt_id", attemptId);
-        cmd.Parameters.AddWithValue("@position", _position++);
-        cmd.Parameters.AddWithValue("@first", (long)samples.First().MapTimeMs);
-        cmd.Parameters.AddWithValue("@last", (long)samples.Last().MapTimeMs);
-        cmd.Parameters.AddWithValue("@count", samples.Count);
-        cmd.Parameters.AddWithValue("@payload", MovementRepository.EncodeSamples(samples));
-        cmd.ExecuteNonQuery();
+        _pendingChunks.Add(new PendingChunk(
+            _position++,
+            (long)samples.First().MapTimeMs,
+            (long)samples.Last().MapTimeMs,
+            samples.Count,
+            MovementRepository.EncodeSamples(samples)));
         _sampleCount += samples.Count;
     }
 
@@ -126,6 +105,36 @@ public sealed class MovementCaptureStore
 
         using var con = _factory.Open();
         using var tx = con.BeginTransaction();
+        Execute(con, tx,
+            """
+            UPDATE sessions
+            SET z_count = MAX(0, z_count - COALESCE((SELECT key1_presses FROM attempt_input_summary WHERE attempt_id = @id), 0)),
+                x_count = MAX(0, x_count - COALESCE((SELECT key2_presses FROM attempt_input_summary WHERE attempt_id = @id), 0))
+            WHERE id = (SELECT session_id FROM attempts WHERE id = @id)
+            """,
+            ("@id", attemptId));
+        Execute(con, tx, "DELETE FROM attempt_movement_chunks WHERE attempt_id = @id", ("@id", attemptId));
+        Execute(con, tx, "DELETE FROM attempt_movement WHERE attempt_id = @id", ("@id", attemptId));
+        Execute(con, tx, "DELETE FROM attempt_input_summary WHERE attempt_id = @id", ("@id", attemptId));
+
+        foreach (var chunk in _pendingChunks)
+        {
+            using var insertChunk = con.CreateCommand();
+            insertChunk.Transaction = tx;
+            insertChunk.CommandText = """
+                INSERT INTO attempt_movement_chunks(attempt_id, position, first_map_time_ms,
+                                                    last_map_time_ms, sample_count, payload_zlib)
+                VALUES(@attempt_id, @position, @first, @last, @count, @payload)
+                """;
+            insertChunk.Parameters.AddWithValue("@attempt_id", attemptId);
+            insertChunk.Parameters.AddWithValue("@position", chunk.Position);
+            insertChunk.Parameters.AddWithValue("@first", chunk.FirstMapTimeMs);
+            insertChunk.Parameters.AddWithValue("@last", chunk.LastMapTimeMs);
+            insertChunk.Parameters.AddWithValue("@count", chunk.SampleCount);
+            insertChunk.Parameters.AddWithValue("@payload", chunk.Payload);
+            insertChunk.ExecuteNonQuery();
+        }
+
         using var movement = con.CreateCommand();
         movement.Transaction = tx;
         movement.CommandText = """
@@ -198,7 +207,15 @@ public sealed class MovementCaptureStore
         Log.Debug("Stored movement capture for attempt {AttemptId}: {Samples} samples, Z {Z}, X {X}",
             attemptId, _sampleCount, _key1Presses, _key2Presses);
         _attemptId = null;
+        _pendingChunks.Clear();
     }
+
+    private sealed record PendingChunk(
+        int Position,
+        long FirstMapTimeMs,
+        long LastMapTimeMs,
+        int SampleCount,
+        byte[] Payload);
 
     private void ObserveKeys(MovementSample sample)
     {

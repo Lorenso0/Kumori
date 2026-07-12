@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Keep every first-party assembly aligned for local, CI, and IDE builds.
+         A command-line Version (for example, a release tag) still takes precedence. -->
+    <Version>0.2.0</Version>
+  </PropertyGroup>
+</Project>

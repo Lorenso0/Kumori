@@ -26,16 +26,21 @@ public sealed class PersistedReplayReconciliationService
         this.movementReplaced = movementReplaced;
     }
 
-    public void Run()
+    public void Run(CancellationToken cancellationToken = default)
     {
         foreach (Candidate candidate in LoadCandidates())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 if (candidate.ClientKind.Equals("stable", StringComparison.OrdinalIgnoreCase))
-                    ReconcileStable(candidate);
+                    ReconcileStable(candidate, cancellationToken);
                 else if (candidate.ClientKind.Equals("lazer", StringComparison.OrdinalIgnoreCase))
-                    ReconcileLazer(candidate);
+                    ReconcileLazer(candidate, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -44,7 +49,7 @@ public sealed class PersistedReplayReconciliationService
         }
     }
 
-    private void ReconcileStable(Candidate candidate)
+    private void ReconcileStable(Candidate candidate, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(candidate.GameFolder)
             || string.IsNullOrWhiteSpace(candidate.BeatmapPath)
@@ -61,6 +66,7 @@ public sealed class PersistedReplayReconciliationService
                      .OrderBy(file => Math.Abs((file.Time - candidate.EndedAt).TotalMilliseconds))
                      .Select(file => file.Path))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!StableReplayFrameRecoverySink.TryRead(replay, beatmapPath, candidate.Checksum, out var samples))
                 continue;
             var existing = movementRepository.GetMetadata(candidate.AttemptId);
@@ -80,8 +86,9 @@ public sealed class PersistedReplayReconciliationService
         }
     }
 
-    private void ReconcileLazer(Candidate candidate)
+    private void ReconcileLazer(Candidate candidate, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var beatmap = LazerStorage.ResolveBeatmapAssets(candidate.BeatmapId, candidate.BeatmapSetId, candidate.Difficulty);
         if (beatmap is null)
             return;
@@ -152,12 +159,15 @@ public sealed class PersistedReplayReconciliationService
         return result;
     }
 
-    private static IEnumerable<string> ReplayFiles(string gameFolder)
+    internal static IEnumerable<string> ReplayFiles(string gameFolder)
     {
         foreach (string directory in new[] { Path.Combine(gameFolder, "Data", "r"), Path.Combine(gameFolder, "Replays") })
         {
             if (!Directory.Exists(directory)) continue;
-            foreach (string file in Directory.EnumerateFiles(directory, "*.osr", SearchOption.TopDirectoryOnly))
+            var pattern = directory.EndsWith(Path.Combine("Data", "r"), StringComparison.OrdinalIgnoreCase)
+                ? "*"
+                : "*.osr";
+            foreach (string file in Directory.EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly))
                 yield return file;
         }
     }

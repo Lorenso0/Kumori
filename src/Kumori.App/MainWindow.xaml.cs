@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using System.Globalization;
 using System.Windows;
@@ -205,11 +206,11 @@ public partial class MainWindow : Window
         }
         var menu = new ContextMenu();
         var replay = new MenuItem { Header = "Open Replay Analyzer", IsEnabled = row.CanOpenReplayInspector };
-        replay.Click += (_, _) => vm.OpenReplayInspector(row);
+        replay.Click += async (_, _) => await vm.OpenReplayInspectorAsync(row);
         var showAll = new MenuItem { Header = "Show all plays for this map" };
         showAll.Click += (_, _) => vm.ShowAllPlaysForMap(row);
         var delete = new MenuItem { Header = "Delete this attempt" };
-        delete.Click += (_, _) => vm.DeleteAttempt(row);
+        delete.Click += async (_, _) => await vm.DeleteAttemptAsync(row);
         menu.Items.Add(replay);
         menu.Items.Add(new Separator());
         menu.Items.Add(showAll);
@@ -228,7 +229,7 @@ public partial class MainWindow : Window
         }
         var menu = new ContextMenu();
         var delete = new MenuItem { Header = "Delete this session" };
-        delete.Click += (_, _) => vm.DeleteSession(row.Model.Id);
+        delete.Click += async (_, _) => await vm.DeleteSessionAsync(row.Model.Id);
         menu.Items.Add(delete);
         menu.PlacementTarget = button;
         menu.IsOpen = true;
@@ -291,6 +292,18 @@ public partial class MainWindow : Window
 
     private void PerformanceNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Performance");
     private void MapsNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Maps");
+    private void DiscordNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(SupportLinks.DiscordInviteUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            KumoriDialog.Show(this, $"Could not open Discord.\n\n{ex.Message}", "Kumori", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void SettingsNavigation_Click(object sender, RoutedEventArgs e)
     {
         ShowPage("Settings");

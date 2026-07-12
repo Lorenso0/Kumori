@@ -117,4 +117,26 @@ public class SettingsMigrationTests
             dir.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void Load_PreservesCorruptV2BeforeWritingDefaults()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.v2.json");
+            File.WriteAllText(path, "{ truncated");
+
+            var loaded = new SettingsService(path, Path.Combine(dir.FullName, "missing.json")).Load();
+
+            Assert.NotNull(loaded);
+            Assert.Single(Directory.EnumerateFiles(dir.FullName, "settings.v2.json.corrupt-*"));
+            Assert.Equal("{ truncated", File.ReadAllText(Directory.EnumerateFiles(dir.FullName, "settings.v2.json.corrupt-*").Single()));
+            Assert.NotEqual("{ truncated", File.ReadAllText(path));
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
 }

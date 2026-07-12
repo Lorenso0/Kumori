@@ -51,6 +51,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _sessionIndicator = "No active session";
     [ObservableProperty] private string _tosuChipText = "Tracker offline";
     [ObservableProperty] private string _tosuChipColor = "#FF4F7B";
+    [ObservableProperty] private bool _isUpdateAvailable;
+    [ObservableProperty] private string _updateAvailableText = "Update available";
     [ObservableProperty] private bool _isTosuLaunchVisible = true;
     [ObservableProperty] private bool _isLaunchingTosu;
     [ObservableProperty] private bool _isReplayAnalyzerLoading;
@@ -111,6 +113,8 @@ public partial class MainViewModel : ObservableObject
     partial void OnIsScrolledToBottomChanged(bool value) => OnPropertyChanged(nameof(LoadOlderVisible));
     private string? _activeSearch;
     private CancellationTokenSource? _searchDebounce;
+    private readonly SemaphoreSlim _reloadGate = new(1, 1);
+    private long _reloadGeneration;
 
     public MainViewModel(
         AppStateStore store,
@@ -141,7 +145,7 @@ public partial class MainViewModel : ObservableObject
     public string ResultsShortText => $"{Attempts.Count:N0}";
     public bool CanLaunchTosu => IsTosuLaunchVisible && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "1.0.0"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.2.0"}";
 
     partial void OnIsTosuLaunchVisibleChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -187,8 +191,11 @@ public partial class MainViewModel : ObservableObject
 
     private async Task ReloadFirstPageAsync()
     {
+        var generation = Interlocked.Increment(ref _reloadGeneration);
+        await _reloadGate.WaitAsync();
         try
         {
+            if (generation != Volatile.Read(ref _reloadGeneration)) return;
             var search = _activeSearch;
             var load = await Task.Run(() => new
             {
@@ -202,7 +209,7 @@ public partial class MainViewModel : ObservableObject
                 CacheBytes = CacheStorageUsage.GetAdditionalBytes(AppPaths.BeatmapMediaDir),
                 UsingLazerRealm = LazerStorage.GetDiagnostics().RealmOpened,
             });
-            if (search != _activeSearch)
+            if (search != _activeSearch || generation != Volatile.Read(ref _reloadGeneration))
             {
                 return;
             }
@@ -250,6 +257,10 @@ public partial class MainViewModel : ObservableObject
             Log.Error(ex, "History load failed");
             HistoryStatus = "Could not read history (see logs)";
         }
+        finally
+        {
+            _reloadGate.Release();
+        }
     }
 
     private void ApplyDashboard(AnalyticsSummary analytics, IReadOnlyList<AttemptSummary> page, long dbBytes, long cacheBytes)
@@ -275,7 +286,7 @@ public partial class MainViewModel : ObservableObject
         GlobalScoreMetric = analytics.TotalScore.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         var synced = analytics.LastSyncedAt is { Length: >= 16 } stamp ? stamp.Substring(11, 5) : "—";
         var mediaStatus = _usingLazerRealm
-            ? $"Using Realm ({cacheBytes / 1_048_576.0:0.00} MB local)"
+            ? $"Using Realm ({cacheBytes / 1_048_576.0:0.00} MB Kumori cache)"
             : $"Cache {cacheBytes / 1_048_576.0:0.00} MB";
         SyncLine = Invariant($"Synced {synced}  ·  DB {dbBytes / 1_048_576.0:0.0} MB  ·  {mediaStatus}");
 
@@ -433,6 +444,15 @@ public partial class MainViewModel : ObservableObject
         OpenInWorkspace(new UpdateCheckWindow(), "Updates");
     }
 
+    [RelayCommand]
+    private void OpenAvailableUpdate()
+    {
+        var releaseUrl = _appState.Current.ApplicationUpdate.ReleaseUrl;
+        if (string.IsNullOrWhiteSpace(releaseUrl)) releaseUrl = KumoriUpdateService.ReleasesUrl;
+        try { Process.Start(new ProcessStartInfo { FileName = releaseUrl, UseShellExecute = true }); }
+        catch (Exception ex) { Log.Warning(ex, "Could not open Kumori release page {Url}", releaseUrl); }
+    }
+
     private void OpenInWorkspace(Window window, string title)
         => WorkspaceWindowRequested?.Invoke(window, title);
 
@@ -506,7 +526,7 @@ public partial class MainViewModel : ObservableObject
                 Writer: .NET real DB
                 Logs: {AppPaths.LogDir}
 
-                Contact: https://discord.gg/sFNs6znDNU
+                Contact: {SupportLinks.DiscordInviteUrl}
                 """);
             CopyIfExists(AppPaths.SettingsFile, Path.Combine(tempDir, "settings.v2.json"));
             CopyIfExists(AppPaths.LegacySettingsFile, Path.Combine(tempDir, "settings.legacy.json"));
@@ -533,7 +553,7 @@ public partial class MainViewModel : ObservableObject
             HistoryStatus = $"Diagnostics written to {report}";
             if (KumoriDialog.Confirm(ActiveOwner(), "Copy the support Discord invite to clipboard?", "Kumori", MessageBoxImage.Question))
             {
-                Clipboard.SetText("https://discord.gg/sFNs6znDNU");
+                Clipboard.SetText(SupportLinks.DiscordInviteUrl);
             }
         }
         catch (Exception ex)
@@ -755,35 +775,35 @@ public partial class MainViewModel : ObservableObject
         a.OsuBeatmapId?.ToString() ?? a.Checksum ?? a.Title;
 
     /// <summary>Confirm + delete a single attempt, then reload.</summary>
-    public void DeleteAttempt(AttemptRowViewModel row)
+    public async Task DeleteAttemptAsync(AttemptRowViewModel row)
     {
         if (!KumoriDialog.Confirm(ActiveOwner(), "Permanently delete this attempt?", "Delete attempt", MessageBoxImage.Warning))
         {
             return;
         }
-        _maintenance.DeleteAttempt(row.Id);
+        await Task.Run(() => _maintenance.DeleteAttempt(row.Id));
         Inspector.ForgetAttempt(row.Id);
         if (SelectedAttempt?.Id == row.Id)
         {
             SelectedAttempt = null;
         }
-        _ = ReloadFirstPageAsync();
+        await ReloadFirstPageAsync();
     }
 
     /// <summary>Confirm + delete a whole session and its attempts, then reload.</summary>
-    public void DeleteSession(long sessionId)
+    public async Task DeleteSessionAsync(long sessionId)
     {
         if (!KumoriDialog.Confirm(ActiveOwner(), "Permanently delete this session and all its attempts?", "Delete session", MessageBoxImage.Warning))
         {
             return;
         }
-        _maintenance.DeleteSession(sessionId);
+        await Task.Run(() => _maintenance.DeleteSession(sessionId));
         if (SelectedAttempt?.Model.SessionId == sessionId)
         {
             Inspector.ForgetAttempt(SelectedAttempt.Id);
             SelectedAttempt = null;
         }
-        _ = ReloadFirstPageAsync();
+        await ReloadFirstPageAsync();
     }
 
     /// <summary>Filter the list to every loaded attempt on the same beatmap.</summary>
@@ -816,7 +836,7 @@ public partial class MainViewModel : ObservableObject
         HistoryStatus = $"{Attempts.Count} problem play(s) for this map";
     }
 
-    public async void OpenReplayInspector(AttemptRowViewModel row)
+    public async Task OpenReplayInspectorAsync(AttemptRowViewModel row)
     {
         SelectedAttempt = row;
         var owner = ActiveOwner();
@@ -863,12 +883,13 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenSelectedReplayInspector()
+    private Task OpenSelectedReplayInspector()
     {
         if (SelectedAttempt is { } row)
         {
-            OpenReplayInspector(row);
+            return OpenReplayInspectorAsync(row);
         }
+        return Task.CompletedTask;
     }
 
     private IEnumerable<AttemptSummary> FilterAttempts(IEnumerable<AttemptSummary> attempts)
@@ -983,6 +1004,10 @@ public partial class MainViewModel : ObservableObject
                     _ => "#A86C9E",
                 };
             IsTosuLaunchVisible = !tracking.TosuConnected;
+            IsUpdateAvailable = state.ApplicationUpdate.IsAvailable;
+            UpdateAvailableText = string.IsNullOrWhiteSpace(state.ApplicationUpdate.Version)
+                ? "Update available"
+                : $"Update {state.ApplicationUpdate.Version} available";
         });
     }
 

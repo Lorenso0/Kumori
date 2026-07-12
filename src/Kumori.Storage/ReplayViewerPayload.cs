@@ -53,7 +53,12 @@ internal static class ReplayViewerPayload
                 else
                 {
                     Directory.Move(temporaryDirectory, versionDirectory);
+                    foreach (var added in Directory.EnumerateFiles(versionDirectory, "*", SearchOption.AllDirectories))
+                    {
+                        CacheActivityLog.RecordAddition(added, "embedded-replay-viewer");
+                    }
                 }
+                PruneOtherVersions(versionDirectory);
 
                 return File.Exists(executable) ? executable : null;
             }
@@ -73,6 +78,21 @@ internal static class ReplayViewerPayload
                 Log.Warning(ex, "Could not extract the embedded replay viewer");
                 return null;
             }
+        }
+    }
+
+    private static void PruneOtherVersions(string currentDirectory)
+    {
+        foreach (var directory in Directory.EnumerateDirectories(AppPaths.ViewerRuntimeDir))
+        {
+            if (string.Equals(directory, currentDirectory, StringComparison.OrdinalIgnoreCase) ||
+                Path.GetFileName(directory).Contains(".extract-", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            try { Directory.Delete(directory, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 }

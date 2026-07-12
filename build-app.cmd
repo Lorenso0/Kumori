@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if not defined KUMORI_VERSION set KUMORI_VERSION=0.2.0
 
 REM ============================================================
 REM  Kumori WPF app (new .NET solution) build script.
@@ -15,7 +16,7 @@ REM ============================================================
 
 if /i "%~1"=="publish" goto :publish
 
-dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Debug -r win-x64 ^
+dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Debug -r win-x64 -p:Version=%KUMORI_VERSION% ^
   --self-contained false ^
   -o replay_viewer\bin\Debug\net8.0\win-x64
 if errorlevel 1 exit /b %errorlevel%
@@ -23,7 +24,7 @@ if errorlevel 1 exit /b %errorlevel%
 dotnet build Kumori.sln -c Debug
 if errorlevel 1 exit /b %errorlevel%
 
-xcopy /E /I /Y replay_viewer\bin\Debug\net8.0\win-x64 src\Kumori.App\bin\Debug\net8.0-windows\Kumori.ReplayViewer >nul
+xcopy /E /I /Y replay_viewer\bin\Debug\net8.0\win-x64 src\Kumori.App\bin\Debug\net8.0-windows10.0.17763.0\Kumori.ReplayViewer >nul
 if errorlevel 1 exit /b %errorlevel%
 
 dotnet test Kumori.sln -c Debug --no-build
@@ -44,7 +45,7 @@ if exist artifacts\Kumori.ReplayViewer.zip del /Q artifacts\Kumori.ReplayViewer.
 if exist artifacts\app-publish rmdir /S /Q artifacts\app-publish
 if exist dist\app rmdir /S /Q dist\app
 
-dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Release -r win-x64 ^
+dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Release -r win-x64 -p:Version=%KUMORI_VERSION% ^
   --self-contained true ^
   -p:PublishSingleFile=false ^
   -p:PublishReadyToRun=false ^
@@ -54,7 +55,7 @@ if errorlevel 1 exit /b %errorlevel%
 powershell -NoProfile -NonInteractive -Command "Compress-Archive -Path 'artifacts\viewer-release\*' -DestinationPath 'artifacts\Kumori.ReplayViewer.zip' -CompressionLevel Optimal"
 if errorlevel 1 exit /b %errorlevel%
 
-dotnet publish src\Kumori.App\Kumori.App.csproj -c Release -r win-x64 ^
+dotnet publish src\Kumori.App\Kumori.App.csproj -c Release -r win-x64 -p:Version=%KUMORI_VERSION% ^
   --self-contained true ^
   -p:PublishSingleFile=true ^
   -p:PublishReadyToRun=true ^

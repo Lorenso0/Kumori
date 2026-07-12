@@ -958,6 +958,7 @@ internal sealed record LazerMemoryOffsets(
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         try
         {
+            var isNew = !File.Exists(path);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("Kumori");
             var json = http.GetStringAsync(OfficialOffsetsUrl).GetAwaiter().GetResult();
@@ -966,6 +967,7 @@ internal sealed record LazerMemoryOffsets(
             var temp = path + ".new";
             File.WriteAllText(temp, json);
             File.Move(temp, path, overwrite: true);
+            if (isNew) CacheActivityLog.RecordAddition(path, "tosu-memory-offsets");
         }
         catch when (File.Exists(path))
         {

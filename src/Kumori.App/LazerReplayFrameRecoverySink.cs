@@ -13,15 +13,21 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
     private readonly MovementCaptureStore movement;
     private readonly MovementRepository repository;
     private readonly Action<long>? movementReplaced;
+    private readonly CancellationToken cancellationToken;
     private AttemptStart? start;
     private long generation;
 
-    public LazerReplayFrameRecoverySink(SqliteConnectionFactory factory, Func<long?> attemptId, Action<long>? movementReplaced = null)
+    public LazerReplayFrameRecoverySink(
+        SqliteConnectionFactory factory,
+        Func<long?> attemptId,
+        Action<long>? movementReplaced = null,
+        CancellationToken cancellationToken = default)
     {
         this.attemptId = attemptId;
         movement = new MovementCaptureStore(factory);
         repository = new MovementRepository(factory);
         this.movementReplaced = movementReplaced;
+        this.cancellationToken = cancellationToken;
     }
 
     public void StartAttempt(AttemptStart value)
@@ -40,10 +46,11 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         long capturedGeneration = Volatile.Read(ref generation);
         start = null;
         if (capturedStart is null || id is null || string.IsNullOrWhiteSpace(capturedStart.Checksum)) return;
-        _ = Task.Run(() => RecoverAsync(capturedStart, id.Value, capturedGeneration));
+        var endedAt = DateTimeOffset.FromUnixTimeMilliseconds((long)(finalization.Snapshot.WallTime * 1000));
+        _ = Task.Run(() => RecoverAsync(capturedStart, id.Value, capturedGeneration, endedAt), cancellationToken);
     }
 
-    private async Task RecoverAsync(AttemptStart attempt, long id, long capturedGeneration)
+    private async Task RecoverAsync(AttemptStart attempt, long id, long capturedGeneration, DateTimeOffset endedAt)
     {
         try
         {
@@ -54,7 +61,8 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
             // finalizes. Match stable recovery's two-minute window.
             for (var pass = 0; pass < 240; pass++)
             {
-                var replay = LazerStorage.ResolveReplayFile(attempt.Checksum!, startedAt, attempt.GameFolder);
+                cancellationToken.ThrowIfCancellationRequested();
+                var replay = LazerStorage.ResolveReplayFile(attempt.Checksum!, startedAt, attempt.GameFolder, endedAt);
                 if (replay is not null && StableReplayFrameRecoverySink.TryRead(replay, beatmap.BeatmapPath, attempt.Checksum, out var samples))
                 {
                     var existing = repository.GetMetadata(id);
@@ -80,7 +88,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
                     return;
                 }
                 UpdateIfCurrent(capturedGeneration, status => status.LocalReplayState = "waiting");
-                await Task.Delay(500);
+                await Task.Delay(500, cancellationToken);
             }
             var retained = repository.GetMetadata(id);
             if (retained is { SampleCount: > 0 } && retained.Source is "lazer_memory" or "lazer_replay_frame")
@@ -97,6 +105,9 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
                 status.LocalReplayState = "not_found";
                 status.LocalReplayError = "No matching persisted lazer replay appeared.";
             });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {

@@ -80,30 +80,30 @@ public partial class ReplayViewerGame : OsuGameBase
         {
             base.LoadComplete();
 
-        // OsuGameBase registers these services during its own dependency
-        // loading. Building the player here (rather than in a derived
-        // BackgroundDependencyLoader) guarantees they are available.
-        var audio = Dependencies.Get<AudioManager>();
-        var host = gameHost = Dependencies.Get<GameHost>();
-        var frameworkConfig = Dependencies.Get<FrameworkConfigManager>();
+            // OsuGameBase registers these services during its own dependency
+            // loading. Building the player here (rather than in a derived
+            // BackgroundDependencyLoader) guarantees they are available.
+            var audio = Dependencies.Get<AudioManager>();
+            var host = gameHost = Dependencies.Get<GameHost>();
+            var frameworkConfig = Dependencies.Get<FrameworkConfigManager>();
 
-        configureWindow(frameworkConfig);
+            configureWindow(frameworkConfig);
 
-        Window.Title = $"Kumori — {analysis.Artist} — {analysis.Title} [{analysis.Difficulty}]";
+            Window.Title = $"Kumori — {analysis.Artist} — {analysis.Title} [{analysis.Difficulty}]";
 
-        ruleset = new OsuRuleset();
-        workingBeatmap = new KumoriWorkingBeatmap(contract.BeatmapPath, contract.MediaDirectory, contract.MediaPaths, audio, host);
-        Beatmap.Value = workingBeatmap;
-        Ruleset.Value = ruleset.RulesetInfo;
+            ruleset = new OsuRuleset();
+            workingBeatmap = new KumoriWorkingBeatmap(contract.BeatmapPath, contract.MediaDirectory, contract.MediaPaths, audio, host);
+            Beatmap.Value = workingBeatmap;
+            Ruleset.Value = ruleset.RulesetInfo;
 
-        // Analysis playback: the hit-lighting flash (skin lighting.png)
-        // obscures exactly the moments being reviewed. This host has its own
-        // config store, so this never touches the player's real osu! setting.
-        LocalConfig.SetValue(OsuSetting.HitLighting, false);
+            // Analysis playback: the hit-lighting flash (skin lighting.png)
+            // obscures exactly the moments being reviewed. This host has its own
+            // config store, so this never touches the player's real osu! setting.
+            LocalConfig.SetValue(OsuSetting.HitLighting, false);
 
-        viewerConfig = new KumoriViewerConfig(host.Storage);
-        seedViewerSettingsFromContract();
-        selectSkin();
+            viewerConfig = new KumoriViewerConfig(host.Storage);
+            seedViewerSettingsFromContract();
+            selectSkin();
 
             screenStack = new OsuScreenStack
             {

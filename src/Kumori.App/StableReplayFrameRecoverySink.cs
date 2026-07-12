@@ -23,15 +23,21 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
     private readonly MovementCaptureStore _movement;
     private readonly MovementRepository _repository;
     private readonly Action<long>? movementReplaced;
+    private readonly CancellationToken cancellationToken;
     private AttemptStart? _start;
     private DateTime _startedUtc;
 
-    public StableReplayFrameRecoverySink(SqliteConnectionFactory factory, Func<long?> attemptId, Action<long>? movementReplaced = null)
+    public StableReplayFrameRecoverySink(
+        SqliteConnectionFactory factory,
+        Func<long?> attemptId,
+        Action<long>? movementReplaced = null,
+        CancellationToken cancellationToken = default)
     {
         _attemptId = attemptId;
         _movement = new MovementCaptureStore(factory);
         _repository = new MovementRepository(factory);
         this.movementReplaced = movementReplaced;
+        this.cancellationToken = cancellationToken;
         StableReplayFrameDiagnostics.Update(status =>
         {
             status.Enabled = true;
@@ -94,7 +100,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
             status.ActiveAttemptId = attemptId;
         });
 
-        _ = Task.Run(() => RecoverAsync(start, attemptId.Value, startedUtc));
+        _ = Task.Run(() => RecoverAsync(start, attemptId.Value, startedUtc), cancellationToken);
     }
 
     private async Task RecoverAsync(AttemptStart start, long attemptId, DateTime startedUtc)
@@ -122,6 +128,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
             var checkedVersions = new Dictionary<string, (long Length, long WriteTicks)>(StringComparer.OrdinalIgnoreCase);
             for (var pass = 0; pass < 240; pass++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 foreach (var candidate in ReplayCandidates(gameFolder, startedUtc))
                 {
                     var info = new FileInfo(candidate);
@@ -183,7 +190,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
                         return;
                     }
                 }
-                await Task.Delay(500);
+                await Task.Delay(500, cancellationToken);
             }
             Log.Debug("No matching local osu!stable replay appeared for attempt {AttemptId}", attemptId);
             var retained = _repository.GetMetadata(attemptId);
@@ -205,6 +212,9 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
                 status.ActiveAttemptId = null;
                 status.LastError = "Matching stable replay not found";
             });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -233,7 +243,10 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         if (!Directory.Exists(directory)) yield break;
         // The embedded beatmap hash is authoritative; never rely on the
         // filename prefix to identify a replay.
-        foreach (var file in Directory.EnumerateFiles(directory, "*.osr", SearchOption.TopDirectoryOnly))
+        // Stable's internal Data/r store normally uses hash-like filenames with
+        // no .osr extension. Exported replays use .osr, so inspect every regular
+        // file here and let the decoder/checksum validation identify a match.
+        foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
             yield return file;
     }
 

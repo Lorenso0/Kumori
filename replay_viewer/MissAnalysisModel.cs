@@ -591,11 +591,11 @@ internal static class MissAnalysisBuilder
             return hitObject == null ? [] : [hitObject.StackedPosition];
         List<Vector2> path = [];
         for (int span = 0; span <= slider.RepeatCount; span++)
-        for (int point = 0; point <= 24; point++)
-        {
-            double progress = point / 24.0;
-            path.Add(slider.StackedPositionAt(span % 2 == 1 ? 1 - progress : progress));
-        }
+            for (int point = 0; point <= 24; point++)
+            {
+                double progress = point / 24.0;
+                path.Add(slider.StackedPositionAt(span % 2 == 1 ? 1 - progress : progress));
+            }
         return path;
     }
 

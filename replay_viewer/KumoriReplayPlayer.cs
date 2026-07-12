@@ -76,6 +76,9 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
             AllowUserInteraction = true,
             AllowSkipping = true,
             ShowLeaderboard = false,
+            // Kumori is an analysis viewer. The full-screen red failing tint
+            // obscures replay details when health drops, so it is always off.
+            ShowFailingOverlay = false,
         })
     {
         sourceScore = score;

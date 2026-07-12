@@ -14,6 +14,7 @@ public sealed class TrayIconService : IDisposable
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _statusItem;
     private readonly ToolStripMenuItem _dualModeToggleItem;
+    private readonly ToolStripMenuItem _endSessionItem;
 
     public event Action? OpenRequested;
     public event Action? SettingsRequested;
@@ -23,6 +24,7 @@ public sealed class TrayIconService : IDisposable
     public event Action? RestoreDualModeRequested;
     public event Action? KeepDualModeRequested;
     public event Action? DualModeToggleRequested;
+    public event Action? UpdateRequested;
 
     public TrayIconService(string tooltip, string? iconPath = null)
     {
@@ -47,7 +49,9 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add("Open Kumori", null, (_, _) => OpenRequested?.Invoke());
         menu.Items.Add("Settings", null, (_, _) => SettingsRequested?.Invoke());
         menu.Items.Add("Logs", null, (_, _) => LogsRequested?.Invoke());
-        menu.Items.Add("End Session", null, (_, _) => EndSessionRequested?.Invoke());
+        _endSessionItem = new ToolStripMenuItem("End Session") { Enabled = false };
+        _endSessionItem.Click += (_, _) => EndSessionRequested?.Invoke();
+        menu.Items.Add(_endSessionItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitRequested?.Invoke());
         _icon.ContextMenuStrip = menu;
@@ -58,7 +62,18 @@ public sealed class TrayIconService : IDisposable
     public void ShowNotification(string title, string message)
         => _icon.ShowBalloonTip(5000, title, message, ToolTipIcon.None);
 
+    public void ShowUpdateNotification(string version)
+    {
+        new ToastContentBuilder()
+            .AddText("Kumori update available")
+            .AddText($"Version {version} is ready on GitHub.")
+            .AddButton("Open release", ToastActivationType.Foreground, "kumoriAction=openUpdate")
+            .Show();
+    }
+
     public void SetDualModeToggleEnabled(bool enabled) => _dualModeToggleItem.Enabled = enabled;
+
+    public void SetEndSessionEnabled(bool enabled) => _endSessionItem.Enabled = enabled;
 
     /// <summary>Shows a Windows toast with actions embedded in the notification itself.</summary>
     public void ShowDualModeRestoreNotification()
@@ -109,6 +124,9 @@ public sealed class TrayIconService : IDisposable
                 break;
             case "kumoriAction=keepDualMode":
                 KeepDualModeRequested?.Invoke();
+                break;
+            case "kumoriAction=openUpdate":
+                UpdateRequested?.Invoke();
                 break;
         }
     }

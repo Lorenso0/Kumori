@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
+using AutoMapper;
 using osu.Framework;
 using osu.Framework.Platform;
 using osu.Game.Rulesets.Osu.Replays;
@@ -27,15 +28,18 @@ public static class Program
             NativeViewerLog.Write($"Starting with args: {string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}");
             if (options.Probe)
             {
-                NativeViewerLog.Write("Probe succeeded");
+                bool autoMapperCompatible = typeof(MapperConfiguration).GetConstructor(
+                    [typeof(Action<IMapperConfigurationExpression>)]) is not null;
+                NativeViewerLog.Write(autoMapperCompatible ? "Probe succeeded" : "Probe failed: incompatible AutoMapper ABI");
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
-                    status = "ok",
+                    status = autoMapperCompatible ? "ok" : "error",
                     contract_version = ViewerContract.CurrentVersion,
                     lazer_package = BuildInfo.LazerPackageVersion,
+                    automapper_compatible = autoMapperCompatible,
                     assembly = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
                 }));
-                return 0;
+                return autoMapperCompatible ? 0 : 2;
             }
 
             ViewerContract contract = ViewerContract.Load(options.ContractPath!);

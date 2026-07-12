@@ -8,10 +8,14 @@ public class JudgementCaptureTests
     private static JudgementCapture.PlayValues Values(
         double h100 = 0, double h50 = 0, double miss = 0, double sb = 0,
         double combo = 0, double ppPeak = 0) => new()
-    {
-        Hit100 = h100, Hit50 = h50, Miss = miss, SliderBreak = sb,
-        Combo = combo, PpPeak = ppPeak,
-    };
+        {
+            Hit100 = h100,
+            Hit50 = h50,
+            Miss = miss,
+            SliderBreak = sb,
+            Combo = combo,
+            PpPeak = ppPeak,
+        };
 
     private static List<JudgementCapture.CapturedEvent> NonCheckpoint(
         JudgementCapture capture, JudgementCapture.PlayValues values) =>
@@ -80,8 +84,13 @@ public class JudgementCaptureTests
         var capture = new JudgementCapture();
         var events = capture.Capture(new JudgementCapture.PlayValues
         {
-            Hit300 = 100, Hit100 = 5, Miss = 1, PpCurrent = 42.5,
-            Accuracy = 97.1, Combo = 200, Progress = 0.5,
+            Hit300 = 100,
+            Hit100 = 5,
+            Miss = 1,
+            PpCurrent = 42.5,
+            Accuracy = 97.1,
+            Combo = 200,
+            Progress = 0.5,
         });
         var checkpoint = Assert.Single(events, e => e.EventType == "checkpoint");
         Assert.Equal(42.5, checkpoint.Value);

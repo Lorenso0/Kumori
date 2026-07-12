@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Kumori.Core;
 using Realms;
 using Realms.Exceptions;
 
@@ -92,7 +93,6 @@ internal static class LazerMediaStore
             try
             {
                 using var realm = Realm.GetInstance(createScoreConfiguration(realmPath));
-                realm.Refresh();
                 var score = realm.All<LazerScore>()
                     .Where(s => s.BeatmapHash == beatmapHash && !s.DeletePending)
                     .AsEnumerable()
@@ -165,6 +165,7 @@ internal static class LazerMediaStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            var isNew = !File.Exists(destination);
             if (File.Exists(destination))
             {
                 File.Delete(destination);
@@ -172,12 +173,15 @@ internal static class LazerMediaStore
 
             if (CreateHardLink(destination, source, IntPtr.Zero))
             {
+                if (isNew) CacheActivityLog.RecordAddition(destination, "osu-lazer-hardlink");
                 return true;
             }
 
             // Hard links cannot cross volumes. A file symlink keeps the cache
             // zero-copy when lazer has been moved to another drive.
-            return CreateSymbolicLink(destination, source, symbolic_link_allow_unprivileged_create);
+            var linked = CreateSymbolicLink(destination, source, symbolic_link_allow_unprivileged_create);
+            if (linked && isNew) CacheActivityLog.RecordAddition(destination, "osu-lazer-symlink");
+            return linked;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

@@ -17,13 +17,15 @@ public static class HistoricalBeatmapCacheRecovery
         IEnumerable<AttemptSummary> pending,
         string primaryMirror,
         IReadOnlyList<string>? fallbackMirrors = null,
-        Action<HistoricalMapRecoveryProgress>? progress = null)
+        Action<HistoricalMapRecoveryProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var maps = pending.ToArray();
         var recovered = 0;
 
         for (var index = 0; index < maps.Length; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var attempt = maps[index];
             var cached = TosuMediaCache.Cache(new TosuMediaInfo
             {

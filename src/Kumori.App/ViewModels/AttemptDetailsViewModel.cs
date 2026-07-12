@@ -621,7 +621,16 @@ public partial class AttemptDetailsViewModel : ObservableObject
                 beatmapPath,
                 mediaDirectory,
                 lazer?.Files));
-            await _replayViewer.PrepareAnalysisAsync(contract);
+            try
+            {
+                await _replayViewer.PrepareAnalysisAsync(contract);
+            }
+            catch (Exception ex)
+            {
+                // Exact judgement simulation enriches the analyzer but must
+                // never prevent the movement/replay viewer itself from opening.
+                Log.Warning(ex, "Exact replay analysis preparation failed for attempt {AttemptId}; opening fallback analyzer", details.Summary.Id);
+            }
             LastReplayInspectorProcess = _replayViewer.LaunchViewer(contract);
             LoadError = null;
         }
@@ -766,12 +775,21 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
     private static readonly Dictionary<string, string> SettingAliases = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["approach_rate"] = "AR", ["overall_difficulty"] = "OD",
-        ["circle_size"] = "CS", ["drain_rate"] = "HP",
-        ["ar"] = "AR", ["od"] = "OD", ["cs"] = "CS", ["hp"] = "HP",
-        ["speed_change"] = "Speed", ["adjust_pitch"] = "Pitch", ["pitch_adjust"] = "Pitch",
-        ["minimum_accuracy"] = "Min acc", ["accuracy_judge_mode"] = "Accuracy mode",
-        ["restart"] = "Restart", ["use_classic_notelock"] = "Classic notelock",
+        ["approach_rate"] = "AR",
+        ["overall_difficulty"] = "OD",
+        ["circle_size"] = "CS",
+        ["drain_rate"] = "HP",
+        ["ar"] = "AR",
+        ["od"] = "OD",
+        ["cs"] = "CS",
+        ["hp"] = "HP",
+        ["speed_change"] = "Speed",
+        ["adjust_pitch"] = "Pitch",
+        ["pitch_adjust"] = "Pitch",
+        ["minimum_accuracy"] = "Min acc",
+        ["accuracy_judge_mode"] = "Accuracy mode",
+        ["restart"] = "Restart",
+        ["use_classic_notelock"] = "Classic notelock",
         ["no_slider_head_accuracy"] = "No slider-head acc",
     };
 
@@ -827,10 +845,14 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
         var statKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["approach_rate"] = "ar", ["ar"] = "ar",
-            ["circle_size"] = "cs", ["cs"] = "cs",
-            ["overall_difficulty"] = "od", ["od"] = "od",
-            ["drain_rate"] = "hp", ["hp"] = "hp",
+            ["approach_rate"] = "ar",
+            ["ar"] = "ar",
+            ["circle_size"] = "cs",
+            ["cs"] = "cs",
+            ["overall_difficulty"] = "od",
+            ["od"] = "od",
+            ["drain_rate"] = "hp",
+            ["hp"] = "hp",
         };
         foreach (var mod in mods)
         {

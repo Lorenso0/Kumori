@@ -48,6 +48,9 @@ public partial class App : Application
     private bool _exitRequested;
     private bool _shutdownCleanupCompleted;
     private readonly object _osuCompanionGate = new();
+    private readonly CancellationTokenSource _backgroundCts = new();
+    private readonly object _backgroundGate = new();
+    private readonly HashSet<Task> _backgroundTasks = new();
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -70,6 +73,8 @@ public partial class App : Application
             .WriteTo.File(
                 Path.Combine(AppPaths.AppLogDir, "kumori-.log"),
                 rollingInterval: RollingInterval.Day,
+                fileSizeLimitBytes: 10L * 1024 * 1024,
+                rollOnFileSizeLimit: true,
                 retainedFileCountLimit: AppPaths.LogRetentionDays)
             .CreateLogger();
         Log.Information("Kumori starting");
@@ -97,7 +102,7 @@ public partial class App : Application
         // Shell first — no data work before first paint.
         _mainWindow = new MainWindow(viewModel, settings);
         _mainWindow.Show();
-        _ = RecoverHistoricalBeatmapsAsync(attempts, settings);
+        TrackBackground(RecoverHistoricalBeatmapsAsync(attempts, settings, _backgroundCts.Token), "historical beatmap recovery");
         if (!settings.Current.FirstRunCompleted ||
             settings.Current.OnboardingVersion < WelcomeWindow.CurrentOnboardingVersion)
         {
@@ -124,6 +129,7 @@ public partial class App : Application
         _tray.KeepDualModeRequested += () => Dispatcher.InvokeAsync(() =>
             PublishCompanionStatus(c => c with { DualModeDetail = "Dual mode left active after osu! closed" }));
         _tray.DualModeToggleRequested += () => _ = ToggleDualModeFromTrayAsync();
+        _tray.UpdateRequested += () => Dispatcher.InvokeAsync(() => OpenAvailableUpdate(store.Current.ApplicationUpdate.ReleaseUrl));
         UpdateTrayDualModeToggle(settings.Current.Display.AutoSwitchDualMode);
         _tray.ExitRequested += () =>
         {
@@ -161,12 +167,21 @@ public partial class App : Application
             var status = state.Tracking.TosuConnected
                 ? state.Tracking.CurrentBeatmap ?? "Tracker connected"
                 : state.Tracking.Detail ?? "Tracker not running";
-            Dispatcher.InvokeAsync(() => _tray?.UpdateStatus(status));
+            Dispatcher.InvokeAsync(() =>
+            {
+                _tray?.UpdateStatus(status);
+                _tray?.SetEndSessionEnabled(state.ActiveSession is not null);
+            });
         };
         _companionMonitorCts = new CancellationTokenSource();
         _companionMonitorTask = Task.Run(() => CompanionMonitorLoopAsync(store, settings, _companionMonitorCts.Token));
         _ = Dispatcher.InvokeAsync(
             () => _ = CheckForTosuUpdatesOnLaunchAsync(),
+            DispatcherPriority.ApplicationIdle);
+        _ = Dispatcher.InvokeAsync(
+            () => TrackBackground(
+                CheckForKumoriUpdatesOnLaunchAsync(store, _backgroundCts.Token),
+                "Kumori update check"),
             DispatcherPriority.ApplicationIdle);
 
         // Background services start only after the shell is visible
@@ -206,14 +221,16 @@ public partial class App : Application
                         new LazerReplayFrameRecoverySink(
                             factory,
                             () => trackingSink.CurrentAttemptId,
-                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id))),
+                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id)),
+                            _backgroundCts.Token),
                         "lazer Realm replay-frame recovery"),
                     new BestEffortAttemptSink(_lazerReplayFrames, "lazer replay-frame capture"),
                     new BestEffortAttemptSink(
                         new StableReplayFrameRecoverySink(
                             factory,
                             () => trackingSink.CurrentAttemptId,
-                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id))),
+                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id)),
+                            _backgroundCts.Token),
                         "stable replay-frame recovery"),
                     // Composite sinks finalize in reverse order. Store the live
                     // buffer first, then let an exact Data/r replay replace it.
@@ -252,9 +269,10 @@ public partial class App : Application
             _tracking.Start();
             if (settings.Current.Capture.LazerReplayFrameEnabled)
             {
-                _ = Task.Run(() => new PersistedReplayReconciliationService(
+                TrackBackground(Task.Run(() => new PersistedReplayReconciliationService(
                     factory,
-                    id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id))).Run());
+                    id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id))).Run(_backgroundCts.Token),
+                    _backgroundCts.Token), "persisted replay reconciliation");
             }
             viewModel.SetEndLiveSessionHandler(() => Task.Run(() => _tracking?.EndSession() ?? false));
 
@@ -266,7 +284,10 @@ public partial class App : Application
         _ = viewModel.HydrateAsync();
     }
 
-    private async Task RecoverHistoricalBeatmapsAsync(AttemptRepository attempts, SettingsService settings)
+    private async Task RecoverHistoricalBeatmapsAsync(
+        AttemptRepository attempts,
+        SettingsService settings,
+        CancellationToken cancellationToken)
     {
         // Startup recovery must not compete with dashboard hydration over an
         // entire long-lived history. The newest plays are the only ones likely
@@ -286,7 +307,8 @@ public partial class App : Application
                 pending,
                 settings.Current.Media.PrimaryMirror,
                 settings.Current.Media.FallbackMirrors,
-                progress => Dispatcher.Invoke(() => dialog.Report(progress))));
+                progress => Dispatcher.Invoke(() => dialog.Report(progress)),
+                cancellationToken));
         }
         finally
         {
@@ -320,6 +342,44 @@ public partial class App : Application
         }
     }
 
+    private async Task CheckForKumoriUpdatesOnLaunchAsync(AppStateStore store, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await new KumoriUpdateService().CheckAsync(cancellationToken: cancellationToken);
+            store.Update(state => state with
+            {
+                ApplicationUpdate = new ApplicationUpdateStatus
+                {
+                    IsAvailable = result.IsUpdateAvailable,
+                    Version = result.LatestTag,
+                    ReleaseUrl = result.ReleaseUrl,
+                    PublishedAt = result.PublishedAt,
+                },
+            });
+            if (result.IsUpdateAvailable)
+            {
+                _tray?.ShowUpdateNotification(result.LatestTag);
+                Log.Information("Kumori update {Version} is available at {Url}", result.LatestTag, result.ReleaseUrl);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            // Startup remains quiet when offline; the manual update window shows errors on demand.
+            Log.Debug(ex, "Kumori startup update check failed");
+        }
+    }
+
+    private static void OpenAvailableUpdate(string? releaseUrl)
+    {
+        var url = string.IsNullOrWhiteSpace(releaseUrl) ? KumoriUpdateService.ReleasesUrl : releaseUrl;
+        try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+        catch (Exception ex) { Log.Warning(ex, "Could not open Kumori release page {Url}", url); }
+    }
+
     private void ShowMainWindow()
     {
         if (_mainWindow is null)
@@ -339,7 +399,9 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             LogCrash("DispatcherUnhandledException", args.Exception);
-            args.Handled = true; // keep the app alive for UI-thread faults
+            // Unknown UI-thread failures may leave tracking or persistence state
+            // partially mutated. Log them, then let WPF terminate safely.
+            args.Handled = false;
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             LogCrash("AppDomain.UnhandledException", args.ExceptionObject as Exception);
@@ -374,6 +436,7 @@ public partial class App : Application
         }
         _tray?.Dispose();
         _singleInstance?.Dispose();
+        _backgroundCts.Dispose();
         Log.Information("Kumori exiting");
         Log.CloseAndFlush();
         base.OnExit(e);
@@ -400,6 +463,16 @@ public partial class App : Application
             }
 
             statusWindow.UpdateStatus("Closing companion services...");
+            _backgroundCts.Cancel();
+            Task[] backgroundTasks;
+            lock (_backgroundGate)
+            {
+                backgroundTasks = _backgroundTasks.ToArray();
+            }
+            if (backgroundTasks.Length > 0)
+            {
+                await AwaitBoundedAsync(Task.WhenAll(backgroundTasks), TimeSpan.FromSeconds(3));
+            }
             _companionMonitorCts?.Cancel();
             if (_companionMonitorTask is not null)
             {
@@ -455,12 +528,38 @@ public partial class App : Application
             try { _stableReplayFrames.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3)); } catch { }
         }
         _companionMonitorCts?.Cancel();
+        _backgroundCts.Cancel();
+        Task[] backgroundTasks;
+        lock (_backgroundGate)
+        {
+            backgroundTasks = _backgroundTasks.ToArray();
+        }
+        try { Task.WhenAll(backgroundTasks).Wait(TimeSpan.FromSeconds(3)); } catch { }
         try { _companionMonitorTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }
         _companionMonitorCts?.Dispose();
         DeactivateDualModeIfRequested();
         OpenTabletDriverService.CloseOwned();
         TosuManager.CloseOwned();
         _shutdownCleanupCompleted = true;
+    }
+
+    private void TrackBackground(Task task, string operation)
+    {
+        lock (_backgroundGate)
+        {
+            _backgroundTasks.Add(task);
+        }
+        _ = task.ContinueWith(completed =>
+        {
+            lock (_backgroundGate)
+            {
+                _backgroundTasks.Remove(completed);
+            }
+            if (completed.IsFaulted && completed.Exception is { } exception)
+            {
+                Log.Warning(exception.GetBaseException(), "Background operation {Operation} failed", operation);
+            }
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     private static void SyncStartupRegistration(KumoriSettings settings)

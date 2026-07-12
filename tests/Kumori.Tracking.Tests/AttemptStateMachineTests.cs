@@ -8,20 +8,28 @@ public class AttemptStateMachineTests
 {
     private static PacketView Play(
         double t, string id = "mapA", long live = 0, double hp = 1) => new()
-    {
-        MonoTime = t, State = "play", IsPlaying = true,
-        Identity = id, LiveTimeMs = live, Health = hp,
-    };
+        {
+            MonoTime = t,
+            State = "play",
+            IsPlaying = true,
+            Identity = id,
+            LiveTimeMs = live,
+            Health = hp,
+        };
 
     private static PacketView Menu(double t, string state = "songselect") => new()
     {
-        MonoTime = t, State = state,
+        MonoTime = t,
+        State = state,
     };
 
     private static PacketView Results(double t, string? grade = "S", string id = "mapA") => new()
     {
-        MonoTime = t, State = "resultscreen", IsResults = true,
-        Identity = id, Grade = grade,
+        MonoTime = t,
+        State = "resultscreen",
+        IsResults = true,
+        Identity = id,
+        Grade = grade,
     };
 
     private static AttemptStateMachine InPlay(string id = "mapA", long live = 0)

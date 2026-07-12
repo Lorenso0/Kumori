@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Kumori.Core;
 using Serilog;
@@ -15,6 +16,7 @@ public static class TosuManager
     public const string ReleasesUrl = "https://github.com/tosuapp/tosu/releases";
     private const string LatestReleaseUrl = "https://api.github.com/repos/tosuapp/tosu/releases/latest";
     private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(24);
+    private const long MaxDownloadBytes = 250L * 1024 * 1024;
     private static readonly HttpClient Http = new()
     {
         Timeout = TimeSpan.FromMinutes(3),
@@ -55,17 +57,17 @@ public static class TosuManager
     {
         Directory.CreateDirectory(AppPaths.TosuDir);
         var local = ReadLocalVersion();
-        if (File.Exists(AppPaths.TosuExecutable) && !forceCheck && RecentUpdateCheck())
+        if (File.Exists(AppPaths.TosuExecutable) && !forceCheck && RecentUpdateCheck() && InstalledDigestIsValid())
         {
-            TryVerifyWindowsSignature(AppPaths.TosuExecutable);
             EnsureEnvironment();
             return new TosuInstallResult(local, AppPaths.TosuExecutable, false);
         }
 
         var release = await GetLatestReleaseAsync(cancellationToken).ConfigureAwait(false);
-        if (File.Exists(AppPaths.TosuExecutable) && string.Equals(local, release.Version, StringComparison.OrdinalIgnoreCase))
+        if (File.Exists(AppPaths.TosuExecutable) &&
+            string.Equals(local, release.Version, StringComparison.OrdinalIgnoreCase) &&
+            InstalledDigestIsValid())
         {
-            TryVerifyWindowsSignature(AppPaths.TosuExecutable);
             MarkUpdateChecked(release.Version);
             EnsureEnvironment();
             return new TosuInstallResult(release.Version, AppPaths.TosuExecutable, false);
@@ -73,6 +75,10 @@ public static class TosuManager
 
         var downloadPath = Path.Combine(AppPaths.TosuDir, "tosu.download");
         await DownloadAsync(release.Url, downloadPath, cancellationToken).ConfigureAwait(false);
+        if (!VerifyDigest(downloadPath, release.Digest))
+        {
+            throw new InvalidDataException("Downloaded tosu asset did not match GitHub's SHA-256 digest.");
+        }
         Log.Information("Downloaded tosu {Version} ({Bytes} bytes)", release.Version, new FileInfo(downloadPath).Length);
 
         var candidatePath = downloadPath;
@@ -90,6 +96,7 @@ public static class TosuManager
         StripZoneIdentifier(tempExe);
         File.Move(tempExe, AppPaths.TosuExecutable, overwrite: true);
         File.WriteAllText(AppPaths.TosuVersionFile, release.Version);
+        File.WriteAllText(AppPaths.TosuDigestFile, ComputeDigest(AppPaths.TosuExecutable));
         SafeDelete(downloadPath);
         SafeDelete(Path.Combine(AppPaths.TosuDir, "tosu.archive.exe"));
         SafeDelete(Path.Combine(AppPaths.TosuDir, "tosu-kumori.exe"));
@@ -237,7 +244,7 @@ public static class TosuManager
         try { Directory.Delete(source, recursive: true); } catch { }
     }
 
-    private static async Task<(string Version, string Url)> GetLatestReleaseAsync(CancellationToken cancellationToken)
+    private static async Task<(string Version, string Url, string Digest)> GetLatestReleaseAsync(CancellationToken cancellationToken)
     {
         using var response = await Http.GetAsync(LatestReleaseUrl, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -257,7 +264,7 @@ public static class TosuManager
             throw new InvalidOperationException("The latest tosu release has no downloadable assets.");
         }
 
-        var compatible = new List<(bool NonX64, string Name, string Url)>();
+        var compatible = new List<(bool NonX64, string Name, string Url, string Digest)>();
         foreach (var asset in assets.EnumerateArray())
         {
             var name = asset.TryGetProperty("name", out var nameElement)
@@ -278,9 +285,12 @@ public static class TosuManager
                 continue;
             }
             var url = urlElement.GetString();
-            if (!string.IsNullOrWhiteSpace(url))
+            var digest = asset.TryGetProperty("digest", out var digestElement)
+                ? digestElement.GetString() ?? ""
+                : "";
+            if (!string.IsNullOrWhiteSpace(url) && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
             {
-                compatible.Add((!x64, lower, url));
+                compatible.Add((!x64, lower, url, digest));
             }
         }
 
@@ -293,16 +303,32 @@ public static class TosuManager
         {
             throw new InvalidOperationException("The latest tosu release has no compatible Windows asset.");
         }
-        return (version, selected.Url);
+        return (version, selected.Url, selected.Digest);
     }
 
     private static async Task DownloadAsync(string url, string destination, CancellationToken cancellationToken)
     {
         using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is > MaxDownloadBytes)
+        {
+            throw new InvalidDataException("tosu download exceeds the 250 MB safety limit.");
+        }
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using var output = File.Create(destination);
-        await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+        var buffer = new byte[1024 * 1024];
+        long total = 0;
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+            total += read;
+            if (total > MaxDownloadBytes)
+            {
+                throw new InvalidDataException("tosu download exceeds the 250 MB safety limit.");
+            }
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static void ExtractExecutable(string archivePath, string destination)
@@ -325,6 +351,39 @@ public static class TosuManager
         {
             throw new InvalidOperationException("Downloaded tosu executable failed validation.");
         }
+    }
+
+    private static bool InstalledDigestIsValid()
+    {
+        try
+        {
+            return File.Exists(AppPaths.TosuDigestFile) &&
+                   VerifyDigest(AppPaths.TosuExecutable, File.ReadAllText(AppPaths.TosuDigestFile));
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool VerifyDigest(string path, string expectedDigest)
+    {
+        if (!expectedDigest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)) return false;
+        var expected = expectedDigest["sha256:".Length..].Trim();
+        if (expected.Length != 64) return false;
+        using var stream = File.OpenRead(path);
+        var actual = Convert.ToHexString(SHA256.HashData(stream));
+        return actual.Equals(expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ComputeDigest(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return "sha256:" + Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
     private static bool TryVerifyWindowsSignature(string path)

@@ -1,3 +1,4 @@
+#if STABLE_FRAME_BRIDGE
 using System.Buffers.Binary;
 using System.Diagnostics;
 using Kumori.Tracking;
@@ -128,16 +129,16 @@ public sealed class StableRawReplayReader : IDisposable
             {
                 if (buttons == time || objects.Any(o => (i32(o, buttons) & ~0x1f) != 0)) continue;
                 for (int x = 4; x <= 88; x += 4)
-                for (int y = 4; y <= 88; y += 4)
-                {
-                    if (x == y || x == time || y == time || x == buttons || y == buttons) continue;
-                    float[] xs = objects.Select(o => f32(o, x)).ToArray();
-                    float[] ys = objects.Select(o => f32(o, y)).ToArray();
-                    if (xs.All(saneCoordinate) && ys.All(saneCoordinate)
-                        && xs.Any(value => Math.Abs(value) > 1)
-                        && ys.Any(value => Math.Abs(value) > 1))
-                        return new FrameLayout(time, x, y, buttons);
-                }
+                    for (int y = 4; y <= 88; y += 4)
+                    {
+                        if (x == y || x == time || y == time || x == buttons || y == buttons) continue;
+                        float[] xs = objects.Select(o => f32(o, x)).ToArray();
+                        float[] ys = objects.Select(o => f32(o, y)).ToArray();
+                        if (xs.All(saneCoordinate) && ys.All(saneCoordinate)
+                            && xs.Any(value => Math.Abs(value) > 1)
+                            && ys.Any(value => Math.Abs(value) > 1))
+                            return new FrameLayout(time, x, y, buttons);
+                    }
             }
         }
         return null;
@@ -193,11 +194,11 @@ public sealed class StableRawReplayReader : IDisposable
     private static Process? find(string? folder)
     {
         foreach (string name in new[] { "osu!", "osu" }) foreach (Process p in Process.GetProcessesByName(name))
-        {
-            try { string? dir = Path.GetDirectoryName(p.MainModule?.FileName); if (!p.HasExited && dir is not null && ((folder is not null && Path.GetFullPath(dir).Equals(Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase)) || Directory.Exists(Path.Combine(dir, "Songs")))) return p; }
-            catch { }
-            p.Dispose();
-        }
+            {
+                try { string? dir = Path.GetDirectoryName(p.MainModule?.FileName); if (!p.HasExited && dir is not null && ((folder is not null && Path.GetFullPath(dir).Equals(Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase)) || Directory.Exists(Path.Combine(dir, "Songs")))) return p; }
+                catch { }
+                p.Dispose();
+            }
         return null;
     }
 
@@ -282,3 +283,4 @@ internal sealed class StableMemorySnapshot
 }
 
 internal readonly record struct SnapshotRegion(uint BaseAddress, byte[] Data);
+#endif

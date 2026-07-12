@@ -134,6 +134,32 @@ public sealed class AppDataOrganizerTests : IDisposable
         Assert.True(File.Exists(recent));
     }
 
+    [Fact]
+    public void PruneRuntime_RetainsCurrentViewerAndExpiresPrivateData()
+    {
+        var now = new DateTimeOffset(2026, 7, 9, 12, 0, 0, TimeSpan.Zero);
+        var oldestViewer = Write(Path.Combine("runtime", "replay-viewer", "v1", "viewer.exe"), "old");
+        var previousViewer = Write(Path.Combine("runtime", "replay-viewer", "v2", "viewer.exe"), "previous");
+        var currentViewer = Write(Path.Combine("runtime", "replay-viewer", "v3", "viewer.exe"), "current");
+        Directory.SetLastWriteTimeUtc(Path.GetDirectoryName(oldestViewer)!, now.UtcDateTime.AddDays(-3));
+        Directory.SetLastWriteTimeUtc(Path.GetDirectoryName(previousViewer)!, now.UtcDateTime.AddDays(-2));
+        Directory.SetLastWriteTimeUtc(Path.GetDirectoryName(currentViewer)!, now.UtcDateTime.AddDays(-1));
+        var oldContract = Write(Path.Combine("runtime", "viewer-contracts", "old.json"), "private");
+        var oldFixture = Write(Path.Combine("runtime", "fixtures", "old.jsonl"), "private");
+        var debugSnapshot = Write(Path.Combine("runtime", "debug", "stable-memory-latest.bin"), "private");
+        File.SetLastWriteTimeUtc(oldContract, now.UtcDateTime.AddDays(-8));
+        File.SetLastWriteTimeUtc(oldFixture, now.UtcDateTime.AddDays(-4));
+
+        AppDataOrganizer.PruneRuntime(_root, now);
+
+        Assert.False(Directory.Exists(Path.GetDirectoryName(oldestViewer)));
+        Assert.False(File.Exists(previousViewer));
+        Assert.True(File.Exists(currentViewer));
+        Assert.False(File.Exists(oldContract));
+        Assert.False(File.Exists(oldFixture));
+        Assert.False(File.Exists(debugSnapshot));
+    }
+
     private string Write(string relativePath, string content)
     {
         var path = Path.Combine(_root, relativePath);

@@ -13,12 +13,13 @@ namespace Kumori.Tracking;
 /// Reconnects with backoff; connection state is surfaced via events so the
 /// tracking service can publish health.
 /// </summary>
-public sealed class WebSocketPacketSource : ITosuPacketSource
+public sealed class WebSocketPacketSource : ITosuPacketSource, IAsyncDisposable
 {
     public const int TosuPort = 24051;
     public static readonly Uri DefaultUri = new($"ws://127.0.0.1:{TosuPort}/websocket/v2");
 
     private const int MaxMessageBytes = 8 * 1024 * 1024;
+    private const long MaxRecordingBytes = 25L * 1024 * 1024;
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(15);
 
@@ -26,6 +27,8 @@ public sealed class WebSocketPacketSource : ITosuPacketSource
     private readonly bool _recordPackets;
     private readonly string _fixtureDirectory;
     private StreamWriter? _recording;
+    private long _recordingBytes;
+    private DateTimeOffset _lastRecordingFlush = DateTimeOffset.MinValue;
 
     public event Action? Connected;
     public event Action<string?>? Disconnected;
@@ -102,21 +105,43 @@ public sealed class WebSocketPacketSource : ITosuPacketSource
             if (_recording is null)
             {
                 Directory.CreateDirectory(_fixtureDirectory);
-                var path = Path.Combine(_fixtureDirectory, $"tosu-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.jsonl");
-                _recording = new StreamWriter(path, append: false, Encoding.UTF8);
+                var path = Path.Combine(_fixtureDirectory, $"tosu-{DateTimeOffset.Now:yyyyMMdd-HHmmss-fff}.jsonl");
+                _recording = new StreamWriter(path, append: false, Encoding.UTF8, 64 * 1024);
+                _recordingBytes = 0;
+                _lastRecordingFlush = DateTimeOffset.UtcNow;
             }
-            _recording.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+            var line = System.Text.Json.JsonSerializer.Serialize(new
             {
                 wall = packet.WallTime,
                 mono = packet.MonoTime,
                 raw = packet.Raw,
-            }));
-            _recording.Flush();
+            });
+            _recording.WriteLine(line);
+            _recordingBytes += Encoding.UTF8.GetByteCount(line) + Environment.NewLine.Length;
+            var now = DateTimeOffset.UtcNow;
+            if (now - _lastRecordingFlush >= TimeSpan.FromSeconds(2))
+            {
+                _recording.Flush();
+                _lastRecordingFlush = now;
+            }
+            if (_recordingBytes >= MaxRecordingBytes)
+            {
+                _recording.Dispose();
+                _recording = null;
+            }
         }
         catch (Exception ex)
         {
             Log.Debug(ex, "tosu packet recording failed");
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_recording is null) return;
+        await _recording.FlushAsync();
+        _recording.Dispose();
+        _recording = null;
     }
 
     private static async IAsyncEnumerable<TosuPacket> ReceiveLoopAsync(

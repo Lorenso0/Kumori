@@ -17,6 +17,7 @@ public static class AppDataOrganizer
         DeleteObsoleteRootFiles(root);
         DeleteObsoleteToolFiles(root);
         PruneLogs(root, now ?? DateTimeOffset.Now);
+        PruneRuntime(root, now ?? DateTimeOffset.Now);
     }
 
     private static void EnsureStructure(string root)
@@ -51,6 +52,33 @@ public static class AppDataOrganizer
         foreach (var dir in LogDirectories(root))
         {
             DeleteOldFiles(dir, cutoff);
+        }
+    }
+
+    public static void PruneRuntime(string? root = null, DateTimeOffset? now = null)
+    {
+        root ??= AppPaths.AppDataDir;
+        var current = now ?? DateTimeOffset.Now;
+        var contracts = Path.Combine(root, "runtime", "viewer-contracts");
+        DeleteOldFiles(contracts, current.UtcDateTime.AddDays(-3));
+        KeepNewestFiles(contracts, 50);
+        DeleteOldFiles(Path.Combine(root, "runtime", "fixtures"), current.UtcDateTime.AddDays(-3));
+        var debug = Path.Combine(root, "runtime", "debug");
+        DeleteFile(Path.Combine(debug, "stable-memory-latest.bin"));
+        DeleteOldFiles(debug, current.UtcDateTime.AddDays(-3));
+
+        var viewerRoot = Path.Combine(root, "runtime", "replay-viewer");
+        if (!Directory.Exists(viewerRoot)) return;
+        foreach (var temporary in Directory.EnumerateDirectories(viewerRoot, "*.extract-*"))
+        {
+            TryDeleteDirectory(temporary);
+        }
+        foreach (var obsolete in Directory.EnumerateDirectories(viewerRoot)
+                     .Where(path => !Path.GetFileName(path).Contains(".extract-", StringComparison.OrdinalIgnoreCase))
+                     .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                     .Skip(1))
+        {
+            TryDeleteDirectory(obsolete);
         }
     }
 
@@ -98,6 +126,7 @@ public static class AppDataOrganizer
 
             Directory.CreateDirectory(beatmaps);
             File.WriteAllText(marker, "Cache rolled over for lazer-linked media.");
+            CacheActivityLog.RecordAddition(marker, "cache-migration-marker", Path.Combine(root, "logs", "cache-additions.jsonl"));
         }
         catch
         {
@@ -340,6 +369,17 @@ public static class AppDataOrganizer
             {
                 // Retention is best-effort; locked logs can wait for the next launch.
             }
+        }
+    }
+
+    private static void KeepNewestFiles(string directory, int count)
+    {
+        if (!Directory.Exists(directory)) return;
+        foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly)
+                     .OrderByDescending(File.GetLastWriteTimeUtc)
+                     .Skip(count))
+        {
+            DeleteFile(file);
         }
     }
 
