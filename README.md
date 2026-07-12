@@ -1,93 +1,126 @@
 # Kumori
 
-Kumori is a Windows companion app for osu! players who want to understand their sessions—not just keep a list of scores. It records local play history, turns attempts into useful session and performance views, and opens a replay analyser for investigating the moments that cost a play.
+Kumori is a Windows companion app for osu! players. It records your plays, groups them into sessions, and helps you understand your performance over time. Everything is shown in a desktop app that can stay quietly in the system tray while you play.
+
+Kumori does not change your osu! installation and does not upload your play history. Your data stays on your computer.
 
 > Kumori is an independent project. It is not affiliated with, endorsed by, or supported by ppy Pty Ltd, osu!, or tosu.
 
-## What Kumori does
+## Main features
 
-### Local play history and session analysis
+### Play history and sessions
 
-Kumori records attempts and groups them into sessions, then presents the information in a desktop dashboard designed for review after a play session. It includes:
+Kumori records each play and keeps it in a local history. You can:
 
-- Recent-play and session history, with filters for completed, failed, retried, quit, and multiplayer attempts.
-- Per-attempt details such as score result, mods, accuracy, rank, play time, key activity, and captured movement data.
-- Session and account-change metrics, including plays, completions, performance points, rank movement, accuracy, and time played.
-- Beatmap artwork, cached map media, history search, day/session grouping, and an attempt inspector for quickly moving from an overview into a specific play.
-- Local SQLite storage, so play history stays on the PC rather than being uploaded by Kumori.
+- Search your history by map title, artist, difficulty, or mods.
+- Filter plays by completed, failed, retried, or quit results.
+- Group plays by day or session.
+- End an active session yourself when needed.
+- See your score, accuracy, grade, combo, misses, performance points, mods, progress, and play time.
+- View beatmap artwork and difficulty information.
+- Open every recorded play for a specific map.
+- Delete a single play, a complete session, older entries, or all tracking data.
 
-### Advanced replay analysis
+The dashboard gives you a quick summary of the current or most recent session, including play count, play time, key presses, best play, performance points gained, and rank changes.
 
-For a saved attempt with replay/movement data, Kumori can open its native replay viewer. The viewer is based on the official osu!lazer gameplay and replay components, so it can render the beatmap, mods, replay input, timing, and playback in a familiar gameplay view.
+### Detailed play information
 
-The **Advanced Analyzer** is built for asking *why* a miss or weak hit happened:
+Selecting a play opens a detailed view with the information Kumori captured for it. Depending on the game client and available data, this can include:
 
-- A seekable timeline marks misses, slider breaks, 50s, and 100s. Marker types can be shown or hidden independently.
-- An event browser lists reviewable moments and lets you filter directly to misses, slider breaks, 50s, or 100s.
-- Selecting an event focuses replay playback around that object. You can step one replay frame at a time, move between events, change playback speed, and loop a configurable window before and after the selected moment.
-- The analysis panel displays the object type, input timing, cursor distance from the target, and a practical diagnosis such as likely aim, likely timing, a released slider input, or a cursor leaving the slider path.
-- Miss and slider-break heatmaps visualise the local cursor path around the target, including cursor samples, held-button samples, the selected click/release, and overshoot or undershoot direction.
-- Viewer preferences—including marker visibility, loop timing, speed, and visual overlays—are remembered between sessions.
+- Beatmap settings such as star rating, circle size, approach rate, overall difficulty, drain rate, BPM, and map length.
+- Hit counts, misses, slider breaks, slider ticks, slider tails, unstable rate, current performance points, full-combo performance points, and maximum possible performance points.
+- Key presses, alternation, simultaneous presses, average and peak keys per second, and key hold times.
+- Hit-timing graphs with early and late hit information.
+- Movement and map-pressure graphs across the play.
+- Technical details about the recording source, sample rate, dropped samples, and captured events.
 
-These diagnoses are evidence-based helpers, not a replacement for judgement data: the quality of an analysis depends on the replay frames captured for that attempt. The optional osu!lazer frame capture is experimental and may need updating when osu!lazer changes.
+Some details are only available when the required data was captured during that play.
 
-### Tracking and capture
+### Performance view
 
-Kumori uses [tosu](https://github.com/tosuapp/tosu) to receive live osu! state and play metadata over a local connection. The app can also capture replay frames from osu!stable and osu!lazer while you play, allowing later replay inspection instead of relying only on final score data.
+The Performance page shows your long-term activity and consistency across all recorded plays. It includes:
 
-Other optional companion features include startup registration, OpenTabletDriver launch when osu! starts, and LG monitor dual-mode switching on compatible hardware.
+- Total plays, completed plays, failed plays, and completion rate.
+- Average accuracy, best performance, total score, and total play time.
+- Daily activity with play count, completion rate, average accuracy, and best performance.
 
-## Getting started
+### Maps view
 
-1. Install and run osu!.
-2. Launch Kumori. It will offer to set up tosu if it is not available.
-3. Play normally. Kumori records local attempts and sessions while tracking is enabled.
-4. Select a saved attempt in Kumori and open the replay viewer to inspect its timeline and Advanced Analyzer.
+The Maps page groups your history by beatmap. It shows your most-played maps first, together with average results, best results, completion rate, and the last time each map was played. Selecting a map opens all recorded plays for it.
 
-All user data is stored beneath `%APPDATA%\Kumori\`, including settings, local history, caches, replay contracts, and logs. Back up that folder if you want to preserve your Kumori data; do not commit it to Git.
+## Replay capture and Replay Analyzer
 
-## Tosu
+Kumori can capture replay frames from both osu!stable and osu!lazer. When a play has enough captured data, you can open it in the built-in Replay Analyzer.
 
-Kumori manages an installation of the upstream, unmodified `tosu.exe`; tosu is neither bundled with nor committed to this project.
+The replay viewer uses osu!lazer's gameplay and replay components to show the beatmap, replay input, mods, audio, and playback controls. The analyzer adds tools for reviewing difficult moments:
 
-- On every launch, Kumori checks for and installs the latest compatible Windows release from [tosu GitHub releases](https://github.com/tosuapp/tosu/releases). This includes installing tosu automatically on a clean first launch.
-- The managed executable and configuration live in `%APPDATA%\Kumori\tools\tosu\`.
-- Kumori configures tosu to keep its dashboard closed and listen only on `127.0.0.1:24051`.
-- GitHub access is needed for the initial download and future updates. Kumori checks that a downloaded file is a Windows executable and attempts Authenticode signature verification before replacing its managed copy.
+- A seekable timeline with markers for misses, slider breaks, 50s, and 100s.
+- Filters that let you show or hide each marker type.
+- A list of review events with their time, object type, and available evidence.
+- Controls to jump between events, step through replay frames, change playback speed, and loop around a selected event.
+- Adjustable time before and after the selected event.
+- Input timing, cursor distance, timing-window information, and confidence level for each diagnosis.
+- Simple explanations such as an early or late tap, a cursor stopping short, an overshoot, no detected tap, an early slider release, or leaving the slider follow area.
+- A local cursor-path view with movement samples, held-button samples, click or release markers, and direction information.
+- Pattern summaries that can highlight repeated aim direction, timing changes, or differences from recent attempts on the same map.
 
-tosu is maintained by its own project and is licensed under LGPL-3.0-only. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for its required notice and upstream links.
+Analyzer settings such as marker visibility, playback speed, loop timing, visual markers, background appearance, and audio levels are remembered.
 
-## Replay viewer and osu!lazer dependency
+The analyzer explains the evidence it can see, but it cannot always know the exact reason for a mistake. Results may be less precise when a capture is incomplete. Replay-frame capture is optional, and osu!lazer capture is experimental because game updates can change how it works.
 
-The replay viewer is a separate executable shipped beside Kumori in a published build. It uses the official [ppy/osu](https://github.com/ppy/osu) and osu.Framework NuGet packages, pinned in `replay_viewer\Kumori.ReplayViewer.csproj`. No osu!lazer source checkout or local upstream patch is required.
+### Replay skins and `.osr` comparison
 
-The viewer’s package version is reported by its `--probe` command. See [replay_viewer/THIRD-PARTY-NOTICES.md](replay_viewer/THIRD-PARTY-NOTICES.md) for licence information.
+Kumori includes a skin library for the replay viewer. You can import an `.osk` file or a skin folder, choose the active skin, and remove imported skins. Replay skins use osu!lazer layouts.
 
-## Build from source
+For a recorded play, Kumori can also compare its stored result and movement data with a matching `.osr` replay. The comparison can show differences in accuracy, score, combo, cursor movement, click matching, and sample coverage.
 
-Requirements: Windows 10/11 x64, Git, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+## Live tracking with tosu
 
-```powershell
-# On a fresh clone, this restores the replay viewer's pinned NuGet dependencies,
-# then builds Kumori, the viewer, and the tests.
-.\build-app.cmd
+Kumori uses tosu to read live osu! status and play information through a connection on your own computer. This provides the metadata used for session history, scores, performance points, judgements, and beatmap details.
 
-# Build and start Kumori.
-.\build-app.cmd run
+Kumori manages its own standard copy of tosu. It can install or update it, starts it when osu! is detected, and closes the copy it started when the osu! session ends. It is configured to listen only on `127.0.0.1:24051`.
 
-# Create a distributable build in dist\app\.
-.\build-app.cmd publish
-```
+An internet connection is needed when Kumori downloads or updates tosu. Normal tracking uses the local connection between Kumori and tosu.
 
-Update the pinned osu! NuGet package versions only after validating the replay viewer against representative replays.
+## Optional companion tools
 
-## Creating a GitHub Release
+Kumori can also:
 
-Pushing a version tag such as `v0.2.0` runs the GitHub Actions release workflow. It builds a self-contained Windows x64 publish and creates a GitHub Release containing one file: `Kumori.exe`.
+- Start automatically when you sign in to Windows.
+- Launch OpenTabletDriver when osu! starts and close the copy it launched when osu! closes.
+- Switch supported LG monitors into Dual Mode when osu! starts, with an option to restore the display after osu! closes.
+- Check for new Kumori versions and show an update notice.
+- Keep running in the system tray when the main window is closed.
 
-```powershell
-git tag v0.2.0
-git push origin v0.2.0
-```
+OpenTabletDriver automation and LG Dual Mode are optional. Dual Mode only works with compatible LG monitors and may behave differently depending on the monitor and graphics setup.
 
-Run the downloaded `Kumori.exe` directly. The replay viewer is embedded in the executable and is extracted automatically into Kumori's private runtime storage when advanced replay analysis is used; users do not need to manage a companion folder. You can also run the workflow manually from GitHub's **Actions** tab to download a test build as an artifact without creating a Release.
+## Setup, appearance, and maintenance
+
+The first-run setup guides you through tracking, replay capture, and optional integrations. These choices can be changed later in Settings.
+
+Kumori includes three visual themes: Refined Kumori, Pulse, and Windows Fluent. The layout adapts to the window size, and the app remembers its window and sidebar settings.
+
+Built-in maintenance tools let you:
+
+- Check the health of tracking, storage, replay capture, and companion services.
+- Clear downloaded beatmap artwork and map files.
+- Find and clean up invalid play records.
+- Open app logs and the Kumori data folder.
+- Create a problem-report file, with the choice to include or leave out the tracking database.
+- Check the tosu connection and view capture diagnostics.
+
+## Your data
+
+Kumori stores its settings, play history, captured replay data, imported replay skins, cached beatmap media, reports, and logs under:
+
+`%APPDATA%\Kumori\`
+
+The play history is stored in a local SQLite database. Cached artwork or map files may be downloaded from the media mirror selected in Settings. Update checks and managed tosu downloads also use the internet, but Kumori does not upload your play history.
+
+Back up the Kumori data folder if you want to keep your history when moving to another computer or reinstalling Windows.
+
+## Supported environment
+
+Kumori is a Windows desktop app for 64-bit systems. It supports tracking osu!stable and osu!lazer through tosu. The amount of detail available for an older play depends on what Kumori was able to capture at the time.
+
+Third-party components used by the app have their own licences and notices. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for details.
