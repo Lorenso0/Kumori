@@ -10,4 +10,5 @@ internal sealed record ReplayResultRecoveryContext(
     string BeatmapPath,
     string? MediaDirectory,
     IReadOnlyDictionary<string, string>? MediaPaths,
-    IReadOnlyList<MovementSample> Samples);
+    IReadOnlyList<MovementSample> Samples,
+    bool RequiresSimulation = true);

@@ -259,6 +259,16 @@ public partial class App : Application
             }
             async Task CompleteReplayResultRecoveryAsync(ReplayResultRecoveryContext recovery)
             {
+                if (!recovery.RequiresSimulation)
+                {
+                    await Dispatcher.InvokeAsync(async () =>
+                    {
+                        await viewModel.RefreshDashboardAsync();
+                        await viewModel.Inspector.RefreshAfterMovementReplacementAsync(recovery.AttemptId);
+                    }).Task.Unwrap();
+                    return;
+                }
+
                 // Start the companion restart immediately while the headless
                 // ruleset simulation runs independently at accelerated speed.
                 Task restart = TosuManager.RestartAsync(_backgroundCts.Token);

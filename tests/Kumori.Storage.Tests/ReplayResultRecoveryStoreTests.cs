@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Kumori.Storage;
 using Kumori.Tracking;
 using Microsoft.Data.Sqlite;
@@ -95,6 +96,50 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
         Assert.Equal(321, reader.GetInt32(3));
         Assert.Equal(600, reader.GetInt32(4));
         Assert.Equal(20, reader.GetInt32(5));
+    }
+
+    [Fact]
+    public void Apply_RepairsAccuracyOverwrittenByLegacySimulation()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory);
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        sink.Finalize(Final(score: 0, accuracy: 0, combo: 0, n300: 0, n100: 0));
+        var store = new ReplayResultRecoveryStore(factory);
+        var replay = new ReplayResultData(123_456, 97.4321, "A", 300, 280, 12, 3, 5, 0, 0);
+        store.Apply(id, replay, "lazer_replay");
+
+        using (var con = factory.Open())
+        using (var damage = con.CreateCommand())
+        {
+            damage.CommandText = """
+                UPDATE attempts SET accuracy=83.25 WHERE id=@id;
+                UPDATE attempt_context
+                SET source_json='{"result_recovery":{"reason":"tosu_gameplay_values_missing","simulation_schema":2,"simulated_fields":["accuracy"]}}'
+                WHERE attempt_id=@id;
+                """;
+            damage.Parameters.AddWithValue("@id", id);
+            damage.ExecuteNonQuery();
+        }
+
+        var outcome = store.Apply(id, replay, "lazer_replay_reconciliation");
+
+        Assert.True(outcome.Applied);
+        Assert.Contains("accuracy", outcome.RecoveredFields);
+        using var verify = factory.Open();
+        using var accuracy = verify.CreateCommand();
+        accuracy.CommandText = "SELECT accuracy FROM attempts WHERE id=@id";
+        accuracy.Parameters.AddWithValue("@id", id);
+        Assert.Equal(97.4321, Convert.ToDouble(accuracy.ExecuteScalar()), 4);
+
+        using var provenance = verify.CreateCommand();
+        provenance.CommandText = "SELECT source_json FROM attempt_context WHERE attempt_id=@id";
+        provenance.Parameters.AddWithValue("@id", id);
+        using var document = JsonDocument.Parse((string)provenance.ExecuteScalar()!);
+        var recovery = document.RootElement.GetProperty("result_recovery");
+        Assert.Equal("replay_or_tosu", recovery.GetProperty("accuracy_source").GetString());
+        Assert.Equal(2, recovery.GetProperty("simulation_schema").GetInt32());
     }
 
     [Fact]
@@ -299,7 +344,8 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
         Assert.Equal(10, details.N100);
         Assert.Equal(2, details.N50);
         Assert.Equal(8, details.Summary.Misses);
-        Assert.Equal(83.6666667, details.Summary.Accuracy, 4);
+        Assert.Equal(95, details.Summary.Accuracy, 4);
+        Assert.DoesNotContain("accuracy", outcome.RecoveredFields);
         Assert.Equal(2, details.Events.Count);
         Assert.Contains(details.Events, entry => entry.EventType == "miss" && entry.MapTimeMs == 50_000);
         Assert.Contains(details.Events, entry => entry.EventType == "hit_100" && entry.MapTimeMs == 60_000);

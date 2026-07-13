@@ -35,10 +35,13 @@ public sealed record ReplayResultRecoveryOutcome(
 
 /// <summary>
 /// Repairs result fields which tosu omitted, using the checksum-matched replay.
-/// Existing non-zero telemetry always wins.
+/// Existing non-zero telemetry wins unless an older recovery schema is known
+/// to have replaced replay accuracy with a reconstructed core-hit formula.
 /// </summary>
 public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
 {
+    public const int CurrentSimulationSchema = 2;
+
     public ReplayResultRecoveryOutcome Apply(long attemptId, ReplayResultData replay, string source)
     {
         using var con = factory.Open();
@@ -49,7 +52,9 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
 
         var fields = new List<string>();
         long score = FillLong(current.Score, replay.Score, "score");
-        double accuracy = FillDouble(current.Accuracy, replay.Accuracy, "accuracy");
+        double accuracy = WasAccuracyOverwrittenByLegacySimulation(current.SourceJson)
+            ? ReplaceDouble(current.Accuracy, replay.Accuracy, "accuracy")
+            : FillDouble(current.Accuracy, replay.Accuracy, "accuracy");
         int combo = FillInt(current.Combo, replay.Combo, "combo");
         int n300 = FillInt(current.N300, replay.N300, "300");
         int n100 = FillInt(current.N100, replay.N100, "100");
@@ -138,6 +143,14 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             fields.Add(field);
             return replayValue;
         }
+
+        double ReplaceDouble(double currentValue, double replayValue, string field)
+        {
+            if (Math.Abs(replayValue) <= 0.000001)
+                return currentValue;
+            fields.Add(field);
+            return Math.Abs(currentValue - replayValue) <= 0.000001 ? currentValue : replayValue;
+        }
     }
 
     public ReplayResultRecoveryOutcome ApplySimulation(long attemptId, ReplaySimulationResult simulation)
@@ -209,12 +222,10 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             Replace(ref n100, simulation.N100, "100");
             Replace(ref n50, simulation.N50, "50");
             Replace(ref misses, simulation.Misses, "misses");
-            double simulatedAccuracy = CalculateAccuracy(simulation.N300, simulation.N100, simulation.N50, simulation.Misses);
-            if (Math.Abs(accuracy - simulatedAccuracy) > 0.000001)
-            {
-                accuracy = simulatedAccuracy;
-                fields.Add("accuracy");
-            }
+            // The replay decoder (or valid tosu telemetry) owns final accuracy.
+            // Re-simulation can produce different modern-lazer slider judgements,
+            // so its core 300/100/50/miss counts are not an accuracy substitute.
+            accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
         }
         sliderBreaks = FillInt(sliderBreaks, simulation.SliderBreaks, "slider breaks");
         largeTickHits = FillInt(largeTickHits, simulation.LargeTickHits, "large tick hits");
@@ -377,10 +388,37 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         }
     }
 
-    private static double CalculateAccuracy(int n300, int n100, int n50, int misses)
+    private static bool WasAccuracyOverwrittenByLegacySimulation(string sourceJson)
     {
-        int total = n300 + n100 + n50 + misses;
-        return total == 0 ? 0 : (n300 * 300d + n100 * 100d + n50 * 50d) / (total * 300d) * 100;
+        try
+        {
+            using var document = JsonDocument.Parse(sourceJson);
+            return NeedsAccuracyAuthorityRepair(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    public static bool NeedsAccuracyAuthorityRepair(JsonElement source)
+    {
+        if (!source.TryGetProperty("result_recovery", out var recovery)
+            || recovery.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (recovery.TryGetProperty("accuracy_source", out var accuracySource)
+            && accuracySource.ValueKind == JsonValueKind.String
+            && string.Equals(accuracySource.GetString(), "replay_or_tosu", StringComparison.Ordinal))
+            return false;
+
+        if (!recovery.TryGetProperty("simulated_fields", out var fields)
+            || fields.ValueKind != JsonValueKind.Array)
+            return false;
+
+        return fields.EnumerateArray().Any(field =>
+            field.ValueKind == JsonValueKind.String
+            && string.Equals(field.GetString(), "accuracy", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void ReplaceRecoveredJudgementEvents(
@@ -436,10 +474,13 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         using var cmd = con.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
-            SELECT outcome, score, accuracy, grade, combo, n300, n100, n50, misses, geki, katu,
-                   large_tick_hits, large_tick_misses, small_tick_hits, small_tick_misses,
-                   slider_tail_hits, slider_tail_misses
-            FROM attempts WHERE id=@id
+            SELECT a.outcome, a.score, a.accuracy, a.grade, a.combo, a.n300, a.n100, a.n50,
+                   a.misses, a.geki, a.katu, a.large_tick_hits, a.large_tick_misses,
+                   a.small_tick_hits, a.small_tick_misses, a.slider_tail_hits,
+                   a.slider_tail_misses, COALESCE(c.source_json, '{}')
+            FROM attempts a
+            LEFT JOIN attempt_context c ON c.attempt_id=a.id
+            WHERE a.id=@id
             """;
         cmd.Parameters.AddWithValue("@id", attemptId);
         using var reader = cmd.ExecuteReader();
@@ -450,7 +491,8 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
                 reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7),
                 reader.GetInt32(8), reader.GetInt32(9), reader.GetInt32(10),
                 reader.GetInt32(11), reader.GetInt32(12), reader.GetInt32(13),
-                reader.GetInt32(14), reader.GetInt32(15), reader.GetInt32(16))
+                reader.GetInt32(14), reader.GetInt32(15), reader.GetInt32(16),
+                reader.GetString(17))
             : null;
     }
 
@@ -521,13 +563,14 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         var recoveredFields = new JsonArray();
         foreach (var field in fields)
             recoveredFields.Add(field);
-        root["result_recovery"] = new JsonObject
-        {
-            ["source"] = source,
-            ["reason"] = "tosu_gameplay_values_missing",
-            ["recovered_at_utc"] = DateTimeOffset.UtcNow.ToString("O"),
-            ["fields"] = recoveredFields,
-        };
+        var recovery = root["result_recovery"] as JsonObject ?? [];
+        recovery["source"] = source;
+        recovery["reason"] = "tosu_gameplay_values_missing";
+        recovery["recovered_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
+        recovery["fields"] = recoveredFields;
+        if (fields.Contains("accuracy", StringComparer.OrdinalIgnoreCase))
+            recovery["accuracy_source"] = "replay_or_tosu";
+        root["result_recovery"] = recovery;
 
         using var update = con.CreateCommand();
         update.Transaction = tx;
@@ -743,7 +786,7 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         var simulatedFields = new JsonArray();
         foreach (string field in fields) simulatedFields.Add(field);
         recovery["simulation"] = "completed";
-        recovery["simulation_schema"] = 2;
+        recovery["simulation_schema"] = CurrentSimulationSchema;
         recovery["simulation_completed_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
         recovery["simulated_fields"] = simulatedFields;
         root["result_recovery"] = recovery;
@@ -759,5 +802,5 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         string Outcome, long Score, double Accuracy, string? Grade, int Combo,
         int N300, int N100, int N50, int Misses, int Geki, int Katu,
         int LargeTickHits, int LargeTickMisses, int SmallTickHits, int SmallTickMisses,
-        int SliderTailHits, int SliderTailMisses);
+        int SliderTailHits, int SliderTailMisses, string SourceJson);
 }

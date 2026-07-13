@@ -94,6 +94,7 @@ internal sealed class PersistedReplayReconciliationService
                 Store(candidate.AttemptId, samples, "stable_replay", replay, "Data/r reconciliation");
             if (recovery.Applied || candidate.NeedsResultResimulation)
             {
+                bool requiresSimulation = candidate.NeedsResultResimulation || !candidate.NeedsAccuracyAuthorityRepair;
                 resultRecovered?.Invoke(new ReplayResultRecoveryContext(
                     candidate.AttemptId,
                     recovery,
@@ -101,7 +102,8 @@ internal sealed class PersistedReplayReconciliationService
                     beatmapPath,
                     Path.GetDirectoryName(beatmapPath),
                     null,
-                    samples));
+                    samples,
+                    requiresSimulation));
             }
             return;
         }
@@ -123,6 +125,7 @@ internal sealed class PersistedReplayReconciliationService
                 Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation");
             if (recovery.Applied || candidate.NeedsResultResimulation)
             {
+                bool requiresSimulation = candidate.NeedsResultResimulation || !candidate.NeedsAccuracyAuthorityRepair;
                 resultRecovered?.Invoke(new ReplayResultRecoveryContext(
                     candidate.AttemptId,
                     recovery,
@@ -130,7 +133,8 @@ internal sealed class PersistedReplayReconciliationService
                     beatmap.BeatmapPath,
                     null,
                     beatmap.Files,
-                    samples));
+                    samples,
+                    requiresSimulation));
             }
             return;
         }
@@ -187,14 +191,15 @@ internal sealed class PersistedReplayReconciliationService
                 string? gameFolder = Property(source.RootElement, "game_folder");
                 string movementSource = reader.GetString(8);
                 bool needsResultResimulation = NeedsCurrentResultSimulation(source.RootElement);
+                bool needsAccuracyAuthorityRepair = ReplayResultRecoveryStore.NeedsAccuracyAuthorityRepair(source.RootElement);
                 bool needsMovementRecovery = movementSource is "" or "stable_memory" or "stable_live" or "lazer_memory" or "lazer_replay_frame";
-                if (!needsMovementRecovery && !needsResultResimulation)
+                if (!needsMovementRecovery && !needsResultResimulation && !needsAccuracyAuthorityRepair)
                     continue;
                 string checksum = reader.GetString(3);
                 if (string.IsNullOrWhiteSpace(checksum)) continue;
                 result.Add(new Candidate(reader.GetInt64(0), started, ended, checksum,
                     reader.GetInt64(4), reader.GetInt64(5), reader.GetString(6), client,
-                    beatmapPath, gameFolder, movementSource, needsResultResimulation));
+                    beatmapPath, gameFolder, movementSource, needsResultResimulation, needsAccuracyAuthorityRepair));
             }
             catch (JsonException) { }
         }
@@ -238,10 +243,11 @@ internal sealed class PersistedReplayReconciliationService
 
         return !recovery.TryGetProperty("simulation_schema", out var schema)
                || !schema.TryGetInt32(out int version)
-               || version < 2;
+               || version < ReplayResultRecoveryStore.CurrentSimulationSchema;
     }
 
     private sealed record Candidate(long AttemptId, DateTimeOffset StartedAt, DateTimeOffset EndedAt,
         string Checksum, long BeatmapId, long BeatmapSetId, string Difficulty, string ClientKind,
-        string? BeatmapPath, string? GameFolder, string MovementSource, bool NeedsResultResimulation);
+        string? BeatmapPath, string? GameFolder, string MovementSource, bool NeedsResultResimulation,
+        bool NeedsAccuracyAuthorityRepair);
 }
