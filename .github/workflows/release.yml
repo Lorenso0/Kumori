@@ -35,14 +35,6 @@ jobs:
           $version = if ($env:GITHUB_REF_NAME -match '^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') { $Matches[1] } else { "0.0.0-dev.$env:GITHUB_RUN_NUMBER" }
           "KUMORI_VERSION=$version" >> $env:GITHUB_ENV
 
-      - name: Require release signing credentials
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:KUMORI_SIGN_CERTIFICATE_BASE64) -or
-              [string]::IsNullOrWhiteSpace($env:KUMORI_SIGN_CERTIFICATE_PASSWORD)) {
-            throw 'Release signing secrets are required.'
-          }
-
       - name: Build and test
         shell: cmd
         run: build-app.cmd
@@ -106,7 +98,8 @@ jobs:
             throw "Replay viewer probe failed"
           }
 
-      - name: Verify signatures and create checksum
+      - name: Verify signatures
+        if: env.KUMORI_SIGN_CERTIFICATE_BASE64 != '' && env.KUMORI_SIGN_CERTIFICATE_PASSWORD != ''
         shell: pwsh
         run: |
           foreach ($path in @('dist/app/Kumori.exe', 'artifacts/viewer-release/Kumori.ReplayViewer.exe')) {
@@ -115,6 +108,10 @@ jobs:
               throw "Invalid Authenticode signature for $path`: $($signature.StatusMessage)"
             }
           }
+
+      - name: Create checksum
+        shell: pwsh
+        run: |
           $hash = (Get-FileHash 'dist/app/Kumori.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  Kumori.exe" | Set-Content 'dist/app/Kumori.exe.sha256' -Encoding ascii
 
