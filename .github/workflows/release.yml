@@ -1,4 +1,5 @@
 name: Build Windows release
+run-name: "feat: ship Kumori ${{ github.ref_name }} replay and customization overhaul"
 
 on:
   push:
