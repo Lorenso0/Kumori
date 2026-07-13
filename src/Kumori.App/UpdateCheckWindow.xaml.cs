@@ -37,7 +37,7 @@ public partial class UpdateCheckWindow : Window
                 Current version: {result.CurrentVersion}
                 Latest release: {result.LatestName}
                 Tag: {result.LatestTag}
-                Published: {result.PublishedAt?.ToString("O") ?? "unknown"}
+                Published: {result.PublishedAt?.ToString("O") ?? "not queried (API-free check)"}
 
                 {availability}
 

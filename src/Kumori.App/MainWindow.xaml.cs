@@ -568,19 +568,16 @@ public partial class MainWindow : Window
 
         if (ActualHeight >= 1000)
         {
-            InspectorHero.Height = 190;
             ScrollHitTimingRow.Height = new GridLength(108);
             ScrollMapPressureRow.Height = new GridLength(116);
         }
         else if (ActualHeight >= 700)
         {
-            InspectorHero.Height = 145;
             ScrollHitTimingRow.Height = new GridLength(78);
             ScrollMapPressureRow.Height = new GridLength(86);
         }
         else
         {
-            InspectorHero.Height = 122;
             ScrollHitTimingRow.Height = new GridLength(68);
             ScrollMapPressureRow.Height = new GridLength(74);
         }

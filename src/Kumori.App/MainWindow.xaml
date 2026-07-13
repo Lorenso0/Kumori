@@ -1119,7 +1119,7 @@
                                       HorizontalScrollBarVisibility="Disabled">
                             <StackPanel>
                                 <!-- a. header banner -->
-                                <Border x:Name="InspectorHero" Height="165" Margin="10,2,10,0" CornerRadius="8" ClipToBounds="True"
+                                <Border x:Name="InspectorHero" Height="122" Margin="10,2,10,0" CornerRadius="8" ClipToBounds="True"
                                         BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
                                 <Grid ClipToBounds="True">
                                     <Border Background="{DynamicResource Brush.CardBackground}" />

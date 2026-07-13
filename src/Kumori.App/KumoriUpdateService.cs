@@ -1,7 +1,6 @@
 using System.IO;
-using System.Reflection;
 using System.Net.Http;
-using System.Text.Json;
+using System.Reflection;
 
 namespace Kumori.App;
 
@@ -26,7 +25,7 @@ internal sealed record KumoriReleaseAsset(string Name, string DownloadUrl, long?
 internal sealed class KumoriUpdateService
 {
     public const string ReleasesUrl = "https://github.com/Lorenso0/Kumori/releases";
-    public const string LatestApiUrl = "https://api.github.com/repos/Lorenso0/Kumori/releases/latest";
+    public const string LatestReleaseUrl = "https://github.com/Lorenso0/Kumori/releases/latest";
 
     private static readonly HttpClient SharedHttp = CreateHttpClient();
     private readonly HttpClient http;
@@ -41,28 +40,46 @@ internal sealed class KumoriUpdateService
         CancellationToken cancellationToken = default)
     {
         currentVersion = Normalize(currentVersion ?? Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0, 0));
-        using var response = await http.GetAsync(LatestApiUrl, cancellationToken).ConfigureAwait(false);
+        using var response = await http.GetAsync(
+            LatestReleaseUrl,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-        var root = doc.RootElement;
-        var tag = root.TryGetProperty("tag_name", out var tagElement) ? tagElement.GetString() ?? "unknown" : "unknown";
-        var name = root.TryGetProperty("name", out var nameElement) ? nameElement.GetString() ?? tag : tag;
-        var url = root.TryGetProperty("html_url", out var urlElement) ? urlElement.GetString() ?? ReleasesUrl : ReleasesUrl;
-        DateTimeOffset? published = root.TryGetProperty("published_at", out var publishedElement) &&
-                                   publishedElement.TryGetDateTimeOffset(out var parsedPublished)
-            ? parsedPublished
-            : null;
-        var assets = ParseAssets(root);
+        var tag = ParseReleaseTag(response.RequestMessage?.RequestUri)
+            ?? throw new InvalidDataException("GitHub did not redirect the latest release page to a versioned release tag.");
+        var latestVersion = ParseTagVersion(tag);
+        if (latestVersion is null)
+            throw new InvalidDataException($"The latest Kumori release tag '{tag}' is not a supported version.");
+
+        var escapedTag = Uri.EscapeDataString(tag);
+        var releaseUrl = $"{ReleasesUrl}/tag/{escapedTag}";
+        var downloadBase = $"{ReleasesUrl}/download/{escapedTag}";
         return new KumoriUpdateResult(
             currentVersion,
             tag,
-            name,
-            ParseTagVersion(tag),
-            url,
-            published,
-            assets.FirstOrDefault(asset => string.Equals(asset.Name, "Kumori.exe", StringComparison.OrdinalIgnoreCase)),
-            assets.FirstOrDefault(asset => string.Equals(asset.Name, "Kumori.exe.sha256", StringComparison.OrdinalIgnoreCase)));
+            $"Kumori {latestVersion.ToString(3)}",
+            latestVersion,
+            releaseUrl,
+            null,
+            new KumoriReleaseAsset("Kumori.exe", $"{downloadBase}/Kumori.exe", null, null),
+            new KumoriReleaseAsset("Kumori.exe.sha256", $"{downloadBase}/Kumori.exe.sha256", null, null));
+    }
+
+    internal static string? ParseReleaseTag(Uri? finalUri)
+    {
+        if (finalUri is null || !string.Equals(finalUri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        const string marker = "/Lorenso0/Kumori/releases/tag/";
+        string path = finalUri.AbsolutePath;
+        int markerIndex = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return null;
+
+        string encodedTag = path[(markerIndex + marker.Length)..].Trim('/');
+        return string.IsNullOrWhiteSpace(encodedTag) || encodedTag.Contains('/')
+            ? null
+            : Uri.UnescapeDataString(encodedTag);
     }
 
     internal static Version? ParseTagVersion(string? tag)
@@ -79,33 +96,6 @@ internal sealed class KumoriUpdateService
         Math.Max(0, version.Minor),
         Math.Max(0, version.Build),
         Math.Max(0, version.Revision));
-
-    private static IReadOnlyList<KumoriReleaseAsset> ParseAssets(JsonElement release)
-    {
-        if (!release.TryGetProperty("assets", out var assetsElement) || assetsElement.ValueKind != JsonValueKind.Array)
-        {
-            return Array.Empty<KumoriReleaseAsset>();
-        }
-
-        var assets = new List<KumoriReleaseAsset>();
-        foreach (var asset in assetsElement.EnumerateArray())
-        {
-            var name = asset.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : null;
-            var downloadUrl = asset.TryGetProperty("browser_download_url", out var urlElement) ? urlElement.GetString() : null;
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(downloadUrl))
-            {
-                continue;
-            }
-
-            long? size = asset.TryGetProperty("size", out var sizeElement) && sizeElement.TryGetInt64(out var parsedSize)
-                ? parsedSize
-                : null;
-            var digest = asset.TryGetProperty("digest", out var digestElement) ? digestElement.GetString() : null;
-            assets.Add(new KumoriReleaseAsset(name, downloadUrl, size, digest));
-        }
-
-        return assets;
-    }
 
     private static HttpClient CreateHttpClient()
     {
