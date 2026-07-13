@@ -31,6 +31,7 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         viewModel.ShowInputMarkers.ValueChanged += _ => rebuild();
         viewModel.ShowMovementSamples.ValueChanged += _ => rebuild();
         viewModel.ShowHeldSamples.ValueChanged += _ => rebuild();
+        viewModel.ComparisonCursorColour.ValueChanged += _ => rebuild();
         rebuild();
     }
 
@@ -69,7 +70,23 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         MissReplayFrameSample[] samples = selected.ReplayFrames.ToArray();
         float nominalCircleRadius = Math.Min(64, DrawWidth * 0.23f);
         float scale = nominalCircleRadius / Math.Max(1, (float)selected.TargetRadius);
-        float circleRadius = nominalCircleRadius;
+
+        // Fit the complete object-local approach into the panel. A fixed scale
+        // made valid samples near the edge of the local review radius draw as
+        // giant clipped diagonals and could shrink the useful target area to a
+        // small corner of the graph.
+        if (samples.Length > 0)
+        {
+            float maxX = samples.Max(sample => Math.Abs(sample.Position.X - selected.TargetPosition.X));
+            float maxY = samples.Max(sample => Math.Abs(sample.Position.Y - selected.TargetPosition.Y));
+            float availableX = Math.Max(1, DrawWidth / 2 - 14);
+            float availableY = Math.Max(1, Math.Min(centre.Y - 44, heatmap_height - centre.Y - 28));
+            if (maxX > 0.01f)
+                scale = Math.Min(scale, availableX / maxX);
+            if (maxY > 0.01f)
+                scale = Math.Min(scale, availableY / maxY);
+        }
+        float circleRadius = Math.Max(1, (float)selected.TargetRadius * scale);
 
         AddInternal(new Box
         {
@@ -87,7 +104,9 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         });
         AddInternal(new SpriteText
         {
-            Text = "CYAN move/held · RED X tap · arrows start/end",
+            Text = viewModel.Comparison is null
+                ? "PRIMARY move/held - RED X tap - arrows start/end"
+                : "PRIMARY path - COMPARISON path - RED X tap",
             Position = new Vector2(10, 27),
             Font = FontUsage.Default.With(size: 8, weight: "bold"),
             Colour = Color4.White.Opacity(0.55f),
@@ -130,6 +149,19 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
                 Colour = Color4.Cyan.Opacity(held ? 0.58f : 0.32f),
                 Vertices = [from, to],
             });
+        }
+
+        if (viewModel.Comparison is { } comparison)
+        {
+            MovementSample[] comparisonSamples = comparison.Samples
+                .Where(s => Math.Abs(s.MapTimeMs - selected.EventTime) <= 700)
+                .ToArray();
+            for (int i = 1; i < comparisonSamples.Length; i++)
+            {
+                Vector2 from = centre + (new Vector2((float)comparisonSamples[i - 1].X, (float)comparisonSamples[i - 1].Y) - selected.TargetPosition) * scale;
+                Vector2 to = centre + (new Vector2((float)comparisonSamples[i].X, (float)comparisonSamples[i].Y) - selected.TargetPosition) * scale;
+                AddInternal(new SmoothPath { AutoSizeAxes = Axes.None, Size = new Vector2(DrawWidth, heatmap_height), PathRadius = 1.5f, Colour = viewModel.ComparisonCursorColour.Value.Opacity(0.6f), Vertices = [from, to] });
+            }
         }
 
         for (int i = 0; i < samples.Length; i++)

@@ -5,7 +5,8 @@ namespace Kumori.Core;
 /// </summary>
 public static class AppPaths
 {
-    public const int LogRetentionDays = 3;
+    public const int DefaultLogRetentionDays = 30;
+    public const long MaxLogFileBytes = 10L * 1024 * 1024;
 
     public static string AppDataDir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -50,6 +51,8 @@ public static class AppPaths
     public static string FixturesDir => Path.Combine(RuntimeDir, "fixtures");
 
     public static string ReportsDir => Path.Combine(AppDataDir, "reports");
+    public static string BackupsDir => Path.Combine(AppDataDir, "backups");
+    public static string PendingRestoreDir => Path.Combine(RuntimeDir, "pending-restore");
 
     public static string ToolsDir => Path.Combine(AppDataDir, "tools");
 

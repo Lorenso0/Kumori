@@ -70,7 +70,6 @@ internal static class MissAnalysisBuilder
 {
     private const double sample_window_before = 650;
     private const double sample_window_after = 450;
-    private const double maximum_analysis_window = 2000;
     private const double object_match_window = 900;
 
     public static MissAnalysisModel Build(ViewerContract contract, IReadOnlyList<HitObject> hitObjects)
@@ -145,6 +144,12 @@ internal static class MissAnalysisBuilder
                 double referenceTime = kind == KumoriTimelineMarkerKind.SliderBreak
                     ? analysisTime
                     : targetObject?.StartTime ?? item.Event.MapTimeMs;
+                MissReplayFrameSample[] localFrames = selectLocalFrames(
+                    prepared.Frames,
+                    target,
+                    targetObject?.Radius ?? OsuHitObject.OBJECT_RADIUS,
+                    analysisTime,
+                    input?.Time ?? analysisTime);
 
                 entries.Add(new MissAnalysisEntry(
                     entries.Count + 1,
@@ -164,11 +169,10 @@ internal static class MissAnalysisBuilder
                     targetIndex >= 0 && targetIndex + 1 < objects.Length ? objects[targetIndex + 1].StartTime : null,
                     analysisTime - sample_window_before,
                     analysisTime + sample_window_after,
-                    prepared.Frames.Where(frame => frame.Time >= analysisTime - maximum_analysis_window
-                                                  && frame.Time <= analysisTime + maximum_analysis_window).ToArray(),
+                    localFrames,
                     nearest,
                     input,
-                    nearest == null ? null : (nearest.Position - target).Length,
+                    (input ?? nearest) is { } aimFrame ? (aimFrame.Position - target).Length : null,
                     input == null ? null : input.Time - referenceTime,
                     false,
                     null,
@@ -397,6 +401,13 @@ internal static class MissAnalysisBuilder
         double? offset = judgement != null && kind is KumoriTimelineMarkerKind.Ok or KumoriTimelineMarkerKind.Meh
             ? judgement.TimeOffset
             : inferredOffset;
+        double radius = matched?.Radius ?? OsuHitObject.OBJECT_RADIUS;
+        MissReplayFrameSample[] localFrames = selectLocalFrames(
+            prepared.Frames,
+            target,
+            radius,
+            eventTime,
+            input?.Time ?? eventTime);
 
         return new MissAnalysisEntry(
             index,
@@ -406,7 +417,7 @@ internal static class MissAnalysisBuilder
             objectNameFor(judgement?.HitObject, matched, kind, ordinal),
             source,
             target,
-            matched?.Radius ?? OsuHitObject.OBJECT_RADIUS,
+            radius,
             matched?.StartTime ?? eventTime,
             matched?.GetEndTime() ?? eventTime,
             pathFor(matched),
@@ -416,15 +427,34 @@ internal static class MissAnalysisBuilder
             objectIndex >= 0 && objectIndex + 1 < prepared.Objects.Length ? prepared.Objects[objectIndex + 1].StartTime : null,
             eventTime - sample_window_before,
             eventTime + sample_window_after,
-            prepared.Frames.Where(frame => frame.Time >= eventTime - maximum_analysis_window && frame.Time <= eventTime + maximum_analysis_window).ToArray(),
+            localFrames,
             nearest,
             input,
-            nearest == null ? null : (nearest.Position - target).Length,
+            (input ?? nearest) is { } aimFrame ? (aimFrame.Position - target).Length : null,
             offset,
             judgement != null && kind is KumoriTimelineMarkerKind.Ok or KumoriTimelineMarkerKind.Meh,
             judgement?.ComboBefore,
             judgement?.ComboAfter,
             hitWindowsFor(judgement?.HitObject ?? matched));
+    }
+
+    private static MissReplayFrameSample[] selectLocalFrames(
+        IReadOnlyList<MissReplayFrameSample> frames,
+        Vector2 target,
+        double radius,
+        double eventTime,
+        double anchorTime)
+    {
+        MissReplayFrameSample[] contiguous = isolateContiguousFrames(
+            frames,
+            eventTime - sample_window_before,
+            eventTime + sample_window_after,
+            anchorTime);
+        return isolateLocalApproach(
+            contiguous,
+            target,
+            Math.Max(radius * 2.25, 48),
+            anchorTime);
     }
 
     private static HitWindowAnalysis hitWindowsFor(HitObject? hitObject)

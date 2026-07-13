@@ -13,6 +13,7 @@
   <ItemGroup>
     <!-- osu! 2026.621 is compiled against AutoMapper's pre-v15 public constructor ABI. -->
     <PackageReference Include="AutoMapper" Version="13.0.1" />
+    <!-- Security floors for older transitive references in the osu! dependency graph. -->
     <PackageReference Include="System.Net.Http" Version="4.3.4" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="ppy.osu.Game" Version="2026.621.0" />
@@ -24,6 +25,10 @@
       configuration or object graphs from contracts/beatmaps.
     -->
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-rvv3-g6hj-g44x" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\src\Kumori.Core\Kumori.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -13,6 +13,9 @@ internal static class TosuMediaCache
     private const long max_file_bytes = 80L * 1024 * 1024;
     private const long max_cache_bytes = 300L * 1024 * 1024;
     private const long max_archive_bytes = 250L * 1024 * 1024;
+    private const long max_mirror_metadata_bytes = 256L * 1024;
+    private const int max_signed_url_hops = 3;
+    private const int max_archive_entries = 10_000;
     private static readonly HttpClient Http = new()
     {
         Timeout = TimeSpan.FromSeconds(90),
@@ -40,22 +43,24 @@ internal static class TosuMediaCache
                 return null;
             }
 
+            // Realm is the index for lazer's authoritative content store. Read
+            // those files in place; the replay viewer accepts a filename-to-path
+            // map and no longer needs a linked compatibility directory.
+            var directLazerMedia = ReadDirectLazerMedia(media, key);
+            if (directLazerMedia is not null)
+            {
+                Log.Debug("Using osu!lazer media directly for beatmap {BeatmapId}", beatmapId);
+                return directLazerMedia;
+            }
+
             var existing = ReadCachedMedia(key);
             if (existing is not null)
-            {
                 return existing;
-            }
 
             if (beatmapSource is null || !File.Exists(beatmapSource))
             {
-                var lazer = LazerStorage.ResolveBeatmapAssets(media.BeatmapId, media.BeatmapSetId);
-                if (lazer is not null)
-                {
-                    return ParseBeatmapMedia(lazer.BeatmapPath, key, beatmapId, media.BeatmapSetId ?? 0);
-                }
                 Log.Debug("tosu media local beatmap missing; trying mirrors for beatmap {BeatmapId}", beatmapId);
-                return CacheFromLazer(media, key)
-                    ?? DownloadMedia(media, key, primaryMirror, fallbackMirrors);
+                return DownloadMedia(media, key, primaryMirror, fallbackMirrors);
             }
 
             var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
@@ -64,7 +69,7 @@ internal static class TosuMediaCache
             var parsed = ParseBeatmapMedia(beatmapSource, key, beatmapId, media.BeatmapSetId ?? 0)
                 with
             { BeatmapFile = $"{(beatmapId > 0 ? beatmapId : "map")}.osu" };
-            CopyIntoCache(beatmapSource, Path.Combine(target, parsed.BeatmapFile), "local-beatmap");
+            LinkOrCopyIntoCache(beatmapSource, Path.Combine(target, parsed.BeatmapFile), "local-beatmap");
 
             var copied = new FileInfo(Path.Combine(target, parsed.BeatmapFile)).Length;
             var names = parsed.SampleEvents.Select(e => e.Filename)
@@ -100,16 +105,20 @@ internal static class TosuMediaCache
                     continue;
                 }
 
-                CopyIntoCache(source, Path.Combine(target, safe), "local-beatmap-media");
+                LinkOrCopyIntoCache(source, Path.Combine(target, safe), "local-beatmap-media");
                 copied += size;
             }
 
-            WriteManifest(target, parsed);
+            WriteManifest(
+                target,
+                parsed,
+                "local-osu-installation",
+                "This map was opened during tracked gameplay, so Kumori copied its local beatmap media for history and replay playback.");
             if (!string.IsNullOrWhiteSpace(parsed.AudioFile) &&
                 !File.Exists(Path.Combine(target, parsed.AudioFile)))
             {
                 Log.Debug("tosu media audio missing after local cache; trying osu!lazer store for beatmap {BeatmapId}", beatmapId);
-                return CacheFromLazer(media, key) ?? DownloadMedia(media, key, primaryMirror, fallbackMirrors) ?? parsed;
+                return DownloadMedia(media, key, primaryMirror, fallbackMirrors) ?? parsed;
             }
             Log.Debug("tosu media cached for beatmap {BeatmapId} at {Path}", beatmapId, target);
             return parsed;
@@ -119,55 +128,6 @@ internal static class TosuMediaCache
             Log.Warning(ex, "tosu media cache failed");
             return null;
         }
-    }
-
-    /// <summary>
-    /// Rebuilds cache entries from the pre-link cache when the same beatmaps exist in osu!lazer.
-    /// Old entries remain untouched as a fallback for maps no longer installed in lazer.
-    /// </summary>
-    public static int MigrateOldLazerCache()
-    {
-        if (!Directory.Exists(AppPaths.OldBeatmapMediaDir))
-        {
-            return 0;
-        }
-
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-        var migrated = 0;
-        foreach (var manifest in Directory.EnumerateFiles(AppPaths.OldBeatmapMediaDir, "manifest.json", SearchOption.AllDirectories).ToArray())
-        {
-            try
-            {
-                var key = Path.GetFileName(Path.GetDirectoryName(manifest)!);
-                if (File.Exists(Path.Combine(AppPaths.BeatmapMediaDir, key, "manifest.json")))
-                {
-                    continue;
-                }
-
-                var old = JsonSerializer.Deserialize<CachedMedia>(File.ReadAllText(manifest), options);
-                if (old is null || old.BeatmapId <= 0 || old.SetId <= 0)
-                {
-                    continue;
-                }
-
-                var linked = CacheFromLazer(new TosuMediaInfo
-                {
-                    BeatmapId = old.BeatmapId,
-                    BeatmapSetId = old.SetId,
-                }, key);
-                if (linked is not null)
-                {
-                    migrated++;
-                }
-            }
-            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
-            {
-                Log.Debug(ex, "Could not migrate old beatmap cache manifest {Manifest}", manifest);
-            }
-        }
-
-        Log.Information("Migrated {Count} cached beatmaps to osu!lazer links", migrated);
-        return migrated;
     }
 
     internal static bool NeedsRecovery(AttemptSummary attempt)
@@ -200,7 +160,7 @@ internal static class TosuMediaCache
         }
     }
 
-    private static CachedMedia? CacheFromLazer(TosuMediaInfo media, string key)
+    private static CachedMedia? ReadDirectLazerMedia(TosuMediaInfo media, string key)
     {
         var beatmapId = media.BeatmapId ?? 0;
         var setId = media.BeatmapSetId ?? 0;
@@ -209,53 +169,12 @@ internal static class TosuMediaCache
             return null;
         }
 
-        var files = LazerMediaStore.ResolveFiles(media);
-        if (files is null)
+        var assets = LazerStorage.ResolveBeatmapAssets(beatmapId, setId, gameFolder: media.GameFolder);
+        if (assets is null)
         {
             return null;
         }
-
-        var osuSource = files
-            .Where(pair => pair.Key.EndsWith(".osu", StringComparison.OrdinalIgnoreCase))
-            .FirstOrDefault(pair => LazerMediaStore.IsBeatmapId(pair.Value, beatmapId));
-        if (string.IsNullOrWhiteSpace(osuSource.Value))
-        {
-            return null;
-        }
-
-        var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
-        var osuName = $"{beatmapId}.osu";
-        var osuTarget = Path.Combine(target, osuName);
-        if (!LazerMediaStore.TryLink(osuSource.Value, osuTarget))
-        {
-            return null;
-        }
-
-        var parsed = ParseBeatmapMedia(osuTarget, key, beatmapId, setId) with { BeatmapFile = osuName };
-        var wanted = parsed.SampleEvents.Select(e => e.Filename)
-            .Append(parsed.AudioFile)
-            .Append(parsed.BackgroundFile)
-            .Append("combobreak.wav")
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(SafeName)
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var name in wanted)
-        {
-            if (files.TryGetValue(name, out var source))
-            {
-                LazerMediaStore.TryLink(source, Path.Combine(target, name));
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(parsed.AudioFile) && !File.Exists(Path.Combine(target, parsed.AudioFile)))
-        {
-            return null;
-        }
-
-        WriteManifest(target, parsed);
-        Log.Debug("tosu media hard-linked from osu!lazer for beatmap {BeatmapId} at {Path}", beatmapId, target);
-        return parsed;
+        return ParseBeatmapMedia(assets.BeatmapPath, key, beatmapId, setId);
     }
 
     private static string? ResolvePath(string? path, string? songsFolder, string? gameFolder)
@@ -286,7 +205,7 @@ internal static class TosuMediaCache
         return normalized;
     }
 
-    private static CachedMedia ParseBeatmapMedia(string path, string cacheKey, long beatmapId, long setId)
+    internal static CachedMedia ParseBeatmapMedia(string path, string cacheKey, long beatmapId, long setId)
     {
         var section = "";
         var audio = "";
@@ -400,16 +319,34 @@ internal static class TosuMediaCache
         if ((bits & 8) != 0) yield return "clap";
     }
 
-    private static void WriteManifest(string target, CachedMedia media)
+    private static void WriteManifest(string target, CachedMedia media, string source, string reason)
     {
-        var json = JsonSerializer.Serialize(media, new JsonSerializerOptions
+        // The .osu file already contains hit-sample timing. Persist only the
+        // lookup metadata needed to find linked files; serialising every event
+        // made the metadata cache grow by tens of kilobytes per difficulty.
+        var json = JsonSerializer.Serialize(new
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            cache_key = media.CacheKey,
+            beatmap_id = media.BeatmapId,
+            set_id = media.SetId,
+            audio_lead_in = media.AudioLeadIn,
+            audio_file = media.AudioFile,
+            background_file = media.BackgroundFile,
+            beatmap_file = media.BeatmapFile,
         });
         var path = Path.Combine(target, "manifest.json");
         var isNew = !File.Exists(path);
         File.WriteAllText(path, json);
-        if (isNew) CacheActivityLog.RecordAddition(path, "beatmap-manifest");
+        if (isNew)
+        {
+            CacheActivityLog.RecordAddition(
+                path,
+                source,
+                reason: reason,
+                beatmapId: media.BeatmapId > 0 ? media.BeatmapId : null,
+                beatmapSetId: media.SetId > 0 ? media.SetId : null,
+                cacheKey: media.CacheKey);
+        }
     }
 
     private static CachedMedia? ReadCachedMedia(string key)
@@ -423,11 +360,18 @@ internal static class TosuMediaCache
 
         try
         {
-            var media = JsonSerializer.Deserialize<CachedMedia>(File.ReadAllText(manifest), new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-            });
-            if (media is null || !File.Exists(Path.Combine(target, media.BeatmapFile)))
+            using var document = JsonDocument.Parse(File.ReadAllText(manifest));
+            var root = document.RootElement;
+            var media = new CachedMedia(
+                root.TryGetProperty("cache_key", out var cacheKey) ? cacheKey.GetString() ?? key : key,
+                root.TryGetProperty("beatmap_id", out var beatmapId) ? beatmapId.GetInt64() : 0,
+                root.TryGetProperty("set_id", out var setId) ? setId.GetInt64() : 0,
+                root.TryGetProperty("audio_lead_in", out var leadIn) ? leadIn.GetInt32() : 0,
+                root.TryGetProperty("audio_file", out var audio) ? audio.GetString() ?? "" : "",
+                root.TryGetProperty("background_file", out var background) ? background.GetString() ?? "" : "",
+                root.TryGetProperty("beatmap_file", out var beatmap) ? beatmap.GetString() ?? "" : "",
+                []);
+            if (string.IsNullOrWhiteSpace(media.BeatmapFile) || !File.Exists(Path.Combine(target, media.BeatmapFile)))
             {
                 return null;
             }
@@ -435,11 +379,7 @@ internal static class TosuMediaCache
                 ? media
                 : null;
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (JsonException)
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or FormatException)
         {
             return null;
         }
@@ -498,12 +438,15 @@ internal static class TosuMediaCache
         {
             DownloadArchive(MirrorDownloadUrl(mirror, setId), temp);
             using var archive = ZipFile.OpenRead(temp);
+            if (archive.Entries.Count > max_archive_entries)
+                throw new InvalidDataException("beatmap archive contains too many entries");
             var members = archive.Entries
                 .Where(IsSafeMember)
                 .ToArray();
             var osuEntry = members.FirstOrDefault(entry =>
             {
-                if (!entry.FullName.EndsWith(".osu", StringComparison.OrdinalIgnoreCase))
+                if (!entry.FullName.EndsWith(".osu", StringComparison.OrdinalIgnoreCase)
+                    || entry.Length > max_file_bytes)
                 {
                     return false;
                 }
@@ -530,10 +473,9 @@ internal static class TosuMediaCache
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Select(SafeName)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var byName = members.ToDictionary(
-                entry => SafeName(entry.FullName),
-                entry => entry,
-                StringComparer.OrdinalIgnoreCase);
+            var byName = members
+                .GroupBy(entry => SafeName(entry.FullName), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
             var copied = new FileInfo(osuPath).Length;
             foreach (var name in wanted)
             {
@@ -548,7 +490,11 @@ internal static class TosuMediaCache
                 ExtractIntoCache(entry, Path.Combine(target, name), $"mirror:{mirror}");
                 copied += entry.Length;
             }
-            WriteManifest(target, parsed);
+            WriteManifest(
+                target,
+                parsed,
+                $"mirror:{mirror}",
+                "This tracked map was not available with complete local media, so Kumori downloaded the missing replay-viewer assets from the configured mirror.");
             Log.Debug("tosu media downloaded for beatmap {BeatmapId} from {Mirror}", beatmapId, mirror);
             return parsed;
         }
@@ -560,25 +506,46 @@ internal static class TosuMediaCache
 
     private static void DownloadArchive(string url, string destination)
     {
-        using var response = Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
-        response.EnsureSuccessStatusCode();
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
-        if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        var currentUrl = url;
+        for (var hop = 0; hop <= max_signed_url_hops; hop++)
         {
-            using var doc = JsonDocument.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
-            if (!doc.RootElement.TryGetProperty("url", out var signedUrlElement))
+            if (!Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
             {
-                throw new InvalidOperationException("mirror JSON did not include a download URL");
+                throw new InvalidOperationException("beatmap mirror returned a non-HTTPS download URL");
             }
-            var signedUrl = signedUrlElement.GetString();
-            if (string.IsNullOrWhiteSpace(signedUrl))
+
+            using var response = Http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+            response.EnsureSuccessStatusCode();
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("mirror JSON included an empty download URL");
+                if (hop == max_signed_url_hops)
+                    throw new InvalidOperationException("mirror returned too many signed URL indirections");
+                if (response.Content.Headers.ContentLength is > max_mirror_metadata_bytes)
+                    throw new InvalidDataException("mirror metadata exceeds size limit");
+
+                using var metadata = response.Content.ReadAsStream();
+                using var limited = new LimitedReadStream(metadata, max_mirror_metadata_bytes);
+                using var doc = JsonDocument.Parse(limited);
+                if (!doc.RootElement.TryGetProperty("url", out var signedUrlElement) ||
+                    string.IsNullOrWhiteSpace(signedUrlElement.GetString()))
+                {
+                    throw new InvalidOperationException("mirror JSON did not include a download URL");
+                }
+                currentUrl = signedUrlElement.GetString()!;
+                continue;
             }
-            DownloadArchive(signedUrl, destination);
+
+            CopyArchiveResponse(response, destination);
             return;
         }
+        throw new InvalidOperationException("mirror download could not be resolved");
+    }
 
+    private static void CopyArchiveResponse(HttpResponseMessage response, string destination)
+    {
+        if (response.Content.Headers.ContentLength is > max_archive_bytes)
+            throw new InvalidDataException("beatmap archive exceeds size limit");
         using var input = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
         using var output = File.Create(destination);
         var buffer = new byte[1024 * 1024];
@@ -599,11 +566,60 @@ internal static class TosuMediaCache
         }
     }
 
-    private static void CopyIntoCache(string source, string destination, string origin)
+    private sealed class LimitedReadStream(Stream inner, long limit) : Stream
     {
+        private long readTotal;
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = inner.Read(buffer, offset, (int)Math.Min(count, limit - readTotal + 1));
+            readTotal += read;
+            if (readTotal > limit) throw new InvalidDataException("mirror metadata exceeds size limit");
+            return read;
+        }
+        public override int Read(Span<byte> buffer)
+        {
+            var read = inner.Read(buffer[..(int)Math.Min(buffer.Length, limit - readTotal + 1)]);
+            readTotal += read;
+            if (readTotal > limit) throw new InvalidDataException("mirror metadata exceeds size limit");
+            return read;
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private static void LinkOrCopyIntoCache(string source, string destination, string origin)
+    {
+        if (LazerMediaStore.TryLink(
+                source,
+                destination,
+                $"{origin}-hardlink",
+                $"{origin}-symlink",
+                "Kumori referenced an existing local osu! file instead of storing a second copy."))
+        {
+            return;
+        }
+
         var isNew = !File.Exists(destination);
         File.Copy(source, destination, overwrite: true);
-        if (isNew) CacheActivityLog.RecordAddition(destination, origin);
+        if (isNew)
+        {
+            CacheActivityLog.RecordAddition(
+                destination,
+                $"{origin}-copy",
+                reason: "The local source could not be hard-linked or symlinked, so a fallback copy was required for replay playback.");
+        }
     }
 
     private static void ExtractIntoCache(ZipArchiveEntry entry, string destination, string origin)

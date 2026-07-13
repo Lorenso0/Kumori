@@ -10,5 +10,4 @@ namespace Kumori.App.ViewModels;
 public abstract class HistoryRowViewModel : ObservableObject
 {
     public bool IsSessionHeader => this is SessionRowViewModel;
-    public bool IsDayHeader => this is DayRowViewModel;
 }

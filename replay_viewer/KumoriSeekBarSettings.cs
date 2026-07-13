@@ -14,7 +14,8 @@ internal partial class KumoriSeekBarSettings : PlayerSettingsGroup
         KumoriViewerConfig config,
         Action? hiddenChanged = null,
         KumoriSeekBar? seekBar = null,
-        Action? openMissAnalyzer = null)
+        Action? openMissAnalyzer = null,
+        Action? openComparisonMenu = null)
         : base("Kumori")
     {
         var hidden = config.GetBindable<bool>(KumoriViewerSetting.DisableHidden);
@@ -55,6 +56,11 @@ internal partial class KumoriSeekBarSettings : PlayerSettingsGroup
             {
                 Text = "Open advanced analyzer",
                 Action = openMissAnalyzer,
+            },
+            new SettingsButton
+            {
+                Text = "Replay comparison",
+                Action = openComparisonMenu,
             },
         };
     }

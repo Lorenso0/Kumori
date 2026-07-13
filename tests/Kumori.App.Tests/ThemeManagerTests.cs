@@ -8,6 +8,7 @@ public sealed class ThemeManagerTests
     [InlineData("refined-kumori", "refined-kumori")]
     [InlineData("pulse", "pulse")]
     [InlineData("windows-fluent", "windows-fluent")]
+    [InlineData("custom", "custom")]
     [InlineData("unknown", "refined-kumori")]
     [InlineData(null, "refined-kumori")]
     public void ResolveAlwaysReturnsSupportedTheme(string? input, string expected)

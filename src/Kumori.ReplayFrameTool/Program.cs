@@ -25,11 +25,18 @@ internal static class Program
         var command = args[0].ToLowerInvariant();
         var options = CliOptions.Parse(args.Skip(1).ToArray());
         var paths = ToolPaths.Create(options);
+        var retentionDays = LogRetentionPolicy.ReadConfiguredDays(Path.Combine(paths.Root, "config", "settings.v2.json"));
+        AppDataOrganizer.PruneLogs(paths.Root, retentionDays: retentionDays);
         Directory.CreateDirectory(paths.LogDir);
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Information()
             .WriteTo.Console()
-            .WriteTo.File(Path.Combine(paths.LogDir, "replay-frame-tool-.log"), rollingInterval: RollingInterval.Day)
+            .WriteTo.File(
+                Path.Combine(paths.LogDir, "replay-frame-tool-.log"),
+                rollingInterval: RollingInterval.Day,
+                fileSizeLimitBytes: AppPaths.MaxLogFileBytes,
+                rollOnFileSizeLimit: true,
+                retainedFileCountLimit: retentionDays)
             .CreateLogger();
 
         try

@@ -11,11 +11,20 @@ namespace Kumori.Tracking;
 /// </summary>
 public sealed class TosuClient
 {
+    private const int ReplayLatchClearPacketCount = 10;
     private static readonly HashSet<string> PlayingStates = new() { "play", "playing", "gameplay" };
     private static readonly HashSet<string> ResultStates = new()
     {
         "result", "results", "resultscreen", "resultsscreen", "ranking", "rank",
     };
+    private readonly IReplayPlaybackDetector? replayPlaybackDetector;
+    private bool watchedReplayLatched;
+    private int consecutiveNonGameplayPackets;
+
+    public TosuClient(IReplayPlaybackDetector? replayPlaybackDetector = null)
+    {
+        this.replayPlaybackDetector = replayPlaybackDetector;
+    }
 
     public event Action<TosuSnapshot>? SnapshotReceived;
     public event Action<string>? PacketInvalid;
@@ -57,6 +66,23 @@ public sealed class TosuClient
                 LastSnapshot?.IsStandardMode ?? false,
                 LastSnapshot?.ClientKind ?? OsuClientKind.Unknown,
                 LastSnapshot?.Mods ?? []);
+            var nativeReplayDetected = false;
+            if (snapshot.IsPlaying && !snapshot.IsWatchedReplay && replayPlaybackDetector is not null)
+            {
+                try
+                {
+                    if (replayPlaybackDetector.IsWatchingReplay(snapshot.ClientKind))
+                        nativeReplayDetected = true;
+                }
+                catch (Exception ex)
+                {
+                    // Replay detection is a defensive guard. A stale native
+                    // offset must never stop ordinary tracking packets.
+                    Log.Debug(ex, "Native replay-playback detection was unavailable");
+                }
+            }
+
+            snapshot = ApplyReplayPlaybackLatch(snapshot, nativeReplayDetected);
         }
         catch (JsonException ex)
         {
@@ -75,6 +101,68 @@ public sealed class TosuClient
         {
             BeatmapChanged?.Invoke(snapshot);
         }
+    }
+
+    /// <summary>
+    /// Clears replay state when osu! itself is known to have stopped. A websocket
+    /// reconnect alone intentionally does not clear it because tosu can reconnect
+    /// in the middle of replay playback.
+    /// </summary>
+    public void ResetReplayPlaybackState()
+    {
+        watchedReplayLatched = false;
+        consecutiveNonGameplayPackets = 0;
+    }
+
+    private TosuSnapshot ApplyReplayPlaybackLatch(TosuSnapshot snapshot, bool nativeReplayDetected)
+    {
+        var replayDetected = snapshot.IsWatchedReplay || nativeReplayDetected;
+        if (snapshot.IsPlaying)
+        {
+            consecutiveNonGameplayPackets = 0;
+            if (replayDetected && !watchedReplayLatched)
+            {
+                watchedReplayLatched = true;
+                Log.Information(
+                    "Replay playback latched for {ClientKind} gameplay ({Source})",
+                    snapshot.ClientKind,
+                    nativeReplayDetected ? "native state" : "tosu payload/player identity");
+            }
+
+            // Native reads can briefly fail while lazer swaps screens or the GC
+            // moves the Player/DrawableRuleset object graph. Once replay playback
+            // has been positively identified it cannot become a live attempt
+            // without leaving gameplay, so retain the signal for the whole run.
+            if (watchedReplayLatched && !snapshot.IsWatchedReplay)
+                snapshot = snapshot with { IsWatchedReplay = true };
+
+            return snapshot;
+        }
+
+        if (snapshot.IsResults)
+        {
+            consecutiveNonGameplayPackets = 0;
+            return watchedReplayLatched && !snapshot.IsWatchedReplay
+                ? snapshot with { IsWatchedReplay = true }
+                : snapshot;
+        }
+
+        // Do not clear on a single non-gameplay packet. During lazer screen
+        // transitions tosu can briefly publish an incomplete/unknown state.
+        // Ten consecutive packets still clears quickly in song select while
+        // preventing a replay from becoming recordable halfway through.
+        if (watchedReplayLatched && ++consecutiveNonGameplayPackets >= ReplayLatchClearPacketCount)
+        {
+            watchedReplayLatched = false;
+            consecutiveNonGameplayPackets = 0;
+            Log.Debug("Replay playback latch cleared after a stable non-gameplay state");
+        }
+        else if (!watchedReplayLatched)
+        {
+            consecutiveNonGameplayPackets = 0;
+        }
+
+        return snapshot;
     }
 
     private static TosuSnapshot ParseSnapshot(
@@ -162,6 +250,10 @@ public sealed class TosuClient
         var mods = NormalizeMods(parsedMods, clientKind);
         var hitErrors = ParseHitErrors(play);
         var richHits = ParseRichHits(play, root);
+        var explicitReplay = GetBool(play, "isReplay")
+            || GetBool(play, "isWatchingReplay")
+            || GetBool(root, "isWatchingReplay")
+            || GetNestedBool(root, "game", "isWatchingReplay");
 
         return new TosuSnapshot
         {
@@ -190,8 +282,9 @@ public sealed class TosuClient
             Score = score,
             Grade = grade,
             ProfileName = profileName,
+            Profile = ParseProfile(profile),
             PlayerName = playerName,
-            IsWatchedReplay = NamesDiffer(profileName, playerName),
+            IsWatchedReplay = explicitReplay || NamesDiffer(profileName, playerName),
             HasAutoMod = HasAutoMod(mods),
             Pp = performance.Current ?? 0,
             FcPp = performance.Fc ?? 0,
@@ -225,6 +318,31 @@ public sealed class TosuClient
                 Progress = progress,
                 HitErrors = hitErrors,
             },
+        };
+    }
+
+    private static TosuProfile? ParseProfile(JsonElement profile)
+    {
+        var id = GetLong(profile, "id");
+        var name = GetString(profile, "name");
+        if (id is not > 0 || string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        // tosu v2 uses the camelCase names below.  The aliases retain
+        // compatibility with older tosu payloads and recorded fixtures.
+        return new TosuProfile
+        {
+            Id = id.Value,
+            Name = name,
+            TotalPp = GetDouble(profile, "performancePoints") ?? GetDouble(profile, "totalPp") ?? GetDouble(profile, "total_pp") ?? GetDouble(profile, "pp"),
+            GlobalRank = GetLong(profile, "rank") ?? GetLong(profile, "globalRank") ?? GetLong(profile, "global_rank"),
+            Accuracy = GetDouble(profile, "accuracy"),
+            PlayCount = GetLong(profile, "playCount") ?? GetLong(profile, "play_count"),
+            Level = GetDouble(profile, "level"),
+            RankedScore = GetLong(profile, "rankedScore") ?? GetLong(profile, "ranked_score"),
+            CountryCode = GetString(profile, "countryCode") ?? GetString(profile, "country_code"),
         };
     }
 
@@ -347,6 +465,21 @@ public sealed class TosuClient
         !string.IsNullOrWhiteSpace(profileName)
         && !string.IsNullOrWhiteSpace(playerName)
         && !string.Equals(profileName.Trim(), playerName.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool GetBool(JsonElement element, string property)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(property, out var value))
+            return false;
+
+        return value.ValueKind == JsonValueKind.True
+               || value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) && number != 0
+               || value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out var parsed) && parsed;
+    }
+
+    private static bool GetNestedBool(JsonElement element, string parent, string property)
+        => element.ValueKind == JsonValueKind.Object
+           && element.TryGetProperty(parent, out var nested)
+           && GetBool(nested, property);
 
     private static bool HasAutoMod(IReadOnlyList<AttemptMod> mods) => mods.Any(mod =>
         mod.Acronym.Equals("AT", StringComparison.OrdinalIgnoreCase)
@@ -737,6 +870,7 @@ public sealed record TosuSnapshot
     public long Score { get; init; }
     public string? Grade { get; init; }
     public string? ProfileName { get; init; }
+    public TosuProfile? Profile { get; init; }
     public string? PlayerName { get; init; }
     public bool IsWatchedReplay { get; init; }
     public bool HasAutoMod { get; init; }
@@ -751,6 +885,26 @@ public sealed record TosuSnapshot
         Artist is null && Title is null
             ? null
             : $"{Artist} — {Title}" + (Difficulty is null ? "" : $" [{Difficulty}]");
+}
+
+/// <summary>Account statistics reported by tosu for the locally logged-in osu! user.</summary>
+public sealed record TosuProfile
+{
+    public long Id { get; init; }
+    public string Name { get; init; } = "";
+    public double? TotalPp { get; init; }
+    public long? GlobalRank { get; init; }
+    public double? Accuracy { get; init; }
+    public long? PlayCount { get; init; }
+    public double? Level { get; init; }
+    public long? RankedScore { get; init; }
+    public string? CountryCode { get; init; }
+}
+
+/// <summary>Optional consumer for account telemetry carried by tosu packets.</summary>
+public interface IProfileTelemetrySink
+{
+    void Ingest(TosuSnapshot snapshot);
 }
 
 public sealed record BeatmapStats

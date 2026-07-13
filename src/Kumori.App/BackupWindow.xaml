@@ -1,0 +1,7 @@
+<Window x:Class="Kumori.App.BackupWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Kumori Backups" Width="720" Height="500" Background="{DynamicResource Brush.AppBackground}">
+  <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel><TextBlock Text="Backup &amp; restore" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Backups contain your tracking database and settings. Restores apply safely on the next launch." Foreground="{DynamicResource Brush.TextSecondary}" Margin="0,4,0,14"/></StackPanel>
+    <ListBox Grid.Row="1" x:Name="BackupList" DisplayMemberPath="Display"/>
+    <Grid Grid.Row="2" Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock x:Name="StatusText" VerticalAlignment="Center" TextWrapping="Wrap"/><StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="Create backup" Click="Create_Click" Margin="0,0,8,0"/><Button Content="Restore selected" Click="Restore_Click" Margin="0,0,8,0"/><Button Content="Open folder" Click="Open_Click"/></StackPanel></Grid>
+  </Grid>
+</Window>

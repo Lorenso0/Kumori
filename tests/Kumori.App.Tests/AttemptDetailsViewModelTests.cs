@@ -45,4 +45,21 @@ public sealed class AttemptDetailsViewModelTests
         Assert.False(viewModel.IsStablePlay);
         Assert.Equal(1, viewModel.SliderStatsOpacity);
     }
+
+    [Fact]
+    public void Replay_recovery_notice_explains_missing_tosu_data_and_simulation()
+    {
+        var viewModel = new AttemptDetailsViewModel(null!)
+        {
+            Details = new AttemptDetails
+            {
+                ResultRecoveredFromReplay = true,
+                ResultRecoverySimulationCompleted = true,
+            },
+        };
+
+        Assert.True(viewModel.HasReplayRecoveredResult);
+        Assert.Contains("tosu gameplay data was unavailable", viewModel.ReplayRecoveryNotice);
+        Assert.Contains("re-simulated", viewModel.ReplayRecoveryNotice);
+    }
 }

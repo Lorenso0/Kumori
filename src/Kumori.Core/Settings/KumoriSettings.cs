@@ -21,6 +21,8 @@ public sealed class KumoriSettings
     public StartupSettings Startup { get; set; } = new();
     public WindowSettings Window { get; set; } = new();
     public AppearanceSettings Appearance { get; set; } = new();
+    public BackupSettings Backup { get; set; } = new();
+    public DeveloperSettings Developer { get; set; } = new();
 
     public sealed class TrackingSettings
     {
@@ -83,6 +85,29 @@ public sealed class KumoriSettings
     public sealed class AppearanceSettings
     {
         public string ThemeId { get; set; } = "refined-kumori";
+        public CustomThemeSettings CustomTheme { get; set; } = new();
         public bool NavigationExpanded { get; set; } = false;
+        public bool GroupSessions { get; set; } = true;
     }
+
+    public sealed class BackupSettings
+    {
+        public bool AutomaticEnabled { get; set; } = true;
+        public int IntervalHours { get; set; } = 24;
+        public int RetentionCount { get; set; } = 14;
+        public string Directory { get; set; } = "";
+    }
+
+    public sealed class DeveloperSettings
+    {
+        /// <summary>Maximum age of every file below the Kumori logs directory.</summary>
+        public int LogRetentionDays { get; set; } = AppPaths.DefaultLogRetentionDays;
+
+        /// <summary>
+        /// One-shot diagnostic which makes the next completed play enter the
+        /// same replay recovery path as a tosu result-data failure.
+        /// </summary>
+        public bool ForceReplayRecoveryNextPlay { get; set; }
+    }
+
 }

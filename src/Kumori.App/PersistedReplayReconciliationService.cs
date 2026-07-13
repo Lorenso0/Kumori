@@ -11,19 +11,26 @@ namespace Kumori.App;
 /// Repairs recent attempts whose persisted client replay appeared after the
 /// live recovery window or while Kumori was closed.
 /// </summary>
-public sealed class PersistedReplayReconciliationService
+internal sealed class PersistedReplayReconciliationService
 {
     private readonly SqliteConnectionFactory factory;
     private readonly MovementCaptureStore movement;
     private readonly MovementRepository movementRepository;
+    private readonly ReplayResultRecoveryStore resultRecovery;
     private readonly Action<long>? movementReplaced;
+    private readonly Action<ReplayResultRecoveryContext>? resultRecovered;
 
-    public PersistedReplayReconciliationService(SqliteConnectionFactory factory, Action<long>? movementReplaced = null)
+    public PersistedReplayReconciliationService(
+        SqliteConnectionFactory factory,
+        Action<long>? movementReplaced = null,
+        Action<ReplayResultRecoveryContext>? resultRecovered = null)
     {
         this.factory = factory;
         movement = new MovementCaptureStore(factory);
         movementRepository = new MovementRepository(factory);
+        resultRecovery = new ReplayResultRecoveryStore(factory);
         this.movementReplaced = movementReplaced;
+        this.resultRecovered = resultRecovered;
     }
 
     public void Run(CancellationToken cancellationToken = default)
@@ -92,10 +99,26 @@ public sealed class PersistedReplayReconciliationService
         var beatmap = LazerStorage.ResolveBeatmapAssets(candidate.BeatmapId, candidate.BeatmapSetId, candidate.Difficulty);
         if (beatmap is null)
             return;
-        string? replay = LazerStorage.ResolveReplayFile(candidate.Checksum, candidate.StartedAt, candidate.GameFolder, candidate.EndedAt);
-        if (replay is null || !StableReplayFrameRecoverySink.TryRead(replay, beatmap.BeatmapPath, candidate.Checksum, out var samples))
+        foreach (string replay in LazerStorage.ResolveReplayFiles(candidate.Checksum, candidate.StartedAt, candidate.GameFolder, candidate.EndedAt))
+        {
+            if (!StableReplayFrameRecoverySink.TryRead(
+                    replay, beatmap.BeatmapPath, candidate.Checksum, out var samples, out var replayResult))
+                continue;
+            ReplayResultRecoveryOutcome recovery = resultRecovery.Apply(candidate.AttemptId, replayResult, "lazer_replay_reconciliation");
+            Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation");
+            if (recovery.Applied)
+            {
+                resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+                    candidate.AttemptId,
+                    recovery,
+                    replay,
+                    beatmap.BeatmapPath,
+                    null,
+                    beatmap.Files,
+                    samples));
+            }
             return;
-        Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation");
+        }
     }
 
     private void Store(long attemptId, IReadOnlyList<Kumori.Core.Models.MovementSample> samples, string source, string replayPath, string origin)

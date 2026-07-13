@@ -11,13 +11,22 @@ public sealed class ReplayViewerContractService
 {
     private readonly AttemptDetailsRepository _details;
     private readonly MovementRepository _movement;
-    private readonly KumoriSettings _settings;
+    private readonly Func<KumoriSettings> _settings;
     private readonly string _contractDirectory;
 
     public ReplayViewerContractService(
         AttemptDetailsRepository details,
         MovementRepository movement,
         KumoriSettings settings,
+        string? contractDirectory = null)
+        : this(details, movement, () => settings, contractDirectory)
+    {
+    }
+
+    public ReplayViewerContractService(
+        AttemptDetailsRepository details,
+        MovementRepository movement,
+        Func<KumoriSettings> settings,
         string? contractDirectory = null)
     {
         _details = details;
@@ -28,6 +37,101 @@ public sealed class ReplayViewerContractService
 
     /// <summary>Returns the raw movement capture for validation and analysis views.</summary>
     public IReadOnlyList<MovementSample> GetMovementSamples(long attemptId) => _movement.GetSamples(attemptId);
+
+    /// <summary>
+    /// Runs the official headless lazer ruleset against a checksum-matched
+    /// replay and returns values which are not present in the replay header.
+    /// </summary>
+    public async Task<ReplaySimulationResult> SimulateRecoveryAsync(
+        long attemptId,
+        string replayPath,
+        string beatmapPath,
+        string? mediaDirectory,
+        IReadOnlyDictionary<string, string>? mediaPaths,
+        IReadOnlyList<MovementSample> samples,
+        CancellationToken cancellationToken = default)
+    {
+        if (samples.Count == 0)
+            throw new InvalidOperationException("Replay simulation requires replay frames.");
+        if (!File.Exists(replayPath))
+            throw new FileNotFoundException("Recovered replay file not found.", replayPath);
+        if (!File.Exists(beatmapPath))
+            throw new FileNotFoundException("Replay beatmap file not found.", beatmapPath);
+
+        var details = _details.GetDetails(attemptId)
+            ?? throw new InvalidOperationException($"Attempt {attemptId} was not found.");
+        Directory.CreateDirectory(_contractDirectory);
+        string contractPath = Path.Combine(_contractDirectory, $"{attemptId}-recovery-{Guid.NewGuid():N}.json");
+        string analysisPath = contractPath + ".analysis.json";
+        var payload = new
+        {
+            contract_version = 1,
+            attempt = new
+            {
+                id = attemptId,
+                artist = details.Summary.Artist,
+                title = details.Summary.Title,
+                difficulty = details.Summary.Difficulty,
+                mods_key = details.Summary.ModsKey,
+                mods = details.Mods.Select(mod => new
+                {
+                    acronym = mod.Acronym,
+                    settings = SettingsObject(mod.SettingsJson),
+                }).ToArray(),
+                clock_rate = ClockRate(details),
+                movement_source = "replay_result_recovery",
+                accuracy = details.Summary.Accuracy,
+                score = details.Summary.Score,
+                grade = details.Summary.Grade ?? "",
+                outcome = details.Summary.Outcome,
+                progress = details.Summary.Progress,
+                mean_offset = details.Timing?.Mean,
+            },
+            beatmap_path = Path.GetFullPath(beatmapPath),
+            media_directory = Path.GetFullPath(mediaDirectory ?? Path.GetDirectoryName(beatmapPath)!),
+            media_paths = mediaPaths ?? new Dictionary<string, string>(),
+            replay_path = Path.GetFullPath(replayPath),
+            settings = ReplaySettings(),
+            judgement_events = Array.Empty<object>(),
+            final_hits = new
+            {
+                n300 = details.N300,
+                n100 = details.N100,
+                n50 = details.N50,
+                misses = details.Summary.Misses,
+            },
+            recent_attempts = Array.Empty<object>(),
+            comparison = (object?)null,
+            comparison_options = Array.Empty<object>(),
+            samples = samples.Select(sample => new
+            {
+                map_time_ms = sample.MapTimeMs,
+                monotonic_ms = sample.MonotonicMs,
+                x = sample.X,
+                y = sample.Y,
+                buttons = sample.Buttons,
+                flags = sample.Flags,
+                pressure = sample.Pressure,
+            }).ToArray(),
+        };
+
+        File.WriteAllText(contractPath, JsonSerializer.Serialize(payload, JsonOptions));
+        try
+        {
+            await PrepareAnalysisAsync(contractPath, cancellationToken: cancellationToken);
+            var prepared = JsonSerializer.Deserialize<PreparedRecoveryAnalysis>(
+                await File.ReadAllTextAsync(analysisPath, cancellationToken), JsonOptions)
+                ?? throw new InvalidDataException("Replay simulation result was empty.");
+            if (prepared.Summary is null)
+                throw new InvalidDataException("Replay simulation did not return a result summary.");
+            return prepared.Summary;
+        }
+        finally
+        {
+            try { File.Delete(contractPath); } catch { }
+            try { File.Delete(analysisPath); } catch { }
+        }
+    }
 
     public string WriteContract(long attemptId, string beatmapPath, string? mediaDirectory = null, IReadOnlyDictionary<string, string>? mediaPaths = null)
     {
@@ -45,6 +149,17 @@ public sealed class ReplayViewerContractService
 
         var metadata = _movement.GetMetadata(attemptId);
         var recentAttempts = _details.GetRecentSameMapAttempts(attemptId);
+        var comparisonOptions = _details.GetComparableAttempts(attemptId)
+            .Select(candidate => new
+            {
+                summary = candidate,
+                samples = CompactComparisonSamples(_movement.GetSamples(candidate.Id)),
+                judgements = _details.GetJudgementEvents(candidate.Id)
+                    .Where(e => e.EventType is "miss" or "slider_break" or "hit_100" or "hit_50")
+                    .ToArray(),
+            })
+            .Where(candidate => candidate.samples.Count > 0)
+            .ToArray();
         Directory.CreateDirectory(_contractDirectory);
         DeleteOldContracts(attemptId);
         var contractPath = Path.Combine(_contractDirectory, $"{attemptId}-{Guid.NewGuid():N}.json");
@@ -67,6 +182,7 @@ public sealed class ReplayViewerContractService
                 clock_rate = ClockRate(details),
                 movement_source = metadata?.Source ?? "live",
                 accuracy = details.Summary.Accuracy,
+                score = details.Summary.Score,
                 grade = details.Summary.Grade ?? "",
                 outcome = details.Summary.Outcome,
                 progress = details.Summary.Progress,
@@ -98,6 +214,24 @@ public sealed class ReplayViewerContractService
                 slider_breaks = attempt.SliderBreaks,
                 mean_offset = attempt.MeanOffset,
             }).ToArray(),
+            comparison = (object?)null,
+            comparison_options = comparisonOptions.Select(candidate => new
+            {
+                attempt_id = candidate.summary.Id,
+                started_at = candidate.summary.StartedAt,
+                outcome = candidate.summary.Outcome,
+                mods_key = candidate.summary.ModsKey,
+                accuracy = candidate.summary.Accuracy,
+                score = candidate.summary.Score,
+                pp = candidate.summary.Pp,
+                combo = candidate.summary.Combo,
+                n300 = candidate.summary.N300,
+                n100 = candidate.summary.N100,
+                n50 = candidate.summary.N50,
+                misses = candidate.summary.Misses,
+                judgement_events = candidate.judgements.Select(ToViewerJudgement).ToArray(),
+                samples = candidate.samples.Select(s => new { map_time_ms = s.MapTimeMs, monotonic_ms = s.MonotonicMs, x = s.X, y = s.Y, buttons = s.Buttons, flags = s.Flags, pressure = s.Pressure }).ToArray(),
+            }).ToArray(),
             samples = samples.Select(s => new
             {
                 map_time_ms = s.MapTimeMs,
@@ -112,6 +246,33 @@ public sealed class ReplayViewerContractService
 
         File.WriteAllText(contractPath, JsonSerializer.Serialize(payload, JsonOptions));
         return contractPath;
+    }
+
+    private static IReadOnlyList<MovementSample> CompactComparisonSamples(IReadOnlyList<MovementSample> samples)
+    {
+        // Comparison choices are embedded so the standalone viewer can switch
+        // without a database connection. Keep input/flag transitions exactly,
+        // but cap ordinary cursor points at roughly 250 Hz to prevent a list of
+        // candidates from turning one launch contract into hundreds of MB.
+        if (samples.Count <= 2)
+            return samples;
+
+        var compact = new List<MovementSample> { samples[0] };
+        var previous = samples[0];
+        var lastKept = samples[0];
+        for (var index = 1; index < samples.Count - 1; index++)
+        {
+            var sample = samples[index];
+            var stateChanged = sample.Buttons != previous.Buttons || sample.Flags != previous.Flags;
+            if (stateChanged || sample.MapTimeMs - lastKept.MapTimeMs >= 4)
+            {
+                compact.Add(sample);
+                lastKept = sample;
+            }
+            previous = sample;
+        }
+        compact.Add(samples[^1]);
+        return compact;
     }
 
     private void DeleteOldContracts(long attemptId)
@@ -274,15 +435,20 @@ public sealed class ReplayViewerContractService
         return candidates[0];
     }
 
-    private Dictionary<string, object> ReplaySettings() => new()
+    private Dictionary<string, object> ReplaySettings()
     {
-        ["osu_replay_master_volume"] = _settings.ReplayViewer.MasterVolume,
-        ["osu_replay_music_volume"] = _settings.ReplayViewer.MusicVolume,
-        ["osu_replay_hitsound_volume"] = _settings.ReplayViewer.HitsoundVolume,
-        ["osu_replay_skin_path"] = _settings.ReplayViewer.SkinPath,
-        ["osu_replay_disable_hidden"] = _settings.ReplayViewer.DisableHidden,
-        ["kumori_theme"] = _settings.Appearance.ThemeId,
-    };
+        var settings = _settings();
+        return new Dictionary<string, object>
+        {
+            ["osu_replay_master_volume"] = settings.ReplayViewer.MasterVolume,
+            ["osu_replay_music_volume"] = settings.ReplayViewer.MusicVolume,
+            ["osu_replay_hitsound_volume"] = settings.ReplayViewer.HitsoundVolume,
+            ["osu_replay_skin_path"] = settings.ReplayViewer.SkinPath,
+            ["osu_replay_disable_hidden"] = settings.ReplayViewer.DisableHidden,
+            ["kumori_theme"] = settings.Appearance.ThemeId,
+            ["kumori_custom_theme"] = CustomThemePalette.Normalize(settings.Appearance.CustomTheme).Colors,
+        };
+    }
 
     private static double ClockRate(AttemptDetails details)
     {
@@ -508,12 +674,54 @@ public sealed class ReplayViewerContractService
     {
         try
         {
-            Directory.CreateDirectory(AppPaths.ViewerLogDir);
-            File.AppendAllText(ViewerLogPath, $"[{DateTimeOffset.Now:O}] app {message}{Environment.NewLine}");
+            LogRetentionPolicy.AppendWithSizeRotation(
+                ViewerLogPath,
+                $"[{DateTimeOffset.Now:O}] app {message}{Environment.NewLine}",
+                maxAgeDays: LogRetentionPolicy.ReadConfiguredDays());
         }
         catch
         {
             // Logging must never block opening the viewer.
         }
     }
+}
+
+public sealed record ReplaySimulationResult
+{
+    public int SliderBreaks { get; init; }
+    public int LargeTickHits { get; init; }
+    public int LargeTickMisses { get; init; }
+    public int SmallTickHits { get; init; }
+    public int SmallTickMisses { get; init; }
+    public int SliderTailHits { get; init; }
+    public int SliderTailMisses { get; init; }
+    public double UnstableRate { get; init; }
+    public IReadOnlyList<double> TimingOffsets { get; init; } = [];
+    public double Pp { get; init; }
+    public double FcPp { get; init; }
+    public double MaxPp { get; init; }
+    public double BaseStars { get; init; }
+    public double AdjustedStars { get; init; }
+    public double ApproachRate { get; init; }
+    public double AdjustedApproachRate { get; init; }
+    public double CircleSize { get; init; }
+    public double AdjustedCircleSize { get; init; }
+    public double OverallDifficulty { get; init; }
+    public double AdjustedOverallDifficulty { get; init; }
+    public double DrainRate { get; init; }
+    public double AdjustedDrainRate { get; init; }
+    public double Bpm { get; init; }
+    public double AdjustedBpm { get; init; }
+    public double ClockRate { get; init; }
+    public int MaxCombo { get; init; }
+    public int CircleCount { get; init; }
+    public int SliderCount { get; init; }
+    public int SpinnerCount { get; init; }
+}
+
+internal sealed record PreparedRecoveryAnalysis
+{
+    public int Version { get; init; }
+    public long AttemptId { get; init; }
+    public ReplaySimulationResult? Summary { get; init; }
 }

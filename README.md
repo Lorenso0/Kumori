@@ -63,6 +63,7 @@ The replay viewer uses osu!lazer's gameplay and replay components to show the be
 - Simple explanations such as an early or late tap, a cursor stopping short, an overshoot, no detected tap, an early slider release, or leaving the slider follow area.
 - A local cursor-path view with movement samples, held-button samples, click or release markers, and direction information.
 - Pattern summaries that can highlight repeated aim direction, timing changes, or differences from recent attempts on the same map.
+- In-viewer cross-attempt comparison: launch a dedicated native, collapsible replay-settings sidebar, choose a captured attempt from the same map with matching playback-rate, hit-geometry, layout, and target-motion mod settings, or temporarily load a checksum-validated `.osr` without adding it to history. Compare its independently coloured skin cursor/trail, comparison-labelled bad judgements when captured events are available, and recorded score statistics after the replay reloads in comparison mode. Visibility, audio, fail, assistance, and scoring mods do not need to match. The sidebar also retains playback, speed, and audio controls; reopen its collapsed handle and use **Stop comparison** to return to the normal replay.
 
 Analyzer settings such as marker visibility, playback speed, loop timing, visual markers, background appearance, and audio levels are remembered.
 
@@ -103,11 +104,13 @@ Kumori includes three visual themes: Refined Kumori, Pulse, and Windows Fluent. 
 Built-in maintenance tools let you:
 
 - Check the health of tracking, storage, replay capture, and companion services.
+- Review a local data inventory, cache sizes, backup status, and every class of optional network endpoint.
 - Clear downloaded beatmap artwork and map files.
 - Find and clean up invalid play records.
 - Open app logs and the Kumori data folder.
 - Create a problem-report file, with the choice to include or leave out the tracking database.
 - Check the tosu connection and view capture diagnostics.
+- Create consistent SQLite backups, rotate automatic backups, and stage a verified restore for the next launch.
 
 ## Your data
 
@@ -115,9 +118,9 @@ Kumori stores its settings, play history, captured replay data, imported replay 
 
 `%APPDATA%\Kumori\`
 
-The play history is stored in a local SQLite database. Cached artwork or map files may be downloaded from the media mirror selected in Settings. Update checks and managed tosu downloads also use the internet, but Kumori does not upload your play history.
+The play history is stored in a versioned local SQLite database. Schema upgrades run transactionally, and timestamps used for filtering are stored in UTC while the interface groups and displays them in local time. Cached artwork or map files may be downloaded from the media mirror selected in Settings. Update checks and managed tosu downloads also use the internet, but Kumori does not upload your play history.
 
-Back up the Kumori data folder if you want to keep your history when moving to another computer or reinstalling Windows.
+Automatic backups are enabled by default and can be configured under Settings. The backup manager creates a consistent database snapshot, validates archives before staging a restore, and applies the restore before the database is opened on the next launch. Copy the backup archive off the computer if you need protection against disk loss.
 
 ## Supported environment
 

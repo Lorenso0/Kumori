@@ -104,13 +104,40 @@ public class SettingsMigrationTests
             service.Load();
             service.Update(settings =>
             {
-                settings.Appearance.ThemeId = "pulse";
+                settings.Appearance.ThemeId = "custom";
                 settings.Appearance.NavigationExpanded = false;
+                settings.Appearance.CustomTheme.Name = "Night drive";
+                settings.Appearance.CustomTheme.Colors["AccentPink"] = "#123456";
             });
 
             var loaded = new SettingsService(path, "unused").Load();
-            Assert.Equal("pulse", loaded.Appearance.ThemeId);
+            Assert.Equal("custom", loaded.Appearance.ThemeId);
             Assert.False(loaded.Appearance.NavigationExpanded);
+            Assert.Equal("Night drive", loaded.Appearance.CustomTheme.Name);
+            Assert.Equal("#123456", loaded.Appearance.CustomTheme.Colors["AccentPink"]);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Update_PublishesNewSnapshotWithoutMutatingActiveReaders()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var service = new SettingsService(
+                Path.Combine(dir.FullName, "settings.v2.json"),
+                Path.Combine(dir.FullName, "missing.json"));
+            var before = service.Load();
+
+            service.Update(settings => settings.Appearance.ThemeId = "pulse");
+
+            Assert.Equal("refined-kumori", before.Appearance.ThemeId);
+            Assert.Equal("pulse", service.Current.Appearance.ThemeId);
+            Assert.NotSame(before, service.Current);
         }
         finally
         {

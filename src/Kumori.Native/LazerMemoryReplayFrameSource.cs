@@ -18,6 +18,8 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     private nint _lastGameBase;
     private int? _lastProcessId;
     private int? _lastReplayFrameTimeOffset;
+    private LazerMemoryOffsets? _replayDetectionOffsets;
+    private int _replayDetectionOffsetsLoadStarted;
     private int _attemptActive;
 
     public LazerMemoryReplayFrameSource(
@@ -209,6 +211,54 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         return frames;
     }
 
+    internal void WarmReplayDetectionOffsets()
+    {
+        if (Interlocked.Exchange(ref _replayDetectionOffsetsLoadStarted, 1) != 0)
+            return;
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var offsets = LazerMemoryOffsets.Load(_offsetsPath);
+                Volatile.Write(ref _replayDetectionOffsets, offsets);
+            }
+            catch { }
+        });
+    }
+
+    internal bool IsWatchingReplay()
+    {
+        var offsets = Volatile.Read(ref _replayDetectionOffsets);
+        if (offsets is null)
+        {
+            offsets = LazerMemoryOffsets.LoadCached(_offsetsPath);
+            if (offsets is not null)
+                Volatile.Write(ref _replayDetectionOffsets, offsets);
+        }
+        if (offsets is null)
+            return false;
+        using var process = FindProcess();
+        if (process is null)
+            return false;
+
+        using var memory = ProcessMemory.Open(process);
+        if (_lastProcessId != process.Id)
+        {
+            ResetCachedPointers();
+            _lastProcessId = process.Id;
+        }
+        var reader = new LazerReplayFrameMemoryReader(
+            memory,
+            offsets,
+            _lastReplayFrameTimeOffset,
+            _lastGameBase);
+        var replay = reader.IsWatchingReplay();
+        if (reader.LastGameBase != 0)
+            _lastGameBase = reader.LastGameBase;
+        return replay;
+    }
+
     public void StartAttempt(AttemptStart start) => Volatile.Write(ref _attemptActive, 1);
 
     public void UpdateAttempt(AttemptSnapshot snapshot) { }
@@ -377,6 +427,35 @@ internal sealed class LazerReplayFrameMemoryReader
 
         LastStatus ??= $"no readable replay frames from {players.Count} player candidate(s)";
         return Array.Empty<LazerReplayFrame>();
+    }
+
+    public bool IsWatchingReplay()
+    {
+        if (_offsets.PlayerDrawableRuleset < 0 || _offsets.DrawableRulesetReplayScore < 0)
+        {
+            LastStatus = "replay playback offsets unavailable";
+            return false;
+        }
+
+        foreach (var player in FindPlayers())
+        {
+            try
+            {
+                var drawableRuleset = _memory.ReadIntPtr(player + _offsets.PlayerDrawableRuleset);
+                if (!IsReadablePointer(drawableRuleset))
+                    continue;
+
+                var replayScore = _memory.ReadIntPtr(drawableRuleset + _offsets.DrawableRulesetReplayScore);
+                if (IsReadablePointer(replayScore))
+                    return true;
+            }
+            catch
+            {
+                // A screen transition can invalidate a candidate between reads.
+            }
+        }
+
+        return false;
     }
 
     private IReadOnlyList<LazerReplayFrame> ReadFramesAfter(nint player, long lastSequence, nint previousFramesList, bool readAll = false)
@@ -919,7 +998,9 @@ internal sealed record LazerMemoryOffsets(
     int ScreenStackStack,
     int PlayerScore,
     int ExternalLinkOpenerApi,
-    int ApiAccessGame)
+    int ApiAccessGame,
+    int PlayerDrawableRuleset,
+    int DrawableRulesetReplayScore)
 {
     private const string OfficialOffsetsUrl =
         "https://raw.githubusercontent.com/tosuapp/tosu/master/packages/tosu/src/assets/offsets.json";
@@ -935,6 +1016,18 @@ internal sealed record LazerMemoryOffsets(
         return Parse(File.ReadAllText(path));
     }
 
+    public static LazerMemoryOffsets? LoadCached(string? path)
+    {
+        path ??= Path.Combine(AppPaths.CacheDir, "tosu", "offsets.json");
+        if (!File.Exists(path))
+            return null;
+        try { return Parse(File.ReadAllText(path)); }
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException)
+        {
+            return null;
+        }
+    }
+
     private static LazerMemoryOffsets Parse(string json)
     {
         using var doc = JsonDocument.Parse(json);
@@ -946,7 +1039,9 @@ internal sealed record LazerMemoryOffsets(
             GetOffset(root, "osu.Framework.Screens.ScreenStack", "stack"),
             GetOffset(root, "osu.Game.Screens.Play.Player", "<Score>k__BackingField"),
             GetOffset(root, "osu.Game.Online.Chat.ExternalLinkOpener", "<api>k__BackingField"),
-            GetOffset(root, "osu.Game.Online.API.APIAccess", "game"));
+            GetOffset(root, "osu.Game.Online.API.APIAccess", "game"),
+            GetOptionalOffset(root, "osu.Game.Screens.Play.Player", "<DrawableRuleset>k__BackingField"),
+            GetOptionalOffset(root, "osu.Game.Rulesets.UI.DrawableRuleset", "<ReplayScore>k__BackingField"));
     }
 
     private static string EnsureDefaultOffsetsPath(bool refreshOfficialCache)
@@ -971,8 +1066,8 @@ internal sealed record LazerMemoryOffsets(
         }
         catch when (File.Exists(path))
         {
-            // Offline or malformed upstream response: a previous valid cache
-            // is safer than disabling replay capture entirely.
+            // A previous valid cache is safer than disabling replay capture
+            // when the upstream response is unavailable or malformed.
         }
 
         return path;
@@ -989,6 +1084,13 @@ internal sealed record LazerMemoryOffsets(
 
         return offset;
     }
+
+    private static int GetOptionalOffset(JsonElement root, string type, string field)
+        => root.TryGetProperty(type, out var typeElement)
+           && typeElement.TryGetProperty(field, out var fieldElement)
+           && fieldElement.TryGetInt32(out var offset)
+            ? offset
+            : -1;
 
     private static long GetInt64(JsonElement root, string field)
     {

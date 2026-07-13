@@ -11,4 +11,7 @@
     <ProjectReference Include="..\Kumori.Core\Kumori.Core.csproj" />
     <ProjectReference Include="..\Kumori.Tracking\Kumori.Tracking.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kumori.Storage.Tests" />
+  </ItemGroup>
 </Project>

@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '[0-9]*.[0-9]*.[0-9]*'
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,8 @@ jobs:
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
+      KUMORI_SIGN_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+      KUMORI_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
 
     steps:
       - name: Check out source
@@ -29,8 +32,16 @@ jobs:
       - name: Derive release version
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_NAME -match '^v(.+)$') { $Matches[1] } else { "0.0.0-dev.$env:GITHUB_RUN_NUMBER" }
+          $version = if ($env:GITHUB_REF_NAME -match '^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') { $Matches[1] } else { "0.0.0-dev.$env:GITHUB_RUN_NUMBER" }
           "KUMORI_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Require release signing credentials
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:KUMORI_SIGN_CERTIFICATE_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:KUMORI_SIGN_CERTIFICATE_PASSWORD)) {
+            throw 'Release signing secrets are required.'
+          }
 
       - name: Build and test
         shell: cmd
@@ -55,8 +66,17 @@ jobs:
               }
             }
           } | Where-Object { $_ })
+          $exceptionExpires = [datetime]'2026-12-31T00:00:00Z'
           $unexpected = @($vulnerabilities | Where-Object {
-            -not ($_.Package -eq 'AutoMapper' -and $_.Version -eq '13.0.1' -and $_.Advisory -eq 'https://github.com/advisories/GHSA-rvv3-g6hj-g44x')
+            $normalizedProject = $_.Project.Replace('\', '/')
+            $approvedProject = $normalizedProject.EndsWith('/replay_viewer/Kumori.ReplayViewer.csproj') -or
+              $normalizedProject.EndsWith('/tests/Kumori.Core.Tests/Kumori.Core.Tests.csproj')
+            $approvedException = $approvedProject -and
+              $_.Package -eq 'AutoMapper' -and
+              $_.Version -eq '13.0.1' -and
+              $_.Advisory -eq 'https://github.com/advisories/GHSA-rvv3-g6hj-g44x' -and
+              [datetime]::UtcNow -lt $exceptionExpires
+            -not $approvedException
           })
           if ($unexpected.Count -gt 0) {
             throw "NuGet audit found $($unexpected.Count) unexpected vulnerable dependency entries."
@@ -86,16 +106,32 @@ jobs:
             throw "Replay viewer probe failed"
           }
 
+      - name: Verify signatures and create checksum
+        shell: pwsh
+        run: |
+          foreach ($path in @('dist/app/Kumori.exe', 'artifacts/viewer-release/Kumori.ReplayViewer.exe')) {
+            $signature = Get-AuthenticodeSignature $path
+            if ($signature.Status -ne 'Valid') {
+              throw "Invalid Authenticode signature for $path`: $($signature.StatusMessage)"
+            }
+          }
+          $hash = (Get-FileHash 'dist/app/Kumori.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Kumori.exe" | Set-Content 'dist/app/Kumori.exe.sha256' -Encoding ascii
+
       - name: Upload build artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Kumori.exe
-          path: dist/app/Kumori.exe
+          path: |
+            dist/app/Kumori.exe
+            dist/app/Kumori.exe.sha256
           if-no-files-found: error
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
-          files: dist/app/Kumori.exe
+          files: |
+            dist/app/Kumori.exe
+            dist/app/Kumori.exe.sha256

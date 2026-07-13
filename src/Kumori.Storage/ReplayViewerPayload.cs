@@ -46,17 +46,10 @@ internal static class ReplayViewerPayload
                     ?? throw new InvalidOperationException("The embedded replay viewer payload is unavailable.");
                 ZipFile.ExtractToDirectory(stream, temporaryDirectory, overwriteFiles: true);
 
-                if (Directory.Exists(versionDirectory))
+                InstallExtractedPayload(temporaryDirectory, versionDirectory);
+                foreach (var added in Directory.EnumerateFiles(versionDirectory, "*", SearchOption.AllDirectories))
                 {
-                    Directory.Delete(temporaryDirectory, recursive: true);
-                }
-                else
-                {
-                    Directory.Move(temporaryDirectory, versionDirectory);
-                    foreach (var added in Directory.EnumerateFiles(versionDirectory, "*", SearchOption.AllDirectories))
-                    {
-                        CacheActivityLog.RecordAddition(added, "embedded-replay-viewer");
-                    }
+                    CacheActivityLog.RecordAddition(added, "embedded-replay-viewer");
                 }
                 PruneOtherVersions(versionDirectory);
 
@@ -79,6 +72,25 @@ internal static class ReplayViewerPayload
                 return null;
             }
         }
+    }
+
+    internal static void InstallExtractedPayload(string temporaryDirectory, string versionDirectory)
+    {
+        var temporaryExecutable = Path.Combine(temporaryDirectory, "Kumori.ReplayViewer.exe");
+        if (!File.Exists(temporaryExecutable))
+        {
+            throw new InvalidDataException(
+                "The embedded replay viewer payload does not contain Kumori.ReplayViewer.exe.");
+        }
+
+        if (Directory.Exists(versionDirectory))
+        {
+            // An interrupted extraction can leave the version folder in place
+            // without its executable. Replace that incomplete folder instead of
+            // throwing away the newly validated payload forever.
+            Directory.Delete(versionDirectory, recursive: true);
+        }
+        Directory.Move(temporaryDirectory, versionDirectory);
     }
 
     private static void PruneOtherVersions(string currentDirectory)

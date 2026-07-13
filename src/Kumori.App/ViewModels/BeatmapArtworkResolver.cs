@@ -19,7 +19,11 @@ internal static class BeatmapArtworkResolver
         {
             if (!Cache.TryGetValue(key, out var local))
             {
-                local = ResolveLocal(key);
+                local = LazerStorage.ResolveBeatmapAssets(
+                    summary.OsuBeatmapId,
+                    summary.BeatmapSetId,
+                    summary.Difficulty)?.BackgroundPath
+                    ?? ResolveLocal(key);
                 if (!string.IsNullOrWhiteSpace(local))
                 {
                     Cache[key] = local;

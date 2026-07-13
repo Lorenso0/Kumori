@@ -6,6 +6,23 @@ namespace Kumori.Tracking.Tests;
 public class TosuClientTests
 {
     [Fact]
+    public void Ingest_ParsesAccountStatisticsFromProfile()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {"profile":{"id":4214858,"name":"Lorenzo","performancePoints":6291,
+              "rank":52590,"accuracy":99.51,"playCount":79580,"level":100,
+              "rankedScore":5920000000,"countryCode":"NL"}}
+            """));
+
+        var profile = Assert.IsType<TosuProfile>(client.LastSnapshot!.Profile);
+        Assert.Equal(4214858, profile.Id);
+        Assert.Equal(6291, profile.TotalPp);
+        Assert.Equal(52590, profile.GlobalRank);
+        Assert.Equal(79580, profile.PlayCount);
+    }
+
+    [Fact]
     public void Ingest_StableAddsClassicAndSuppressesLazerSliderCounters()
     {
         var client = new TosuClient();
@@ -152,12 +169,87 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_ExplicitReplayFlagSuppressesOwnReplayWithMatchingName()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"state":{"name":"play"},"game":{"isWatchingReplay":true},"profile":{"name":"OurPlayer"},"play":{"playerName":"OurPlayer"}}"""));
+
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+    }
+
+    [Fact]
+    public void Ingest_NativeReplayDetectorSuppressesOwnReplayWhenTosuOmitsFlag()
+    {
+        var detector = new StubReplayPlaybackDetector(true);
+        var client = new TosuClient(detector);
+        client.Ingest(Packet("""{"client":"stable","state":{"name":"play"},"profile":{"name":"OurPlayer"},"play":{"playerName":"OurPlayer"}}"""));
+
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(OsuClientKind.Stable, detector.LastClientKind);
+    }
+
+    [Fact]
+    public void Ingest_ConfirmedReplayRemainsSuppressedWhenNativeReadsFlicker()
+    {
+        var detector = new SequenceReplayPlaybackDetector(true, false, false);
+        var client = new TosuClient(detector);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"},"beatmap":{"time":{"live":1000}}}"""));
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"},"beatmap":{"time":{"live":30000}}}""", 101));
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"},"beatmap":{"time":{"live":45000}}}""", 102));
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(3, detector.CallCount);
+    }
+
+    [Fact]
+    public void Ingest_ReplayLatchClearsAfterStableReturnToMenu()
+    {
+        var detector = new SequenceReplayPlaybackDetector(true, false);
+        var client = new TosuClient(detector);
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}"""));
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+
+        for (var index = 0; index < 10; index++)
+            client.Ingest(Packet("""{"client":"lazer","state":{"name":"songSelect"}}""", 101 + index));
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}""", 120));
+        Assert.False(client.LastSnapshot!.IsWatchedReplay);
+    }
+
+    [Fact]
     public void Ingest_AutoMod_FlagsAutoplay()
     {
         var client = new TosuClient();
         client.Ingest(Packet("""{"play":{"mods":[{"acronym":"AT"}]}}"""));
 
         Assert.True(client.LastSnapshot!.HasAutoMod);
+    }
+
+    private sealed class StubReplayPlaybackDetector(bool result) : IReplayPlaybackDetector
+    {
+        public OsuClientKind LastClientKind { get; private set; }
+
+        public bool IsWatchingReplay(OsuClientKind clientKind)
+        {
+            LastClientKind = clientKind;
+            return result;
+        }
+    }
+
+    private sealed class SequenceReplayPlaybackDetector(params bool[] results) : IReplayPlaybackDetector
+    {
+        public int CallCount { get; private set; }
+
+        public bool IsWatchingReplay(OsuClientKind clientKind)
+        {
+            var index = Math.Min(CallCount, results.Length - 1);
+            CallCount++;
+            return results[index];
+        }
     }
 
     [Fact]

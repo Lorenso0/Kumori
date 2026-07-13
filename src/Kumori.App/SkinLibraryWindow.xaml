@@ -20,7 +20,7 @@
             <Button Content="Import .osk" Click="ImportFile_Click" Margin="0,0,8,0" Padding="8,4" />
             <Button Content="Import folder" Click="ImportFolder_Click" Margin="0,0,8,0" Padding="8,4" />
             <Button Content="Use selected" Click="Use_Click" Margin="0,0,8,0" Padding="8,4" />
-            <Button Content="Delete" Click="Delete_Click" Margin="0,0,8,0" Padding="8,4" />
+            <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" Margin="0,0,8,0" Padding="8,4" IsEnabled="False" />
             <Button Content="Close" Click="Close_Click" Padding="8,4" />
         </StackPanel>
         <Grid>
@@ -63,8 +63,8 @@
                             <GridViewColumn.CellTemplate>
                                 <DataTemplate>
                                     <Border Width="214" ClipToBounds="True">
-                                        <TextBlock Text="{Binding Path}"
-                                                   ToolTip="{Binding Path}"
+                                        <TextBlock Text="{Binding DisplayPath}"
+                                                   ToolTip="{Binding DisplayPath}"
                                                    TextWrapping="NoWrap"
                                                    TextTrimming="CharacterEllipsis" />
                                     </Border>

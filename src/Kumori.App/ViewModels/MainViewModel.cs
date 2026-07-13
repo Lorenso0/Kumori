@@ -28,6 +28,8 @@ public partial class MainViewModel : ObservableObject
     private readonly TrackingMaintenanceRepository _maintenance;
     private readonly SessionRepository _sessionsRepo;
     private readonly AppStateStore _appState;
+    private readonly AttemptDetailsRepository _detailsRepository;
+    private readonly ReplayViewerContractService? _replayViewer;
 
     /// <summary>Attempt rows only — used for compare selection and the inspector.</summary>
     public ObservableCollection<AttemptRowViewModel> Attempts { get; } = new();
@@ -92,12 +94,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _selectedArtworkMode = "Thumbnail cards";
 
     private readonly List<AttemptSummary> _loadedAttempts = new();
-    private readonly List<AttemptSummary> _allMapAttempts = new();
+    private readonly List<AttemptSummary> _mapAttempts = new();
     private readonly Dictionary<long, SessionSummary> _sessions = new();
-    private readonly HashSet<string> _collapsedDays = new(StringComparer.Ordinal);
     private readonly HashSet<long> _collapsedSessions = new();
     private long _dbBytes;
     private long _cacheBytes;
+    private AnalyticsSummary _currentAnalytics = new();
     private bool _usingLazerRealm;
     private long? _activeSessionId;
     private long? _latestAttemptId;
@@ -131,10 +133,13 @@ public partial class MainViewModel : ObservableObject
         _attempts = attempts;
         _analytics = analytics;
         _settings = settings;
+        _detailsRepository = details;
+        _replayViewer = replayViewer;
         _maintenance = maintenance ?? new TrackingMaintenanceRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false));
         _sessionsRepo = sessions ?? new SessionRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: true));
         Inspector = new AttemptDetailsViewModel(details, replayViewer);
         _activeSessionId = store.Current.ActiveSession?.SessionId;
+        IsGroupSessions = settings.Current.Appearance.GroupSessions;
         _store.StateChanged += OnStateChanged;
     }
 
@@ -145,7 +150,7 @@ public partial class MainViewModel : ObservableObject
     public string ResultsShortText => $"{Attempts.Count:N0}";
     public bool CanLaunchTosu => IsTosuLaunchVisible && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.2.0"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.3.0"}";
 
     partial void OnIsTosuLaunchVisibleChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -166,7 +171,14 @@ public partial class MainViewModel : ObservableObject
     partial void OnSelectedFilterModeChanged(string value) => ApplyVisibleAttempts();
 
     partial void OnIsGroupRepeatsChanged(bool value) => ApplyVisibleAttempts();
-    partial void OnIsGroupSessionsChanged(bool value) => ApplyVisibleAttempts();
+    partial void OnIsGroupSessionsChanged(bool value)
+    {
+        if (_settings.Current.Appearance.GroupSessions != value)
+        {
+            _settings.Update(settings => settings.Appearance.GroupSessions = value);
+        }
+        ApplyVisibleAttempts();
+    }
 
     partial void OnSelectedArtworkModeChanged(string value)
     {
@@ -174,6 +186,8 @@ public partial class MainViewModel : ObservableObject
     }
 
     public Task HydrateAsync() => ReloadFirstPageAsync();
+
+    public Task RefreshDashboardAsync() => ReloadFirstPageAsync();
 
     private async Task DebouncedSearchAsync(string search, CancellationToken token)
     {
@@ -199,10 +213,8 @@ public partial class MainViewModel : ObservableObject
             var search = _activeSearch;
             var load = await Task.Run(() => new
             {
-                Page = _attempts.GetRecentAttempts(null, PageSize, search),
-                AllMapAttempts = search is null || _allMapAttempts.Count == 0
-                    ? _attempts.GetRecentAttempts(limit: 10_000)
-                    : null,
+                Page = _attempts.GetRecentAttempts(null, PageSize, search, mapKey: _mapFilterKey),
+                Maps = _attempts.GetMapSummaries(),
                 Analytics = _analytics.GetSummary(),
                 Sessions = _sessionsRepo.GetRecentSessions(10_000),
                 DbBytes = SafeFileSize(AppPaths.TrackingDatabase),
@@ -221,12 +233,13 @@ public partial class MainViewModel : ObservableObject
             }
             _reachedEnd = load.Page.Count < PageSize;
             OnPropertyChanged(nameof(LoadOlderVisible));
-            _loadedAttempts.Clear();
-            _loadedAttempts.AddRange(load.Page);
-            if (load.AllMapAttempts is { } allMapAttempts)
+            var destination = _mapFilterKey is null ? _loadedAttempts : _mapAttempts;
+            destination.Clear();
+            destination.AddRange(load.Page);
+            MapCards.Clear();
+            foreach (var map in load.Maps)
             {
-                _allMapAttempts.Clear();
-                _allMapAttempts.AddRange(allMapAttempts);
+                MapCards.Add(new MapCardViewModel(map));
             }
             ApplyVisibleAttempts(selectFirst: false);
             if (Attempts.Count > 0 && (SelectedAttempt is null || !Attempts.Any(a => a.Id == SelectedAttempt.Id)))
@@ -239,6 +252,7 @@ public partial class MainViewModel : ObservableObject
             }
             _dbBytes = load.DbBytes;
             _cacheBytes = load.CacheBytes;
+            _currentAnalytics = load.Analytics;
             _usingLazerRealm = load.UsingLazerRealm;
             ApplyDashboard(load.Analytics, load.Page, load.DbBytes, load.CacheBytes);
             _oldestLoadedId = load.Page.Count > 0 ? load.Page[^1].Id : null;
@@ -284,11 +298,11 @@ public partial class MainViewModel : ObservableObject
         GlobalCompletedMetric = analytics.Completed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         GlobalFailedMetric = analytics.Failed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         GlobalScoreMetric = analytics.TotalScore.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
-        var synced = analytics.LastSyncedAt is { Length: >= 16 } stamp ? stamp.Substring(11, 5) : "—";
+        var synced = FormatLocalProfileSyncTime(analytics.LastSyncedAt);
         var mediaStatus = _usingLazerRealm
             ? $"Using Realm ({cacheBytes / 1_048_576.0:0.00} MB Kumori cache)"
             : $"Cache {cacheBytes / 1_048_576.0:0.00} MB";
-        SyncLine = Invariant($"Synced {synced}  ·  DB {dbBytes / 1_048_576.0:0.0} MB  ·  {mediaStatus}");
+        SyncLine = Invariant($"Profile synced {synced}  ·  DB {dbBytes / 1_048_576.0:0.0} MB  ·  {mediaStatus}");
 
         var first = page.FirstOrDefault();
         GroupHeader = first?.StartedAt.Length >= 10 && DateTime.TryParse(first.StartedAt[..10], out var day)
@@ -314,6 +328,14 @@ public partial class MainViewModel : ObservableObject
         return hours > 0
             ? Invariant($"{hours}h {minutes:00}m")
             : Invariant($"{minutes}m");
+    }
+
+    private static string FormatLocalProfileSyncTime(string? timestamp)
+    {
+        return DateTimeOffset.TryParse(timestamp, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var capturedAt)
+            ? capturedAt.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : "—";
     }
 
     private static string FormatPpGained(AccountChangeSummary? change)
@@ -379,7 +401,6 @@ public partial class MainViewModel : ObservableObject
         SearchText = "";
         SelectedFilterMode = "All";
         IsGroupRepeats = false;
-        IsGroupSessions = false;
         _mapFilterKey = null;
         ApplyVisibleAttempts();
     }
@@ -391,10 +412,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenAnalytics()
-    {
-        OpenInWorkspace(new AnalyticsWindow(_analytics), "Analytics");
-    }
+    private void OpenBackups() => OpenInWorkspace(new BackupWindow(_settings), "Backup & restore");
 
     [RelayCommand]
     private void OpenSetupWizard()
@@ -497,7 +515,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ExportProblemReport()
+    private async Task ExportProblemReportAsync()
     {
         Directory.CreateDirectory(AppPaths.AppDataDir);
         var includeDatabase = KumoriDialog.Show(
@@ -511,39 +529,43 @@ public partial class MainViewModel : ObservableObject
         var state = _store.Current;
         try
         {
-            Directory.CreateDirectory(tempDir);
-            File.WriteAllText(Path.Combine(tempDir, "summary.txt"),
-                $"""
-                Kumori problem report
-                Generated: {DateTimeOffset.Now:O}
-
-                Tracking: {state.Tracking.Health} / {state.Tracking.Detail}
-                Capture: {state.Capture.Health} / {state.Capture.Error}
-                Media: {state.Media.LastError}
-
-                AppData: {AppPaths.AppDataDir}
-                Tracking DB: {AppPaths.TrackingDatabase}
-                Writer: .NET real DB
-                Logs: {AppPaths.LogDir}
-
-                Contact: {SupportLinks.DiscordInviteUrl}
-                """);
-            CopyIfExists(AppPaths.SettingsFile, Path.Combine(tempDir, "settings.v2.json"));
-            CopyIfExists(AppPaths.LegacySettingsFile, Path.Combine(tempDir, "settings.legacy.json"));
-            CopyIfExists(LazerReplayFrameDiagnostics.StatusPath, Path.Combine(tempDir, "lazer_replay_frame_status.json"));
-            CopyIfExists(StableReplayFrameDiagnostics.StatusPath, Path.Combine(tempDir, "stable_replay_frame_status.json"));
-            CopyDirectoryIfExists(AppPaths.LogDir, Path.Combine(tempDir, "logs"));
-            if (includeDatabase)
+            HistoryStatus = "Creating diagnostics...";
+            await Task.Run(() =>
             {
-                CopyIfExists(AppPaths.TrackingDatabase, Path.Combine(tempDir, "osu_tracking.sqlite3"));
-                CopyIfExists(AppPaths.TrackingDatabase + "-wal", Path.Combine(tempDir, "osu_tracking.sqlite3-wal"));
-                CopyIfExists(AppPaths.TrackingDatabase + "-shm", Path.Combine(tempDir, "osu_tracking.sqlite3-shm"));
-            }
-            if (File.Exists(report))
-            {
-                File.Delete(report);
-            }
-            ZipFile.CreateFromDirectory(tempDir, report, CompressionLevel.Optimal, includeBaseDirectory: false);
+                Directory.CreateDirectory(tempDir);
+                File.WriteAllText(Path.Combine(tempDir, "summary.txt"),
+                    $"""
+                    Kumori problem report
+                    Generated: {DateTimeOffset.Now:O}
+
+                    Tracking: {state.Tracking.Health} / {state.Tracking.Detail}
+                    Capture: {state.Capture.Health} / {state.Capture.Error}
+                    Media: {state.Media.LastError}
+
+                    AppData: {AppPaths.AppDataDir}
+                    Tracking DB: {AppPaths.TrackingDatabase}
+                    Writer: .NET real DB
+                    Logs: {AppPaths.LogDir}
+
+                    Contact: {SupportLinks.DiscordInviteUrl}
+                    """);
+                CopyIfExists(AppPaths.SettingsFile, Path.Combine(tempDir, "settings.v2.json"));
+                CopyIfExists(AppPaths.LegacySettingsFile, Path.Combine(tempDir, "settings.legacy.json"));
+                CopyIfExists(LazerReplayFrameDiagnostics.StatusPath, Path.Combine(tempDir, "lazer_replay_frame_status.json"));
+                CopyIfExists(StableReplayFrameDiagnostics.StatusPath, Path.Combine(tempDir, "stable_replay_frame_status.json"));
+                CopyDirectoryIfExists(AppPaths.LogDir, Path.Combine(tempDir, "logs"));
+                if (includeDatabase)
+                {
+                    CopyIfExists(AppPaths.TrackingDatabase, Path.Combine(tempDir, "osu_tracking.sqlite3"));
+                    CopyIfExists(AppPaths.TrackingDatabase + "-wal", Path.Combine(tempDir, "osu_tracking.sqlite3-wal"));
+                    CopyIfExists(AppPaths.TrackingDatabase + "-shm", Path.Combine(tempDir, "osu_tracking.sqlite3-shm"));
+                }
+                if (File.Exists(report))
+                {
+                    File.Delete(report);
+                }
+                ZipFile.CreateFromDirectory(tempDir, report, CompressionLevel.Optimal, includeBaseDirectory: false);
+            });
             Process.Start(new ProcessStartInfo
             {
                 FileName = "explorer.exe",
@@ -658,12 +680,12 @@ public partial class MainViewModel : ObservableObject
         {
             var before = _oldestLoadedId;
             var search = _activeSearch;
-            var page = await Task.Run(() => _attempts.GetRecentAttempts(before, PageSize, search));
+            var page = await Task.Run(() => _attempts.GetRecentAttempts(before, PageSize, search, mapKey: _mapFilterKey));
             if (search != _activeSearch)
             {
                 return;
             }
-            _loadedAttempts.AddRange(page);
+            (_mapFilterKey is null ? _loadedAttempts : _mapAttempts).AddRange(page);
             _reachedEnd = page.Count < PageSize;
             OnPropertyChanged(nameof(LoadOlderVisible));
             ApplyVisibleAttempts(selectFirst: false);
@@ -688,7 +710,7 @@ public partial class MainViewModel : ObservableObject
     private void ApplyVisibleAttempts(bool selectFirst = true)
     {
         var previousSelectedId = SelectedAttempt?.Id;
-        var source = _mapFilterKey is null ? _loadedAttempts : _allMapAttempts;
+        var source = _mapFilterKey is null ? _loadedAttempts : _mapAttempts;
         var filtered = FilterAttempts(source).ToArray();
 
         Attempts.Clear();
@@ -728,38 +750,14 @@ public partial class MainViewModel : ObservableObject
             }
         }
 
-        RebuildSecondaryPages();
-
         SelectedAttempt = Attempts.FirstOrDefault(a => a.Id == previousSelectedId)
             ?? (selectFirst ? Attempts.FirstOrDefault() : SelectedAttempt);
         OnPropertyChanged(nameof(ResultsText));
         OnPropertyChanged(nameof(ResultsShortText));
-        ApplyDashboard(_analytics.GetSummary(), filtered, _dbBytes, _cacheBytes);
+        ApplyDashboard(_currentAnalytics, filtered, _dbBytes, _cacheBytes);
         HistoryStatus = filtered.Length == 0
             ? "No results match the current filters"
             : $"{filtered.Length} visible attempt(s)";
-    }
-
-    private void RebuildSecondaryPages()
-    {
-        MapCards.Clear();
-        foreach (var group in _allMapAttempts
-                     .GroupBy(MapKey)
-                     .OrderByDescending(group => group.Count())
-                     .ThenByDescending(group => group.Max(attempt => attempt.Id)))
-        {
-            MapCards.Add(new MapCardViewModel(group.Key, group.ToArray()));
-        }
-
-    }
-
-    public void ToggleDay(DayRowViewModel row)
-    {
-        if (!_collapsedDays.Add(row.DayKey))
-        {
-            _collapsedDays.Remove(row.DayKey);
-        }
-        ApplyVisibleAttempts(selectFirst: false);
     }
 
     public void ToggleSession(SessionRowViewModel row)
@@ -771,8 +769,11 @@ public partial class MainViewModel : ObservableObject
         ApplyVisibleAttempts(selectFirst: false);
     }
 
-    private static string MapKey(AttemptSummary a) =>
-        a.OsuBeatmapId?.ToString() ?? a.Checksum ?? a.Title;
+    private static string MapKey(AttemptSummary a) => a.OsuBeatmapId is > 0
+        ? $"id:{a.OsuBeatmapId}"
+        : !string.IsNullOrWhiteSpace(a.Checksum)
+            ? $"hash:{a.Checksum.ToLowerInvariant()}"
+            : $"meta:{a.Artist.ToLowerInvariant()}\u001f{a.Title.ToLowerInvariant()}\u001f{a.Difficulty.ToLowerInvariant()}\u001f{a.Mapper.ToLowerInvariant()}";
 
     /// <summary>Confirm + delete a single attempt, then reload.</summary>
     public async Task DeleteAttemptAsync(AttemptRowViewModel row)
@@ -807,19 +808,22 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>Filter the list to every loaded attempt on the same beatmap.</summary>
-    public void ShowAllPlaysForMap(AttemptRowViewModel row)
+    public async Task ShowAllPlaysForMapAsync(AttemptRowViewModel row)
     {
         _mapFilterKey = MapKey(row.Model);
         SelectedFilterMode = "All";
-        ApplyVisibleAttempts();
+        _activeSearch = null;
+        SearchText = "";
+        await ReloadFirstPageAsync();
     }
 
-    public void ShowAllPlaysForMap(MapCardViewModel map)
+    public async Task ShowAllPlaysForMapAsync(MapCardViewModel map)
     {
         _mapFilterKey = map.MapKey;
         SelectedFilterMode = "All";
-        IsGroupSessions = false;
-        ApplyVisibleAttempts();
+        _activeSearch = null;
+        SearchText = "";
+        await ReloadFirstPageAsync();
     }
 
     public void ShowProblemPlaysForMap(AttemptRowViewModel row)

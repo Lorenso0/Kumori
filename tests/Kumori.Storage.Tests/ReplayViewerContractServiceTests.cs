@@ -38,6 +38,7 @@ public class ReplayViewerContractServiceTests : IDisposable
         Assert.Equal(_beatmapPath, root.GetProperty("beatmap_path").GetString());
         Assert.Equal("Song", root.GetProperty("attempt").GetProperty("title").GetString());
         Assert.Equal("live", root.GetProperty("attempt").GetProperty("movement_source").GetString());
+        Assert.Equal(900000, root.GetProperty("attempt").GetProperty("score").GetInt64());
         Assert.Equal("completed", root.GetProperty("attempt").GetProperty("outcome").GetString());
         Assert.Equal(1, root.GetProperty("attempt").GetProperty("progress").GetDouble());
         Assert.Equal(2, root.GetProperty("samples").GetArrayLength());
@@ -45,6 +46,7 @@ public class ReplayViewerContractServiceTests : IDisposable
         Assert.Equal(500, root.GetProperty("final_hits").GetProperty("n300").GetInt32());
         Assert.Equal(0.8, root.GetProperty("settings").GetProperty("osu_replay_master_volume").GetDouble());
         Assert.Equal("refined-kumori", root.GetProperty("settings").GetProperty("kumori_theme").GetString());
+        Assert.Equal("#E8558D", root.GetProperty("settings").GetProperty("kumori_custom_theme").GetProperty("AccentPink").GetString());
     }
 
     [Fact]
@@ -96,6 +98,106 @@ public class ReplayViewerContractServiceTests : IDisposable
         Assert.Equal(-1, recent[0].GetProperty("id").GetInt64());
         Assert.Equal(95.5, recent[0].GetProperty("accuracy").GetDouble());
         Assert.Equal(8.5, recent[0].GetProperty("mean_offset").GetDouble());
+    }
+
+    [Fact]
+    public void WriteContract_IgnoresVisibilityAndScoringModsButRejectsAlignmentChangingMods()
+    {
+        using (var con = Open())
+        {
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = """
+                UPDATE attempts SET mods_key = 'HDSV2' WHERE id = 1;
+                INSERT INTO attempt_mods VALUES (1, 0, 'HD', '{}');
+                INSERT INTO attempt_mods VALUES (1, 1, 'SV2', '{}');
+
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                    accuracy, score, pp, combo, n300, n100, n50, misses, mods_key)
+                VALUES (2, 1, 1, '2026-07-07T10:10:00', 'completed', 98.5, 987654, 175, 500, 600, 4, 2, 1, 'NM');
+                INSERT INTO attempt_events(attempt_id, captured_at, map_time_ms, event_type, value, data_json)
+                VALUES (2, '2026-07-07T10:10:30', 750, 'hit_100', 1, '{}');
+                INSERT INTO attempt_movement VALUES (2, 'live', 1000, 2, 0, 'not_checked', '{}', '2026-07-07T10:11:00');
+                INSERT INTO attempt_movement_chunks VALUES (2, 0, 0, 1000, 2, @blob);
+
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                    accuracy, score, pp, combo, n300, n100, n50, misses, mods_key)
+                VALUES (4, 1, 1, '2026-07-07T10:11:00', 'completed', 99, 999000, 180, 520, 610, 3, 1, 0, 'HR');
+                INSERT INTO attempt_mods VALUES (4, 0, 'HR', '{}');
+                INSERT INTO attempt_movement VALUES (4, 'live', 1000, 2, 0, 'not_checked', '{}', '2026-07-07T10:11:30');
+                INSERT INTO attempt_movement_chunks VALUES (4, 0, 0, 1000, 2, @blob);
+
+                INSERT INTO beatmaps VALUES (2, 'x|y|different', 'Artist', 'Song', 'Insane', 5.2);
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                    accuracy, score, pp, combo, n300, n100, n50, misses, mods_key)
+                VALUES (3, 1, 2, '2026-07-07T10:12:00', 'completed', 99.1, 999999, 190, 550, 620, 2, 1, 0, 'NM');
+                INSERT INTO attempt_movement VALUES (3, 'live', 1000, 2, 0, 'not_checked', '{}', '2026-07-07T10:13:00');
+                INSERT INTO attempt_movement_chunks VALUES (3, 0, 0, 1000, 2, @blob);
+                """;
+            cmd.Parameters.AddWithValue("@blob", MovementRepository.EncodeSamples([
+                new MovementSample { MapTimeMs = 0, MonotonicMs = 0, X = 250, Y = 190 },
+                new MovementSample { MapTimeMs = 1000, MonotonicMs = 1000, X = 270, Y = 200, Buttons = 1 },
+            ]));
+            cmd.ExecuteNonQuery();
+        }
+
+        var path = CreateService().WriteContract(1, _beatmapPath);
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("comparison").ValueKind);
+        var options = doc.RootElement.GetProperty("comparison_options");
+        Assert.Equal(1, options.GetArrayLength());
+        Assert.Equal(2, options[0].GetProperty("attempt_id").GetInt64());
+        Assert.Equal("NM", options[0].GetProperty("mods_key").GetString());
+        Assert.Equal(987654, options[0].GetProperty("score").GetInt64());
+        Assert.Equal(4, options[0].GetProperty("n100").GetInt32());
+        Assert.Equal(2, options[0].GetProperty("n50").GetInt32());
+        Assert.Equal("100", options[0].GetProperty("judgement_events")[0].GetProperty("kind").GetString());
+        Assert.Equal(750, options[0].GetProperty("judgement_events")[0].GetProperty("map_time_ms").GetInt32());
+        Assert.Equal(2, options[0].GetProperty("samples").GetArrayLength());
+        Assert.Equal(1000, options[0].GetProperty("samples")[1].GetProperty("map_time_ms").GetInt32());
+    }
+
+    [Fact]
+    public void WriteContract_RequiresExactConfigurableModSettings()
+    {
+        using (var con = Open())
+        {
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = """
+                UPDATE attempts SET mods_key = 'DTDA' WHERE id = 1;
+                DELETE FROM attempt_mods WHERE attempt_id = 1;
+                INSERT INTO attempt_mods VALUES (1, 0, 'DT', '{"speed_change":1.5}');
+                INSERT INTO attempt_mods VALUES (1, 1, 'DA', '{"approach_rate":9.8,"circle_size":4}');
+
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                    accuracy, score, pp, combo, n300, n100, n50, misses, mods_key)
+                VALUES (2, 1, 1, '2026-07-07T10:10:00', 'completed', 98.5, 987654, 175, 500, 600, 4, 2, 1, 'DTDA');
+                INSERT INTO attempt_mods VALUES (2, 0, 'DA', '{"circle_size":4.0,"approach_rate":9.80}');
+                INSERT INTO attempt_mods VALUES (2, 1, 'DT', '{"speed_change":1.50}');
+                INSERT INTO attempt_movement VALUES (2, 'live', 1000, 2, 0, 'not_checked', '{}', '2026-07-07T10:11:00');
+                INSERT INTO attempt_movement_chunks VALUES (2, 0, 0, 1000, 2, @blob);
+
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                    accuracy, score, pp, combo, n300, n100, n50, misses, mods_key)
+                VALUES (3, 1, 1, '2026-07-07T10:12:00', 'completed', 99, 999000, 180, 520, 610, 3, 1, 0, 'DTDA');
+                INSERT INTO attempt_mods VALUES (3, 0, 'DT', '{"speed_change":1.5}');
+                INSERT INTO attempt_mods VALUES (3, 1, 'DA', '{"approach_rate":9.7,"circle_size":4}');
+                INSERT INTO attempt_movement VALUES (3, 'live', 1000, 2, 0, 'not_checked', '{}', '2026-07-07T10:13:00');
+                INSERT INTO attempt_movement_chunks VALUES (3, 0, 0, 1000, 2, @blob);
+                """;
+            cmd.Parameters.AddWithValue("@blob", MovementRepository.EncodeSamples([
+                new MovementSample { MapTimeMs = 0, MonotonicMs = 0, X = 250, Y = 190 },
+                new MovementSample { MapTimeMs = 1000, MonotonicMs = 1000, X = 270, Y = 200 },
+            ]));
+            cmd.ExecuteNonQuery();
+        }
+
+        string path = CreateService().WriteContract(1, _beatmapPath);
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        JsonElement options = doc.RootElement.GetProperty("comparison_options");
+        Assert.Equal(1, options.GetArrayLength());
+        Assert.Equal(2, options[0].GetProperty("attempt_id").GetInt64());
     }
 
     [Fact]

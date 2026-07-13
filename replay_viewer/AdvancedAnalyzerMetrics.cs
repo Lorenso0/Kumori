@@ -74,6 +74,23 @@ internal static class AdvancedAnalyzerMetrics
     {
         if (entry.Source == AnalysisDataSource.Lazer && entry.ExactTiming && entry.DistanceFromTarget != null)
             return AnalyzerEvidenceConfidence.High;
+
+        // Captured judgement counters are corroborated when the event maps to
+        // known object geometry and an actual replay press is present on a
+        // continuous local cursor path. This is stronger than a generic
+        // reconstruction, even though it is not a lazer-native judgement.
+        bool mappedObject = entry.ObjectType.Equals("Circle", StringComparison.OrdinalIgnoreCase)
+                            || entry.ObjectType.StartsWith("Slider", StringComparison.OrdinalIgnoreCase)
+                            || entry.ObjectType.Equals("Spinner", StringComparison.OrdinalIgnoreCase);
+        if (entry.Source == AnalysisDataSource.Inferred
+            && mappedObject
+            && entry.InputFrame != null
+            && entry.DistanceFromTarget != null
+            && entry.ReplayFrames.Count >= 2)
+        {
+            return AnalyzerEvidenceConfidence.High;
+        }
+
         if (entry.InputFrame != null || entry.NearestFrame != null)
             return AnalyzerEvidenceConfidence.Medium;
         return AnalyzerEvidenceConfidence.Low;
@@ -81,7 +98,8 @@ internal static class AdvancedAnalyzerMetrics
 
     public static string EvidenceLabel(MissAnalysisEntry entry) => Confidence(entry) switch
     {
-        AnalyzerEvidenceConfidence.High => "HIGH CONFIDENCE · EXACT LAZER JUDGEMENT",
+        AnalyzerEvidenceConfidence.High when entry.Source == AnalysisDataSource.Lazer => "HIGH CONFIDENCE · EXACT LAZER JUDGEMENT",
+        AnalyzerEvidenceConfidence.High => "HIGH CONFIDENCE · CAPTURE + REPLAY CORROBORATED",
         AnalyzerEvidenceConfidence.Medium when entry.Source == AnalysisDataSource.Lazer => "MEDIUM CONFIDENCE · PARTIAL INPUT EVIDENCE",
         AnalyzerEvidenceConfidence.Medium => "MEDIUM CONFIDENCE · RECONSTRUCTED CAPTURE",
         _ => "LOW CONFIDENCE · INCOMPLETE EVIDENCE",

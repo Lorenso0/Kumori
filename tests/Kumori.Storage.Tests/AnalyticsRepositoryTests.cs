@@ -79,6 +79,32 @@ public class AnalyticsRepositoryTests : IDisposable
         Assert.Equal(145, summary.LatestAccountChange.NewTotalPp);
     }
 
+    [Fact]
+    public void GetSummary_UsesFirstAndLatestSnapshotsForActiveProfile()
+    {
+        using var con = new SqliteConnection($"Data Source={_dbPath}");
+        con.Open();
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE profile_snapshots(
+                id INTEGER PRIMARY KEY, captured_at TEXT NOT NULL, player_id INTEGER,
+                total_pp REAL, global_rank INTEGER, accuracy REAL, play_count INTEGER);
+            INSERT INTO profile_snapshots VALUES
+                (1, '2026-07-07T18:00:00+02:00', 1, 6250.82, 55747, 99.50, 79433),
+                (2, '2026-07-07T19:00:00+02:00', 1, 6276.18, 55135, 99.48, 79573),
+                (3, '2026-07-13T07:49:00+00:00', 1, 6291.26, 52590, 99.44, 79730);
+            """;
+        cmd.ExecuteNonQuery();
+
+        var summary = new AnalyticsRepository(
+            new SqliteConnectionFactory(_dbPath, readOnly: true)).GetSummary();
+
+        Assert.Equal(6250.82, summary.LatestAccountChange!.OldTotalPp);
+        Assert.Equal(6291.26, summary.LatestAccountChange.NewTotalPp);
+        Assert.Equal(55747, summary.LatestAccountChange.OldGlobalRank);
+        Assert.Equal(52590, summary.LatestAccountChange.NewGlobalRank);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

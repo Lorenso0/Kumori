@@ -19,7 +19,10 @@ public sealed class SettingsService
     private readonly string _legacyFile;
     private readonly object _lock = new();
 
-    public KumoriSettings Current { get; private set; } = new();
+    private KumoriSettings current = new();
+
+    /// <summary>Atomically published snapshot; service updates use copy-on-write.</summary>
+    public KumoriSettings Current => Volatile.Read(ref current);
 
     public event Action<KumoriSettings>? Changed;
 
@@ -37,9 +40,9 @@ public sealed class SettingsService
             {
                 try
                 {
-                    Current = JsonSerializer.Deserialize<KumoriSettings>(
+                    current = JsonSerializer.Deserialize<KumoriSettings>(
                         File.ReadAllText(_settingsFile), JsonOptions) ?? new KumoriSettings();
-                    return Current;
+                    return current;
                 }
                 catch (Exception ex) when (ex is JsonException or NotSupportedException)
                 {
@@ -47,37 +50,44 @@ public sealed class SettingsService
                     // user or support engineer can recover it.
                     if (!TryPreserveCorruptSettings())
                     {
-                        Current = new KumoriSettings();
-                        return Current;
+                        current = new KumoriSettings();
+                        return current;
                     }
                 }
             }
 
-            Current = File.Exists(_legacyFile)
+            current = File.Exists(_legacyFile)
                 ? ImportLegacy(File.ReadAllText(_legacyFile))
                 : new KumoriSettings();
-            SaveLocked();
-            return Current;
+            SaveLocked(current);
+            return current;
         }
     }
 
     public void Update(Action<KumoriSettings> mutate)
     {
+        KumoriSettings next;
         lock (_lock)
         {
-            mutate(Current);
-            SaveLocked();
+            next = Clone(current);
+            mutate(next);
+            SaveLocked(next);
+            Volatile.Write(ref current, next);
         }
-        Changed?.Invoke(Current);
+        Changed?.Invoke(next);
     }
 
-    private void SaveLocked()
+    private void SaveLocked(KumoriSettings settings)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsFile)!);
         var tmp = _settingsFile + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(Current, JsonOptions));
+        File.WriteAllText(tmp, JsonSerializer.Serialize(settings, JsonOptions));
         File.Move(tmp, _settingsFile, overwrite: true);
     }
+
+    private static KumoriSettings Clone(KumoriSettings settings) =>
+        JsonSerializer.Deserialize<KumoriSettings>(JsonSerializer.Serialize(settings, JsonOptions), JsonOptions)
+        ?? throw new InvalidOperationException("Settings snapshot could not be cloned.");
 
     private bool TryPreserveCorruptSettings()
     {

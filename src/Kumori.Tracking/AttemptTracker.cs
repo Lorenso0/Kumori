@@ -249,6 +249,13 @@ public sealed class AttemptTracker
         }
 
         var snapshot = _latestSnapshot ?? Snapshot(frame);
+        Log.Information(
+            "Discarding suppressed attempt {Ordinal}: {Reason}; duration={DurationSeconds:0.00}s score={Score} progress={Progress:P1}",
+            _attemptOrdinal,
+            reason,
+            snapshot.DurationSeconds,
+            snapshot.Score,
+            snapshot.Progress);
         _sink.DiscardIfEmpty(new AttemptDiscard(reason, snapshot, _attemptOrdinal));
         _machine.AttemptCleared();
         _pendingQuitFrame = null;

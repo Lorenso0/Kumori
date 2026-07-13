@@ -18,9 +18,10 @@ public sealed class TosuTrackingService : IAsyncDisposable
 
     private readonly AppStateStore _store;
     private readonly WebSocketPacketSource _source;
-    private readonly TosuClient _client = new();
+    private readonly TosuClient _client;
     private readonly AttemptTracker? _attemptTracker;
     private readonly SessionTracker? _sessionTracker;
+    private readonly IProfileTelemetrySink? _profileTelemetry;
     private readonly string _primaryMediaMirror;
     private readonly IReadOnlyList<string> _fallbackMediaMirrors;
     private readonly CancellationTokenSource _cts = new();
@@ -37,14 +38,18 @@ public sealed class TosuTrackingService : IAsyncDisposable
         Uri? uri = null,
         AttemptTracker? attemptTracker = null,
         SessionTracker? sessionTracker = null,
+        IProfileTelemetrySink? profileTelemetry = null,
         string primaryMediaMirror = "https://api.rai.moe",
         IReadOnlyList<string>? fallbackMediaMirrors = null,
-        bool recordPackets = false)
+        bool recordPackets = false,
+        IReplayPlaybackDetector? replayPlaybackDetector = null)
     {
         _store = store;
+        _client = new TosuClient(replayPlaybackDetector);
         _source = new WebSocketPacketSource(uri, recordPackets);
         _attemptTracker = attemptTracker;
         _sessionTracker = sessionTracker;
+        _profileTelemetry = profileTelemetry;
         _primaryMediaMirror = string.IsNullOrWhiteSpace(primaryMediaMirror) ? "https://api.rai.moe" : primaryMediaMirror;
         _fallbackMediaMirrors = fallbackMediaMirrors ?? Array.Empty<string>();
         _source.Connected += OnConnected;
@@ -91,6 +96,9 @@ public sealed class TosuTrackingService : IAsyncDisposable
     {
         try
         {
+            // Profile data is independent of gameplay state. Persist it before
+            // the attempt tracker opens an attempt so that it becomes its baseline.
+            _profileTelemetry?.Ingest(snapshot);
             if (snapshot.ClientKind != OsuClientKind.Unknown)
             {
                 ClientKindObserved?.Invoke(snapshot.ClientKind);
@@ -315,6 +323,7 @@ public sealed class TosuTrackingService : IAsyncDisposable
 
     public void NotifyOsuStopped()
     {
+        _client.ResetReplayPlaybackState();
         var snapshot = _client.LastSnapshot;
         if (snapshot is null)
         {

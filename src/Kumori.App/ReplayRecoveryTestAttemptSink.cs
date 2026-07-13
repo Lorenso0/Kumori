@@ -1,0 +1,103 @@
+using Kumori.Core.Settings;
+using Kumori.Tracking;
+using Serilog;
+
+namespace Kumori.App;
+
+/// <summary>
+/// One-shot developer diagnostic that feeds a completed play through the real
+/// missing-tosu replay recovery path. Only result telemetry is removed; map
+/// identity, mods, timing and attempt lifecycle remain valid so the persisted
+/// replay can be located and simulated normally.
+/// </summary>
+internal sealed class ReplayRecoveryTestAttemptSink(
+    IAttemptSink inner,
+    SettingsService settings) : IAttemptSink
+{
+    private bool forceCurrentAttempt;
+
+    public void StartAttempt(AttemptStart start)
+    {
+        forceCurrentAttempt = settings.Current.Developer.ForceReplayRecoveryNextPlay;
+        if (forceCurrentAttempt)
+            Log.Warning("Developer replay recovery test armed for the current attempt");
+        inner.StartAttempt(forceCurrentAttempt
+            ? start with { BeatmapStats = new BeatmapStats() }
+            : start);
+    }
+
+    public void Checkpoint(AttemptCheckpoint checkpoint)
+        => inner.Checkpoint(forceCurrentAttempt
+            ? checkpoint with { Snapshot = WithoutResultTelemetry(checkpoint.Snapshot) }
+            : checkpoint);
+
+    public void DiscardIfEmpty(AttemptDiscard discard)
+    {
+        // An empty/discarded attempt does not consume the one-shot switch.
+        inner.DiscardIfEmpty(discard);
+        forceCurrentAttempt = false;
+    }
+
+    public void Finalize(AttemptFinalization finalization)
+    {
+        bool consume = forceCurrentAttempt
+                       && finalization.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase);
+        forceCurrentAttempt = false;
+        if (!consume)
+        {
+            inner.Finalize(finalization);
+            return;
+        }
+
+        Log.Warning(
+            "Developer replay recovery test is discarding tosu result telemetry for the next completed play");
+        try
+        {
+            inner.Finalize(finalization with
+            {
+                Snapshot = WithoutResultTelemetry(finalization.Snapshot),
+            });
+        }
+        finally
+        {
+            try
+            {
+                settings.Update(value => value.Developer.ForceReplayRecoveryNextPlay = false);
+                Log.Information("Developer replay recovery test switch consumed and automatically disabled");
+            }
+            catch (Exception ex)
+            {
+                // Never fail attempt finalization after the test result was
+                // already stored. A settings write failure is logged clearly.
+                Log.Error(ex, "Could not persist the disabled developer replay recovery switch");
+            }
+        }
+    }
+
+    internal static AttemptSnapshot WithoutResultTelemetry(AttemptSnapshot snapshot) => snapshot with
+    {
+        Score = 0,
+        Accuracy = 0,
+        Grade = null,
+        Pp = 0,
+        FcPp = 0,
+        MaxPp = 0,
+        Combo = 0,
+        N300 = 0,
+        N100 = 0,
+        N50 = 0,
+        Misses = 0,
+        Geki = 0,
+        Katu = 0,
+        SliderBreaks = 0,
+        LargeTickHits = 0,
+        LargeTickMisses = 0,
+        SmallTickHits = 0,
+        SmallTickMisses = 0,
+        SliderTailHits = 0,
+        SliderTailMisses = 0,
+        UnstableRate = 0,
+        TimingOffsets = [],
+        BeatmapStats = new BeatmapStats(),
+    };
+}

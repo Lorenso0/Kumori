@@ -28,6 +28,40 @@ public sealed class MapCardViewModel
         Stars = row.StarsText;
     }
 
+    public MapCardViewModel(MapSummary map)
+    {
+        MapKey = map.MapKey;
+        Artist = map.Artist;
+        Title = map.Title;
+        Difficulty = map.Difficulty;
+        Mapper = map.Mapper;
+        var representative = new AttemptSummary
+        {
+            Id = map.LastAttemptId,
+            OsuBeatmapId = map.OsuBeatmapId,
+            BeatmapSetId = map.BeatmapSetId,
+            Checksum = map.Checksum,
+            Artist = map.Artist,
+            Title = map.Title,
+            Difficulty = map.Difficulty,
+            Mapper = map.Mapper,
+            StartedAt = map.LastStartedAt,
+            Stars = map.Stars,
+        };
+        var row = new AttemptRowViewModel(representative);
+        ArtworkSource = row.ArtworkSource;
+        PlayCount = map.PlayCount;
+        BestPp = map.BestPp;
+        BestAccuracy = map.BestAccuracy;
+        BestCombo = map.BestCombo;
+        AverageAccuracy = map.AverageAccuracy;
+        AveragePp = map.AveragePp;
+        AverageCombo = map.AverageCombo;
+        CompletionRate = map.PlayCount == 0 ? 0 : map.CompletedCount * 100.0 / map.PlayCount;
+        LastPlayed = row.WhenText;
+        Stars = row.StarsText;
+    }
+
     public string MapKey { get; }
     public string Artist { get; }
     public string Title { get; }

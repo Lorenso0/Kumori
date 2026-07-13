@@ -671,7 +671,12 @@
                                       Margin="7,0,0,0"
                                       IsHitTestVisible="False" />
                             </Grid>
-                            <Button Grid.Column="1" Content="&#xE71C;" FontFamily="Segoe Fluent Icons" Style="{StaticResource FilterChipButton}" ToolTip="Reset filters" Command="{Binding ClearFiltersCommand}" Margin="0"/>
+                            <Button Grid.Column="1"
+                                    Content="Clear"
+                                    Style="{StaticResource FilterChipButton}"
+                                    ToolTip="Clear search and filters"
+                                    Command="{Binding ClearFiltersCommand}"
+                                    Margin="0"/>
                             <WrapPanel Grid.Row="1" VerticalAlignment="Bottom">
                                 <Button Content="All" Tag="All" Click="FilterChip_Click" Style="{StaticResource FilterChipButton}"/>
                                 <Button Content="Completed" Tag="Completed" Click="FilterChip_Click" Style="{StaticResource FilterChipButton}"/>
@@ -724,72 +729,6 @@
                              VirtualizingPanel.VirtualizationMode="Recycling"
                              VirtualizingPanel.ScrollUnit="Pixel">
                         <ListBox.Resources>
-                            <DataTemplate DataType="{x:Type vm:DayRowViewModel}">
-                                <Border Height="34"
-                                        Margin="0"
-                                        Padding="9,0,8,0"
-                                        Background="{DynamicResource Brush.PanelBackground}"
-                                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
-                                        BorderThickness="1"
-                                        CornerRadius="3"
-                                        ToolTip="{Binding StatsLine}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="30" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Button Grid.Column="0"
-                                                Click="DayToggle_Click"
-                                                Style="{StaticResource HeaderChevronButton}"
-                                                ToolTip="Collapse day">
-                                            <Path Width="8"
-                                                  Height="8"
-                                                  Stretch="Uniform"
-                                                  Data="M 0 0 L 5 4.5 L 0 9"
-                                                  Stroke="{DynamicResource Brush.AccentPink}"
-                                                  StrokeThickness="1.9"
-                                                  StrokeStartLineCap="Round"
-                                                  StrokeEndLineCap="Round"
-                                                  StrokeLineJoin="Round">
-                                                <Path.Style>
-                                                    <Style TargetType="Path">
-                                                        <Setter Property="RenderTransform">
-                                                            <Setter.Value>
-                                                                <RotateTransform Angle="0" CenterX="4" CenterY="4" />
-                                                            </Setter.Value>
-                                                        </Setter>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding IsCollapsed}" Value="False">
-                                                                <Setter Property="RenderTransform">
-                                                                    <Setter.Value>
-                                                                        <RotateTransform Angle="90" CenterX="4" CenterY="4" />
-                                                                    </Setter.Value>
-                                                                </Setter>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Path.Style>
-                                            </Path>
-                                        </Button>
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{Binding HeaderLine}"
-                                                   Style="{StaticResource Text.RowTitle}"
-                                                   FontSize="12"
-                                                   VerticalAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="2"
-                                                   Text="{Binding StatsLine}"
-                                                   Style="{StaticResource Text.Muted}"
-                                                   FontSize="11"
-                                                   VerticalAlignment="Center"
-                                                   MaxWidth="340"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Margin="10,0,0,0" />
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-
                             <DataTemplate DataType="{x:Type vm:SessionRowViewModel}">
                                 <Border Margin="0"
                                         Height="44"
@@ -1183,12 +1122,15 @@
                                         BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
                                 <Grid ClipToBounds="True">
                                     <Border Background="{DynamicResource Brush.CardBackground}" />
-                                    <Image Source="{Binding ArtworkSource}"
-                                           Stretch="UniformToFill"
-                                           StretchDirection="Both"
-                                           HorizontalAlignment="Stretch"
-                                           VerticalAlignment="Stretch"
-                                           Opacity="0.96" />
+                                    <Border Opacity="0.96"
+                                            RenderOptions.BitmapScalingMode="HighQuality">
+                                        <Border.Background>
+                                            <ImageBrush ImageSource="{Binding ArtworkSource}"
+                                                        Stretch="UniformToFill"
+                                                        AlignmentX="Center"
+                                                        AlignmentY="Center" />
+                                        </Border.Background>
+                                    </Border>
                                     <Border>
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
@@ -1341,6 +1283,28 @@
                                         <TextBlock Text="{Binding PpValue}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Grid>
+
+                                <Border Margin="10,8,10,0"
+                                        Padding="10,7"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource Brush.CardSelectedBackground}"
+                                        BorderBrush="{DynamicResource Brush.Warning}"
+                                        BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasReplayRecoveredResult}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding ReplayRecoveryNotice}"
+                                               Foreground="{DynamicResource Brush.TextSecondary}"
+                                               FontSize="10"
+                                               TextWrapping="Wrap" />
+                                </Border>
 
                                 <!-- c/d. primary + secondary bordered stat rows (shared outer border) -->
                                 <Border Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="8" Margin="10,8,10,0">
@@ -1731,7 +1695,7 @@
                                         <Button Grid.Column="2"
                                                 Content="Replay Analyzer"
                                                 Command="{Binding DataContext.OpenSelectedReplayInspectorCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                Visibility="{Binding HasMovement, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"
+                                                Visibility="{Binding CanOpenReplayInspector, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"
                                                 Style="{StaticResource Button.Primary}"
                                                 FontSize="11"
                                                 FontWeight="Bold"
@@ -1816,7 +1780,7 @@
                                     Margin="0,6,12,6">
                                 <Button.Style>
                                     <Style TargetType="Button" BasedOn="{StaticResource Button.Primary}">
-                                        <Setter Property="Visibility" Value="{Binding HasMovement, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
+                                        <Setter Property="Visibility" Value="{Binding CanOpenReplayInspector, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsExpanded, ElementName=TechnicalDetailsExpander}" Value="True">
                                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -1946,6 +1910,7 @@
                         <Button Content="Launch tosu" Command="{Binding LaunchTosuCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,12" Visibility="{Binding IsTosuLaunchVisible, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"/>
                         <TextBlock Text="STATUS &amp; MAINTENANCE" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
                         <Button Content="Health dashboard" Command="{Binding OpenHealthDashboardCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                        <Button Content="Backup &amp; restore" Command="{Binding OpenBackupsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Clear beatmap cache" Command="{Binding ClearBeatmapCacheCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Cleanup invalid attempts" Command="{Binding CleanupInvalidAttemptsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Delete entries before…" Command="{Binding DeleteEntriesBeforeCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
@@ -2007,9 +1972,12 @@
                 <StackPanel><TextBlock Text="Maps" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Your most-played beatmaps, with performance averages across every recorded play" Foreground="{DynamicResource Brush.TextSecondary}" Margin="0,3,0,0"/></StackPanel>
                 <Border Grid.Column="1" Style="{StaticResource PagePanel}" Padding="12,7" VerticalAlignment="Center"><TextBlock Text="Sorted by play count" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/></Border>
             </Grid>
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{Binding MapCards}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate>
-                    <Button Click="MapCard_Click" Width="410" Height="172" Padding="0" Margin="0,0,12,12" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" ToolTip="Show every recorded play on this map">
+            <ListBox Grid.Row="1" ItemsSource="{Binding MapCards}" Background="Transparent" BorderThickness="0"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style></ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate><DataTemplate>
+                    <Button Click="MapCard_Click" MaxWidth="900" Height="172" Padding="0" Margin="0,0,12,12" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" ToolTip="Show every recorded play on this map">
                         <Border Style="{StaticResource PagePanel}" Padding="0" ClipToBounds="True">
                             <Grid>
                                 <Grid.RowDefinitions><RowDefinition Height="88"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -2020,8 +1988,8 @@
                             </Grid>
                         </Border>
                     </Button>
-                </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-            </ScrollViewer>
+                </DataTemplate></ListBox.ItemTemplate>
+            </ListBox>
         </Grid>
 
         <Grid x:Name="OnboardingOverlay"

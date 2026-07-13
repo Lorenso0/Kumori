@@ -1,3 +1,5 @@
+using Kumori.Core;
+
 namespace Kumori.ReplayViewer;
 
 internal static class NativeViewerLog
@@ -8,8 +10,7 @@ internal static class NativeViewerLog
     {
         get
         {
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            return Path.Combine(appData, "Kumori", "logs", "viewer", $"native-viewer-{DateTimeOffset.Now:yyyyMMdd}.log");
+            return AppPaths.ViewerLogFile;
         }
     }
 
@@ -19,9 +20,11 @@ internal static class NativeViewerLog
         {
             lock (Sync)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
                 PruneOldLogs();
-                File.AppendAllText(LogPath, $"[{DateTimeOffset.Now:O}] native {message}{Environment.NewLine}");
+                LogRetentionPolicy.AppendWithSizeRotation(
+                    LogPath,
+                    $"[{DateTimeOffset.Now:O}] native {message}{Environment.NewLine}",
+                    maxAgeDays: LogRetentionPolicy.ReadConfiguredDays());
             }
         }
         catch
@@ -43,7 +46,7 @@ internal static class NativeViewerLog
                 return;
             }
 
-            var cutoff = DateTimeOffset.Now.UtcDateTime.AddDays(-3);
+            var cutoff = DateTimeOffset.Now.UtcDateTime.AddDays(-LogRetentionPolicy.ReadConfiguredDays());
             foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
             {
                 try

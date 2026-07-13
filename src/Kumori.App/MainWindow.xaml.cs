@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        WindowMaximizeWorkArea.Attach(this);
         // Dark title bar before first render — part of the no-flicker plan.
         DarkTitleBar.Apply(new WindowInteropHelper(this).Handle);
     }
@@ -70,15 +71,6 @@ public partial class MainWindow : Window
         {
             _compactInspectorOpen = true;
             ApplyResponsiveLayout();
-        }
-    }
-
-    private void DayToggle_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { DataContext: DayRowViewModel row }
-            && DataContext is MainViewModel vm)
-        {
-            vm.ToggleDay(row);
         }
     }
 
@@ -208,7 +200,7 @@ public partial class MainWindow : Window
         var replay = new MenuItem { Header = "Open Replay Analyzer", IsEnabled = row.CanOpenReplayInspector };
         replay.Click += async (_, _) => await vm.OpenReplayInspectorAsync(row);
         var showAll = new MenuItem { Header = "Show all plays for this map" };
-        showAll.Click += (_, _) => vm.ShowAllPlaysForMap(row);
+        showAll.Click += async (_, _) => await vm.ShowAllPlaysForMapAsync(row);
         var delete = new MenuItem { Header = "Delete this attempt" };
         delete.Click += async (_, _) => await vm.DeleteAttemptAsync(row);
         menu.Items.Add(replay);
@@ -521,11 +513,11 @@ public partial class MainWindow : Window
         ApplyResponsiveLayout();
     }
 
-    private void MapCard_Click(object sender, RoutedEventArgs e)
+    private async void MapCard_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: MapCardViewModel map } && DataContext is MainViewModel viewModel)
         {
-            viewModel.ShowAllPlaysForMap(map);
+            await viewModel.ShowAllPlaysForMapAsync(map);
             _compactInspectorOpen = false;
             ShowPage("Dashboard");
             HistoryList.Focus();
@@ -661,10 +653,10 @@ public partial class MainWindow : Window
         Height = height;
         Left = left;
         Top = top;
-        if (saved.Maximized)
-        {
-            WindowState = WindowState.Maximized;
-        }
+        // Always start the main GUI as a normal window. Preserve the restored
+        // bounds below, but do not let a previous maximized session turn every
+        // subsequent launch into a full-screen dashboard.
+        WindowState = WindowState.Normal;
     }
 
     private static bool IsMostlyOnScreen(double left, double top, double width, double height)
@@ -690,7 +682,10 @@ public partial class MainWindow : Window
             s.Window.Top = bounds.Top;
             s.Window.Width = bounds.Width;
             s.Window.Height = bounds.Height;
-            s.Window.Maximized = maximized;
+            // Maximising is an action for the current session, not a startup
+            // preference. Keeping this false also clears older settings files
+            // which persisted a maximised launch state.
+            s.Window.Maximized = false;
         });
     }
 }

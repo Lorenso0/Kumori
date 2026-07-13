@@ -1,6 +1,7 @@
 <Window x:Class="Kumori.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Kumori.App"
         Title="Kumori Settings"
         Width="720" Height="680"
         MinWidth="560" MinHeight="480"
@@ -167,7 +168,166 @@
                                     <TextBlock Text="Layered charcoal and native restraint" Style="{StaticResource Text.Muted}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </RadioButton>
+                            <RadioButton x:Name="CustomTheme"
+                                         GroupName="Theme"
+                                         Tag="custom"
+                                         Checked="Theme_Checked"
+                                         Margin="18,0,0,10">
+                                <StackPanel Width="176">
+                                    <Border Height="40" CornerRadius="8" BorderBrush="{DynamicResource Brush.StrongBorder}" BorderThickness="1">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="{DynamicResource Color.AccentPink}" />
+                                                <GradientStop Color="{DynamicResource Color.AccentPurple}" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <TextBlock Text="Custom" FontWeight="SemiBold" Margin="0,7,0,2" />
+                                    <TextBlock Text="Your own shareable color palette" Style="{StaticResource Text.Muted}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </RadioButton>
                         </WrapPanel>
+
+                        <Border x:Name="CustomThemeEditor"
+                                Visibility="Collapsed"
+                                Margin="0,8,0,0"
+                                Padding="12"
+                                CornerRadius="6"
+                                Background="{DynamicResource Brush.ControlBackground}"
+                                BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Theme name" Style="{StaticResource SettingsLabel}" />
+                                        <TextBox x:Name="CustomThemeName" Width="220" HorizontalAlignment="Left" MaxLength="80" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Import" Click="ImportTheme_Click" Margin="8,18,0,0" />
+                                    <Button Grid.Column="2" Content="Export" Click="ExportTheme_Click" Margin="8,18,0,0" />
+                                    <Button Grid.Column="3" Content="Reset" Click="ResetTheme_Click" Margin="8,18,0,0" />
+                                </Grid>
+                                <TextBlock Text="Choose a role below, then use Kumori's color picker or enter #RRGGBB / #AARRGGBB. Every change previews immediately; Save keeps it."
+                                           Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,10" />
+
+                                <Border Height="176"
+                                        Margin="0,0,0,14"
+                                        CornerRadius="8"
+                                        ClipToBounds="True"
+                                        Background="{DynamicResource Brush.AppBackground}"
+                                        BorderBrush="{DynamicResource Brush.StrongBorder}"
+                                        BorderThickness="1">
+                                    <Grid x:Name="ThemePreviewRoot">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="66" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border x:Name="PreviewNavigation" Background="{DynamicResource Brush.NavigationBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,0,1,0">
+                                            <StackPanel Margin="10">
+                                                <Border x:Name="PreviewPrimaryAccent" Width="30" Height="30" HorizontalAlignment="Left" CornerRadius="15" Background="{DynamicResource Brush.AccentPink}" />
+                                                <Border x:Name="PreviewSecondaryAccent" Width="28" Height="5" HorizontalAlignment="Left" Margin="1,14,0,0" CornerRadius="2" Background="{DynamicResource Brush.AccentPurple}" />
+                                                <Border x:Name="PreviewCyan" Width="22" Height="5" HorizontalAlignment="Left" Margin="1,8,0,0" CornerRadius="2" Background="{DynamicResource Brush.Cyan}" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Grid Grid.Column="1">
+                                            <Grid.RowDefinitions><RowDefinition Height="34"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                            <Border x:Name="PreviewTopBar" Background="{DynamicResource Brush.TopBarBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,0,0,1">
+                                                <StackPanel Orientation="Horizontal" Margin="12,0">
+                                                    <TextBlock x:Name="PreviewPrimaryText" Text="Kumori preview" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+                                                    <TextBlock x:Name="PreviewMutedText" Text="  live theme" VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMuted}" />
+                                                </StackPanel>
+                                            </Border>
+                                            <Border x:Name="PreviewPanel" Grid.Row="1" Margin="10" Padding="9" CornerRadius="6" Background="{DynamicResource Brush.PanelBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="112"/></Grid.ColumnDefinitions>
+                                                    <StackPanel Margin="0,0,9,0">
+                                                        <Border x:Name="PreviewSelectedCard" Padding="8" CornerRadius="5" Background="{DynamicResource Brush.CardSelectedBackground}" BorderBrush="{DynamicResource Brush.StrongBorder}" BorderThickness="1">
+                                                            <StackPanel>
+                                                                <TextBlock x:Name="PreviewSecondaryText" Text="Selected play" Foreground="{DynamicResource Brush.TextSecondary}" />
+                                                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                                    <Border x:Name="PreviewSuccess" Background="{DynamicResource Brush.Success}" CornerRadius="3" Padding="5,2" Margin="0,0,4,0"><TextBlock Text="300" FontSize="9" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
+                                                                    <Border x:Name="PreviewWarning" Background="{DynamicResource Brush.Warning}" CornerRadius="3" Padding="5,2" Margin="0,0,4,0"><TextBlock Text="50" FontSize="9" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
+                                                                    <Border x:Name="PreviewDanger" Background="{DynamicResource Brush.Danger}" CornerRadius="3" Padding="5,2"><TextBlock Text="MISS" FontSize="9" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <Border x:Name="PreviewHoverCard" Height="24" Margin="0,6,0,0" CornerRadius="4" Background="{DynamicResource Brush.CardHoverBackground}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1">
+                                                        <Border x:Name="PreviewMetric" Height="34" CornerRadius="5" Background="{DynamicResource Brush.MetricBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
+                                                            <TextBlock Text="98.42%" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextPrimary}" />
+                                                        </Border>
+                                                        <Border x:Name="PreviewControl" Height="26" Margin="0,6,0,0" CornerRadius="4" Background="{DynamicResource Brush.ControlBackground}" BorderBrush="{DynamicResource Brush.StrongBorder}" BorderThickness="1">
+                                                            <TextBlock Text="Button" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="{DynamicResource Brush.TextSecondary}" />
+                                                        </Border>
+                                                        <Border x:Name="PreviewHoverControl" Height="18" Margin="0,6,0,0" CornerRadius="4" Background="{DynamicResource Brush.ControlHoverBackground}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                            <Border x:Name="PreviewOverlay" Grid.RowSpan="2" Width="48" Height="30" Margin="0,8,8,0" HorizontalAlignment="Right" VerticalAlignment="Top" CornerRadius="5" Background="{DynamicResource Brush.OverlayBackground}" />
+                                        </Grid>
+                                        <Canvas x:Name="ThemePreviewHighlightLayer" Grid.ColumnSpan="2" IsHitTestVisible="False">
+                                            <Border x:Name="ThemePreviewHighlight" Visibility="Collapsed" CornerRadius="5" BorderBrush="{DynamicResource Brush.TextPrimary}" BorderThickness="2" />
+                                        </Canvas>
+                                    </Grid>
+                                </Border>
+                                <StackPanel Margin="0,0,0,10">
+                                    <TextBlock x:Name="PreviewSelectionTitle" Text="Select a color role" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+                                    <TextBlock x:Name="PreviewSelectionDescription" Text="The matching element is outlined in the live preview." Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border Height="340"
+                                        Margin="0,0,0,8"
+                                        Padding="8,0,2,0"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource Brush.PanelBackground}"
+                                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                                        BorderThickness="1">
+                                    <ScrollViewer x:Name="ThemeColorScroll"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  PreviewMouseWheel="ThemeColorScroll_PreviewMouseWheel">
+                                <ItemsControl x:Name="CustomColorList">
+                                    <ItemsControl.GroupStyle>
+                                        <GroupStyle>
+                                            <GroupStyle.HeaderTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Name}" Margin="0,9,0,7" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+                                                </DataTemplate>
+                                            </GroupStyle.HeaderTemplate>
+                                            <GroupStyle.Panel>
+                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                            </GroupStyle.Panel>
+                                        </GroupStyle>
+                                    </ItemsControl.GroupStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Width="310" MinHeight="62" Margin="0,0,10,8" Padding="8" CornerRadius="6" Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" MouseLeftButtonUp="CustomColorRow_MouseLeftButtonUp" Cursor="Hand">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/><ColumnDefinition Width="108"/></Grid.ColumnDefinitions>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Label}" Foreground="{DynamicResource Brush.TextPrimary}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource Brush.TextMuted}" FontSize="9" TextWrapping="Wrap" Margin="0,2,8,0" />
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1" Width="26" Height="26" Padding="0" Background="{Binding Swatch}" BorderBrush="{DynamicResource Brush.StrongBorder}" Click="CustomSwatch_Click" ToolTip="Open in-app color picker" />
+                                                    <TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" TextChanged="CustomColor_TextChanged" Margin="6,0,0,0" VerticalAlignment="Center" PreviewMouseDown="CustomHex_PreviewMouseDown" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                    </ScrollViewer>
+                                </Border>
+                                <TextBlock x:Name="CustomThemeError"
+                                           Foreground="{DynamicResource Brush.Danger}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Border>
 
@@ -247,6 +407,16 @@
 
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
+                        <TextBlock Text="Backups" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Create rotating local snapshots of tracking data and settings." Style="{StaticResource SettingsHint}" />
+                        <CheckBox x:Name="AutomaticBackups" Content="Create automatic backups" />
+                        <WrapPanel><TextBlock Text="Interval hours" Style="{StaticResource SettingsLabel}" Margin="0,7,8,0"/><TextBox x:Name="BackupInterval" Width="70" Margin="0,0,18,8"/><TextBlock Text="Keep" Style="{StaticResource SettingsLabel}" Margin="0,7,8,0"/><TextBox x:Name="BackupRetention" Width="70"/></WrapPanel>
+                        <TextBlock Text="Custom backup directory (blank uses Kumori data folder)" Style="{StaticResource SettingsLabel}"/><TextBox x:Name="BackupDirectory"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
                         <TextBlock Text="Developer" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Diagnostic capture options intended for tracker development and debugging." Style="{StaticResource SettingsHint}" />
                         <CheckBox x:Name="PacketRecordingEnabled" Content="Record raw tosu packet fixtures" />
@@ -255,6 +425,46 @@
                                    FontSize="10"
                                    TextWrapping="Wrap"
                                    Margin="16,-2,0,0" />
+                        <Separator Margin="0,12,0,12" />
+                        <CheckBox x:Name="ForceReplayRecoveryNextPlay"
+                                  Content="Test replay recovery on the next completed play" />
+                        <TextBlock Text="One shot: Kumori will deliberately discard the next completed play's tosu result values, recover them from its local replay, restart tosu, and refresh the dashboard. It switches off automatically. Use a short test map and allow up to two minutes for the local replay to appear; if osu! does not save a matching replay, that test entry will remain incomplete."
+                                   Style="{StaticResource Text.Muted}"
+                                   FontSize="10"
+                                   TextWrapping="Wrap"
+                                   Margin="16,-2,0,0" />
+                        <Separator Margin="0,12,0,12" />
+                        <TextBlock Text="Log rotation and retention" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+                        <TextBlock Text="Applies recursively to app, crash, replay viewer, tosu, cache-addition, legacy, and helper-tool logs. Plain logs also rotate at 10 MB."
+                                   Style="{StaticResource SettingsHint}" Margin="0,3,0,6" TextWrapping="Wrap" />
+                        <WrapPanel Margin="0,0,0,12">
+                            <TextBlock Text="Keep logs for" Style="{StaticResource SettingsLabel}" Margin="0,7,8,0" />
+                            <TextBox x:Name="LogRetentionDays" Width="70" Margin="0,0,8,0" />
+                            <TextBlock Text="days" Style="{StaticResource SettingsLabel}" Margin="0,7,0,0" />
+                        </WrapPanel>
+                        <TextBlock Text="Cache additions" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+                        <TextBlock Text="Inspect why Kumori added or installed each local cache item. Newest entries appear first."
+                                   Style="{StaticResource SettingsHint}" Margin="0,3,0,6" />
+                        <TextBlock x:Name="CacheActivityPath" Style="{StaticResource Text.Muted}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
+                        <Grid Height="190" Margin="0,0,0,8">
+                            <ListBox x:Name="CacheActivityList">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+                                            <TextBlock Text="{Binding Reason}" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                            <TextBlock Text="{Binding Details}" Foreground="{DynamicResource Brush.TextMuted}" FontSize="10" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <TextBlock x:Name="CacheActivityEmpty" Text="No cache additions have been recorded yet." Style="{StaticResource Text.Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
+                        </Grid>
+                        <WrapPanel>
+                            <Button Content="Refresh" Click="RefreshCacheLog_Click" Margin="0,0,8,8" />
+                            <Button Content="Open cache-additions.jsonl" Click="OpenCacheLog_Click" Margin="0,0,8,8" />
+                            <Button Content="Open cache folder" Click="OpenCacheFolder_Click" Margin="0,0,0,8" />
+                        </WrapPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>
@@ -277,5 +487,8 @@
                 </StackPanel>
             </Grid>
         </Border>
+        <Popup x:Name="CustomColorPickerPopup" Placement="Bottom" AllowsTransparency="True" StaysOpen="False" PopupAnimation="Fade" HorizontalOffset="-150" VerticalOffset="5">
+            <local:CustomThemeColorPicker x:Name="IntegratedColorPicker" />
+        </Popup>
     </Grid>
 </Window>

@@ -43,9 +43,9 @@ public sealed class AppDataOrganizerTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_root, "config", "settings.v2.json.bak-20260708-180509")));
         Assert.True(File.Exists(Path.Combine(_root, "data", "tracking", "osu_tracking.sqlite3")));
         Assert.True(File.Exists(Path.Combine(_root, "data", "tracking", "osu_tracking.sqlite3-wal")));
-        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media.old", "key", "manifest.json")));
-        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "covers.old", "cover.jpg")));
-        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "files.old", "123.osu")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media", "key", "manifest.json")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "covers", "cover.jpg")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "files", "123.osu")));
         Assert.True(Directory.Exists(Path.Combine(_root, "cache", "beatmaps", "media")));
         Assert.True(File.Exists(Path.Combine(_root, "assets", "skins", "skin.osk")));
         Assert.True(File.Exists(Path.Combine(_root, "runtime", "fixtures", "tosu-1.jsonl")));
@@ -88,10 +88,12 @@ public sealed class AppDataOrganizerTests : IDisposable
         Write("Kumori-Service-Singleton.pid", "1");
         Write("leftover.tmp", "");
         Write("lazer_replay_frame_status.json.old-20260708-180928", "{}");
+        Write(Path.Combine("cache", "beatmaps", ".lazer-linked-cache-v1"), "old migration marker");
 
         AppDataOrganizer.Organize(_root);
 
         Assert.Empty(Directory.EnumerateFiles(_root));
+        Assert.False(File.Exists(Path.Combine(_root, "cache", "beatmaps", ".lazer-linked-cache-v1")));
     }
 
     [Fact]
@@ -107,7 +109,7 @@ public sealed class AppDataOrganizerTests : IDisposable
     }
 
     [Fact]
-    public void Organize_RollsOverBeatmapCacheOnlyOnce()
+    public void Organize_DoesNotRotateActiveBeatmapCache()
     {
         Write(Path.Combine("cache", "beatmaps", "media", "old.mp3"), "old");
 
@@ -115,23 +117,29 @@ public sealed class AppDataOrganizerTests : IDisposable
         Write(Path.Combine("cache", "beatmaps", "media", "new.mp3"), "new");
         AppDataOrganizer.Organize(_root);
 
-        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media.old", "old.mp3")));
+        Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media", "old.mp3")));
         Assert.True(File.Exists(Path.Combine(_root, "cache", "beatmaps", "media", "new.mp3")));
     }
 
     [Fact]
-    public void PruneLogs_DeletesOnlyFilesOlderThanThreeDays()
+    public void PruneLogs_RecursivelyDeletesAnyLogOlderThanConfiguredRetention()
     {
         var now = new DateTimeOffset(2026, 7, 9, 12, 0, 0, TimeSpan.Zero);
         var old = Write(Path.Combine("logs", "app", "old.log"), "old");
         var recent = Write(Path.Combine("logs", "viewer", "recent.log"), "recent");
+        var futureProducer = Write(Path.Combine("logs", "future-tool", "nested", "old.jsonl"), "old");
+        var rootLog = Write(Path.Combine("logs", "old-root.log"), "old");
         File.SetLastWriteTimeUtc(old, now.UtcDateTime.AddDays(-4));
         File.SetLastWriteTimeUtc(recent, now.UtcDateTime.AddDays(-2));
+        File.SetLastWriteTimeUtc(futureProducer, now.UtcDateTime.AddDays(-4));
+        File.SetLastWriteTimeUtc(rootLog, now.UtcDateTime.AddDays(-4));
 
-        AppDataOrganizer.PruneLogs(_root, now);
+        AppDataOrganizer.PruneLogs(_root, now, retentionDays: 3);
 
         Assert.False(File.Exists(old));
         Assert.True(File.Exists(recent));
+        Assert.False(File.Exists(futureProducer));
+        Assert.False(File.Exists(rootLog));
     }
 
     [Fact]

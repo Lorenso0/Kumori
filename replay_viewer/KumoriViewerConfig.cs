@@ -32,6 +32,8 @@ public enum KumoriViewerSetting
     MusicVolume,
     HitsoundVolume,
     AudioSettingsSeeded,
+    ComparisonReplayCursorColour,
+    ComparisonReplayCursorTrailColour,
 }
 
 /// <summary>
@@ -87,5 +89,7 @@ public class KumoriViewerConfig : IniConfigManager<KumoriViewerSetting>
         SetDefault(KumoriViewerSetting.MusicVolume, 1.0, 0, 1, 0.01);
         SetDefault(KumoriViewerSetting.HitsoundVolume, 1.0, 0, 1, 0.01);
         SetDefault(KumoriViewerSetting.AudioSettingsSeeded, false);
+        SetDefault(KumoriViewerSetting.ComparisonReplayCursorColour, Colour4.FromHex("#ff4fa3"));
+        SetDefault(KumoriViewerSetting.ComparisonReplayCursorTrailColour, Colour4.FromHex("#ff4fa3"));
     }
 }

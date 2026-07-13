@@ -137,6 +137,35 @@ public class AttemptRepositoryTests : IDisposable
         Assert.Equal(250, CreateRepository().CountAttempts());
     }
 
+    [Fact]
+    public void GetMapSummaries_MergesDuplicateRowsForTheSameOsuBeatmap()
+    {
+        using (var con = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            con.Open();
+            using var command = con.CreateCommand();
+            command.CommandText = """
+                ALTER TABLE beatmaps ADD COLUMN beatmap_id INTEGER;
+                ALTER TABLE beatmaps ADD COLUMN set_id INTEGER;
+                ALTER TABLE beatmaps ADD COLUMN checksum TEXT;
+                ALTER TABLE beatmaps ADD COLUMN mapper TEXT;
+                UPDATE beatmaps SET beatmap_id=99, set_id=9, checksum='same-map', mapper='Mapper' WHERE id=1;
+                INSERT INTO beatmaps(id, identity, artist, title, difficulty, stars, beatmap_id, set_id, checksum, mapper)
+                VALUES(2, 'duplicate-identity', 'Artist', 'Song', 'Insane', 5.25, 99, 9, 'same-map', 'Mapper');
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
+                                     accuracy, score, grade, pp, combo, misses, mods_key, progress)
+                VALUES(251, 1, 2, '2026-07-07T12:00:00', 'completed',
+                       99, 1100000, 'S', 130, 510, 0, 'HD', 1.0);
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var summary = Assert.Single(CreateRepository().GetMapSummaries());
+        Assert.Equal("id:99", summary.MapKey);
+        Assert.Equal(251, summary.PlayCount);
+        Assert.Equal(251, summary.LastAttemptId);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

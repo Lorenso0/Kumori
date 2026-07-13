@@ -19,15 +19,21 @@ public sealed class AnalyticsRepository
         }
 
         using var con = _factory.Open();
+        var hasUtc = HasColumn(con, "attempts", "started_at_utc_ms");
+        var hasDuration = HasColumn(con, "attempts", "duration_seconds");
+        var hasKeys = HasColumn(con, "attempts", "z_count");
         using var totals = con.CreateCommand();
-        totals.CommandText = """
+        totals.CommandText = $"""
             SELECT COUNT(*),
                    SUM(CASE WHEN outcome='completed' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN outcome='failed' THEN 1 ELSE 0 END),
                    COALESCE(AVG(CASE WHEN outcome='completed' THEN accuracy END), 0),
                    COALESCE(MAX(pp), 0),
-                   COALESCE(SUM(score), 0)
-            FROM attempts
+                   COALESCE(SUM(score), 0),
+                   {(hasDuration ? "COALESCE(SUM(a.duration_seconds), 0)" : "0")},
+                   {(hasKeys ? "COALESCE(SUM(a.z_count), 0)" : "0")},
+                   {(hasKeys ? "COALESCE(SUM(a.x_count), 0)" : "0")}
+            FROM attempts a
             """;
         using var r = totals.ExecuteReader();
         r.Read();
@@ -39,18 +45,22 @@ public sealed class AnalyticsRepository
             AverageAccuracy = r.GetDouble(3),
             BestPp = r.GetDouble(4),
             TotalScore = r.GetInt64(5),
+            TotalDurationSeconds = Convert.ToDouble(r.GetValue(6), System.Globalization.CultureInfo.InvariantCulture),
+            ZTotal = Convert.ToInt64(r.GetValue(7), System.Globalization.CultureInfo.InvariantCulture),
+            XTotal = Convert.ToInt64(r.GetValue(8), System.Globalization.CultureInfo.InvariantCulture),
         };
         r.Close();
 
         using var daily = con.CreateCommand();
-        daily.CommandText = """
-            SELECT substr(started_at, 1, 10) day,
+        var dayExpression = hasUtc ? "date(a.started_at_utc_ms / 1000, 'unixepoch', 'localtime')" : "substr(a.started_at, 1, 10)";
+        daily.CommandText = $"""
+            SELECT {dayExpression} day,
                    COUNT(*) attempts,
                    SUM(CASE WHEN outcome='completed' THEN 1 ELSE 0 END) completed,
                    COALESCE(AVG(CASE WHEN outcome='completed' THEN accuracy END), 0) average_accuracy,
                    COALESCE(MAX(pp), 0) best_pp
-            FROM attempts
-            GROUP BY substr(started_at, 1, 10)
+            FROM attempts a
+            GROUP BY {dayExpression}
             ORDER BY day DESC
             LIMIT @days
             """;
@@ -69,63 +79,26 @@ public sealed class AnalyticsRepository
             });
         }
         dailyReader.Close();
-        var keys = ReadKeyTotals(con);
+        var keyBindings = ReadLatestKeyBindings(con);
         return summary with
         {
             Daily = rows,
-            LatestAccountChange = ReadLatestSessionAccountChange(con),
-            TotalDurationSeconds = ReadTotalDurationSeconds(con),
-            ZTotal = keys.Z,
-            XTotal = keys.X,
-            Key1Binding = keys.Key1,
-            Key2Binding = keys.Key2,
+            LatestAccountChange = ReadLatestProfileChange(con),
+            Key1Binding = keyBindings.Key1,
+            Key2Binding = keyBindings.Key2,
             LastSyncedAt = ReadLastSynced(con),
         };
     }
 
-    private static double ReadTotalDurationSeconds(Microsoft.Data.Sqlite.SqliteConnection con)
+    private static (string Key1, string Key2) ReadLatestKeyBindings(Microsoft.Data.Sqlite.SqliteConnection con)
     {
-        if (!HasColumn(con, "attempts", "duration_seconds"))
-        {
-            return 0;
-        }
-
+        if (!HasColumn(con, "attempts", "key1_binding")) return ("Z", "X");
         using var cmd = con.CreateCommand();
-        cmd.CommandText = "SELECT COALESCE(SUM(duration_seconds), 0) FROM attempts";
-        return Convert.ToDouble(cmd.ExecuteScalar() ?? 0d, System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    private static (long Z, long X, string Key1, string Key2) ReadKeyTotals(
-        Microsoft.Data.Sqlite.SqliteConnection con)
-    {
-        if (!HasColumn(con, "attempts", "z_count"))
-        {
-            return (0, 0, "Z", "X");
-        }
-        long z = 0, x = 0;
-        using (var cmd = con.CreateCommand())
-        {
-            cmd.CommandText = "SELECT COALESCE(SUM(z_count), 0), COALESCE(SUM(x_count), 0) FROM attempts";
-            using var r = cmd.ExecuteReader();
-            if (r.Read())
-            {
-                z = r.GetInt64(0);
-                x = r.GetInt64(1);
-            }
-        }
-        string key1 = "Z", key2 = "X";
-        if (HasColumn(con, "attempts", "key1_binding"))
-        {
-            using var cmd = con.CreateCommand();
-            cmd.CommandText = "SELECT key1_binding, key2_binding FROM attempts ORDER BY id DESC LIMIT 1";
-            using var r = cmd.ExecuteReader();
-            if (r.Read())
-            {
-                key1 = r.IsDBNull(0) ? "Z" : r.GetString(0);
-                key2 = r.IsDBNull(1) ? "X" : r.GetString(1);
-            }
-        }
-        return (z, x, key1, key2);
+        cmd.CommandText = "SELECT key1_binding, key2_binding FROM attempts ORDER BY id DESC LIMIT 1";
+        using var reader = cmd.ExecuteReader();
+        return reader.Read()
+            ? (reader.IsDBNull(0) ? "Z" : reader.GetString(0), reader.IsDBNull(1) ? "X" : reader.GetString(1))
+            : ("Z", "X");
     }
 
     private static string? ReadLastSynced(Microsoft.Data.Sqlite.SqliteConnection con)
@@ -135,7 +108,7 @@ public sealed class AnalyticsRepository
             return null;
         }
         using var cmd = con.CreateCommand();
-        cmd.CommandText = "SELECT MAX(captured_at) FROM profile_snapshots";
+        cmd.CommandText = "SELECT captured_at FROM profile_snapshots ORDER BY id DESC LIMIT 1";
         return cmd.ExecuteScalar() is string value && value.Length > 0 ? value : null;
     }
 
@@ -154,12 +127,58 @@ public sealed class AnalyticsRepository
         return false;
     }
 
-    private static AccountChangeSummary? ReadLatestSessionAccountChange(Microsoft.Data.Sqlite.SqliteConnection con)
+    private static AccountChangeSummary? ReadLatestProfileChange(Microsoft.Data.Sqlite.SqliteConnection con)
     {
-        if (!HasTable(con, "attempt_profile_changes") || !HasTable(con, "sessions"))
+        if (HasTable(con, "profile_snapshots"))
         {
-            return null;
+            using var snapshots = con.CreateCommand();
+            snapshots.CommandText = """
+                SELECT total_pp, global_rank, accuracy, play_count
+                FROM profile_snapshots
+                WHERE player_id = (
+                    SELECT player_id FROM profile_snapshots
+                    WHERE player_id IS NOT NULL
+                    ORDER BY id DESC
+                    LIMIT 1)
+                ORDER BY id ASC
+                LIMIT 1;
+                SELECT total_pp, global_rank, accuracy, play_count
+                FROM profile_snapshots
+                WHERE player_id = (
+                    SELECT player_id FROM profile_snapshots
+                    WHERE player_id IS NOT NULL
+                    ORDER BY id DESC
+                    LIMIT 1)
+                ORDER BY id DESC
+                LIMIT 1
+                """;
+            using var reader = snapshots.ExecuteReader();
+            if (!reader.Read()) return null;
+            var first = ReadAccountChangeRow(reader);
+            if (!reader.NextResult() || !reader.Read()) return null;
+            var latest = ReadAccountChangeRow(reader);
+            return new AccountChangeSummary
+            {
+                OldTotalPp = first.TotalPp,
+                NewTotalPp = latest.TotalPp,
+                OldGlobalRank = first.GlobalRank,
+                NewGlobalRank = latest.GlobalRank,
+                OldAccuracy = first.Accuracy,
+                NewAccuracy = latest.Accuracy,
+                OldPlayCount = first.PlayCount,
+                NewPlayCount = latest.PlayCount,
+            };
         }
+
+        return ReadLatestAttemptProfileChange(con);
+    }
+
+    // Kept solely for databases created by older versions that do not contain
+    // profile snapshots yet. New dashboard values compare the first and latest
+    // snapshots for the active player profile.
+    private static AccountChangeSummary? ReadLatestAttemptProfileChange(Microsoft.Data.Sqlite.SqliteConnection con)
+    {
+        if (!HasTable(con, "attempt_profile_changes") || !HasTable(con, "sessions")) return null;
 
         using var cmd = con.CreateCommand();
         cmd.CommandText = """
@@ -194,6 +213,12 @@ public sealed class AnalyticsRepository
             NewPlayCount = r.IsDBNull(7) ? null : r.GetInt64(7),
         };
     }
+
+    private static (double? TotalPp, long? GlobalRank, double? Accuracy, long? PlayCount) ReadAccountChangeRow(Microsoft.Data.Sqlite.SqliteDataReader reader) =>
+        (reader.IsDBNull(0) ? null : reader.GetDouble(0),
+         reader.IsDBNull(1) ? null : reader.GetInt64(1),
+         reader.IsDBNull(2) ? null : reader.GetDouble(2),
+         reader.IsDBNull(3) ? null : reader.GetInt64(3));
 
     private static bool HasTable(Microsoft.Data.Sqlite.SqliteConnection con, string table)
     {

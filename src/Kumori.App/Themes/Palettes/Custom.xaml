@@ -1,0 +1,57 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Refined Kumori is the safe initial custom palette. ThemeManager replaces
+         these semantic resources with the user's validated colors at runtime. -->
+    <Color x:Key="Color.AppBackground">#0E090B</Color>
+    <Color x:Key="Color.PanelBackground">#151013</Color>
+    <Color x:Key="Color.CardBackground">#1B1216</Color>
+    <Color x:Key="Color.CardHoverBackground">#271820</Color>
+    <Color x:Key="Color.CardSelectedBackground">#2A1821</Color>
+    <Color x:Key="Color.ControlBackground">#171013</Color>
+    <Color x:Key="Color.ControlHoverBackground">#261820</Color>
+    <Color x:Key="Color.SubtleBorder">#3C242F</Color>
+    <Color x:Key="Color.StrongBorder">#E8558D</Color>
+    <Color x:Key="Color.AccentPink">#E8558D</Color>
+    <Color x:Key="Color.AccentPurple">#A766C7</Color>
+    <Color x:Key="Color.TextPrimary">#F7F1F4</Color>
+    <Color x:Key="Color.TextSecondary">#C3A7B3</Color>
+    <Color x:Key="Color.TextMuted">#8F747F</Color>
+    <Color x:Key="Color.Success">#59C779</Color>
+    <Color x:Key="Color.Warning">#FFE044</Color>
+    <Color x:Key="Color.Danger">#FF477F</Color>
+    <Color x:Key="Color.Cyan">#00D5FF</Color>
+    <Color x:Key="Color.NavigationBackground">#120D0F</Color>
+    <Color x:Key="Color.TopBarBackground">#110C0E</Color>
+    <Color x:Key="Color.OverlayBackground">#E00E090B</Color>
+    <Color x:Key="Color.MetricBackground">#1B1216</Color>
+
+    <SolidColorBrush x:Key="Brush.AppBackground" Color="{StaticResource Color.AppBackground}" />
+    <SolidColorBrush x:Key="Brush.PanelBackground" Color="{StaticResource Color.PanelBackground}" />
+    <SolidColorBrush x:Key="Brush.CardBackground" Color="{StaticResource Color.CardBackground}" />
+    <SolidColorBrush x:Key="Brush.CardHoverBackground" Color="{StaticResource Color.CardHoverBackground}" />
+    <SolidColorBrush x:Key="Brush.CardSelectedBackground" Color="{StaticResource Color.CardSelectedBackground}" />
+    <SolidColorBrush x:Key="Brush.ControlBackground" Color="{StaticResource Color.ControlBackground}" />
+    <SolidColorBrush x:Key="Brush.ControlHoverBackground" Color="{StaticResource Color.ControlHoverBackground}" />
+    <SolidColorBrush x:Key="Brush.SubtleBorder" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.StrongBorder" Color="{StaticResource Color.StrongBorder}" />
+    <SolidColorBrush x:Key="Brush.AccentPink" Color="{StaticResource Color.AccentPink}" />
+    <SolidColorBrush x:Key="Brush.AccentPurple" Color="{StaticResource Color.AccentPurple}" />
+    <SolidColorBrush x:Key="Brush.TextPrimary" Color="{StaticResource Color.TextPrimary}" />
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="{StaticResource Color.TextSecondary}" />
+    <SolidColorBrush x:Key="Brush.TextMuted" Color="{StaticResource Color.TextMuted}" />
+    <SolidColorBrush x:Key="Brush.Success" Color="{StaticResource Color.Success}" />
+    <SolidColorBrush x:Key="Brush.Warning" Color="{StaticResource Color.Warning}" />
+    <SolidColorBrush x:Key="Brush.Danger" Color="{StaticResource Color.Danger}" />
+    <SolidColorBrush x:Key="Brush.Cyan" Color="{StaticResource Color.Cyan}" />
+    <SolidColorBrush x:Key="Brush.BackgroundPrimary" Color="{StaticResource Color.AppBackground}" />
+    <SolidColorBrush x:Key="Brush.BackgroundSecondary" Color="{StaticResource Color.PanelBackground}" />
+    <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.Negative" Color="{StaticResource Color.Danger}" />
+    <SolidColorBrush x:Key="Brush.NavigationBackground" Color="{StaticResource Color.NavigationBackground}" />
+    <SolidColorBrush x:Key="Brush.TopBarBackground" Color="{StaticResource Color.TopBarBackground}" />
+    <SolidColorBrush x:Key="Brush.OverlayBackground" Color="{StaticResource Color.OverlayBackground}" />
+    <SolidColorBrush x:Key="Brush.MetricBackground" Color="{StaticResource Color.MetricBackground}" />
+    <CornerRadius x:Key="Radius.ThemeCard">8</CornerRadius>
+    <Thickness x:Key="Space.ThemePage">14</Thickness>
+</ResourceDictionary>

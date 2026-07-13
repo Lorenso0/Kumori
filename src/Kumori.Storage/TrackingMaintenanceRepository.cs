@@ -26,10 +26,12 @@ public sealed class TrackingMaintenanceRepository
         using var cmd = con.CreateCommand();
         cmd.CommandText = """
             UPDATE sessions
-            SET ended_at = @ended_at, interrupted = 0
+            SET ended_at = @ended_at, ended_at_utc_ms = @ended_at_utc_ms, interrupted = 0
             WHERE ended_at IS NULL
             """;
-        cmd.Parameters.AddWithValue("@ended_at", DateTimeOffset.Now.ToString("O"));
+        var endedAt = DateTimeOffset.UtcNow;
+        cmd.Parameters.AddWithValue("@ended_at", endedAt.ToString("O"));
+        cmd.Parameters.AddWithValue("@ended_at_utc_ms", endedAt.ToUnixTimeMilliseconds());
         return cmd.ExecuteNonQuery();
     }
 

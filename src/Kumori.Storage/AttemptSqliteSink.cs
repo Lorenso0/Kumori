@@ -59,16 +59,17 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         using var insert = con.CreateCommand();
         insert.Transaction = tx;
         insert.CommandText = """
-            INSERT INTO attempts(session_id, beatmap_id, started_at, outcome,
+            INSERT INTO attempts(session_id, beatmap_id, started_at, started_at_utc_ms, outcome,
                                  progress, duration_seconds, mods_key,
                                  key1_binding, key2_binding, base_stars, adjusted_stars)
-            VALUES(@session_id, @beatmap_id, @started_at, 'active',
+            VALUES(@session_id, @beatmap_id, @started_at, @started_at_utc_ms, 'active',
                    0, 0, @mods_key, 'Z', 'X', @base_stars, @adjusted_stars)
             RETURNING id
             """;
         insert.Parameters.AddWithValue("@session_id", _sessionId.Value);
         insert.Parameters.AddWithValue("@beatmap_id", beatmapId);
         insert.Parameters.AddWithValue("@started_at", IsoFromUnixSeconds(start.WallTime));
+        insert.Parameters.AddWithValue("@started_at_utc_ms", UnixMilliseconds(start.WallTime));
         insert.Parameters.AddWithValue("@mods_key", start.ModsKey);
         insert.Parameters.AddWithValue("@base_stars", (object?)start.BeatmapStats.BaseStars ?? DBNull.Value);
         insert.Parameters.AddWithValue("@adjusted_stars", (object?)start.BeatmapStats.Stars ?? DBNull.Value);
@@ -152,12 +153,14 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
             SET outcome = @outcome,
                 termination_evidence = @evidence,
                 ended_at = @ended_at,
+                ended_at_utc_ms = @ended_at_utc_ms,
                 progress = CASE WHEN @outcome = 'completed' THEN 1 ELSE progress END
             WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@outcome", finalization.Outcome);
         cmd.Parameters.AddWithValue("@evidence", finalization.Evidence);
         cmd.Parameters.AddWithValue("@ended_at", IsoFromUnixSeconds(finalization.Snapshot.WallTime));
+        cmd.Parameters.AddWithValue("@ended_at_utc_ms", UnixMilliseconds(finalization.Snapshot.WallTime));
         cmd.Parameters.AddWithValue("@id", attemptId);
         cmd.ExecuteNonQuery();
 
@@ -183,11 +186,14 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         using var cmd = con.CreateCommand();
         cmd.CommandText = """
             UPDATE sessions
-            SET ended_at = @ended_at, interrupted = @interrupted
+            SET ended_at = @ended_at, ended_at_utc_ms = @ended_at_utc_ms, interrupted = @interrupted
             WHERE id = @id
             """;
-        cmd.Parameters.AddWithValue("@ended_at",
-            wallTime is { } value ? IsoFromUnixSeconds(value) : DateTimeOffset.Now.ToString("O"));
+        var endedAt = wallTime is { } value
+            ? DateTimeOffset.FromUnixTimeMilliseconds(UnixMilliseconds(value))
+            : DateTimeOffset.UtcNow;
+        cmd.Parameters.AddWithValue("@ended_at", endedAt.ToString("O"));
+        cmd.Parameters.AddWithValue("@ended_at_utc_ms", endedAt.ToUnixTimeMilliseconds());
         cmd.Parameters.AddWithValue("@interrupted", interrupted ? 1 : 0);
         cmd.Parameters.AddWithValue("@id", sessionId);
         cmd.ExecuteNonQuery();
@@ -198,9 +204,15 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_factory.DatabasePath)!);
         using var con = _factory.Open();
+        using (var journal = con.CreateCommand())
+        {
+            journal.CommandText = "PRAGMA journal_mode=WAL;";
+            journal.ExecuteNonQuery();
+        }
+        using var tx = con.BeginTransaction();
         using var cmd = con.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
-            PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS metadata(
                 key TEXT PRIMARY KEY, value TEXT NOT NULL
             );
@@ -341,31 +353,38 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
             CREATE INDEX IF NOT EXISTS idx_attempt_session ON attempts(session_id, started_at);
             CREATE INDEX IF NOT EXISTS idx_attempt_map_mods ON attempts(beatmap_id, mods_key);
             CREATE INDEX IF NOT EXISTS idx_attempt_events ON attempt_events(attempt_id, map_time_ms);
-            INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', '2');
             """;
         cmd.ExecuteNonQuery();
 
-        EnsureColumn(con, "beatmaps", "beatmap_id", "INTEGER");
-        EnsureColumn(con, "beatmaps", "set_id", "INTEGER");
-        EnsureColumn(con, "beatmaps", "checksum", "TEXT");
-        EnsureColumn(con, "beatmaps", "ar", "REAL");
-        EnsureColumn(con, "beatmaps", "cs", "REAL");
-        EnsureColumn(con, "beatmaps", "od", "REAL");
-        EnsureColumn(con, "beatmaps", "hp", "REAL");
-        EnsureColumn(con, "beatmaps", "bpm", "REAL");
-        EnsureColumn(con, "beatmaps", "max_combo", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "sessions", "player_name", "TEXT");
-        EnsureColumn(con, "attempts", "geki", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "katu", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "large_tick_hits", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "large_tick_misses", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "small_tick_hits", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "small_tick_misses", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "slider_tail_hits", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "slider_tail_misses", "INTEGER NOT NULL DEFAULT 0");
-        EnsureColumn(con, "attempts", "base_stars", "REAL");
-        EnsureColumn(con, "attempts", "adjusted_stars", "REAL");
-        BackfillAttemptStars(con);
+        EnsureColumn(con, tx, "beatmaps", "beatmap_id", "INTEGER");
+        EnsureColumn(con, tx, "beatmaps", "set_id", "INTEGER");
+        EnsureColumn(con, tx, "beatmaps", "checksum", "TEXT");
+        EnsureColumn(con, tx, "beatmaps", "ar", "REAL");
+        EnsureColumn(con, tx, "beatmaps", "cs", "REAL");
+        EnsureColumn(con, tx, "beatmaps", "od", "REAL");
+        EnsureColumn(con, tx, "beatmaps", "hp", "REAL");
+        EnsureColumn(con, tx, "beatmaps", "bpm", "REAL");
+        EnsureColumn(con, tx, "beatmaps", "max_combo", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "sessions", "player_name", "TEXT");
+        EnsureColumn(con, tx, "attempts", "geki", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "katu", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "large_tick_hits", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "large_tick_misses", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "small_tick_hits", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "small_tick_misses", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "slider_tail_hits", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "slider_tail_misses", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "base_stars", "REAL");
+        EnsureColumn(con, tx, "attempts", "adjusted_stars", "REAL");
+        BackfillAttemptStars(con, tx);
+        using (var version = con.CreateCommand())
+        {
+            version.Transaction = tx;
+            version.CommandText = "INSERT OR IGNORE INTO metadata(key, value) VALUES('schema_version', '2')";
+            version.ExecuteNonQuery();
+        }
+        tx.Commit();
+        DatabaseMigrator.Apply(con);
     }
 
     /// <summary>
@@ -373,9 +392,9 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
     /// context. The beatmaps table cannot be used here because one row is
     /// shared between every mod combination of a map.
     /// </summary>
-    private static void BackfillAttemptStars(SqliteConnection con)
+    private static void BackfillAttemptStars(SqliteConnection con, SqliteTransaction tx)
     {
-        if (!TableExists(con, "attempt_context"))
+        if (!TableExists(con, tx, "attempt_context"))
         {
             return;
         }
@@ -383,6 +402,7 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         var values = new List<(long AttemptId, double BaseStars, double AdjustedStars)>();
         using (var select = con.CreateCommand())
         {
+            select.Transaction = tx;
             select.CommandText = """
                 SELECT a.id, c.beatmap_json
                 FROM attempts a
@@ -419,6 +439,7 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         foreach (var value in values)
         {
             using var update = con.CreateCommand();
+            update.Transaction = tx;
             update.CommandText = """
                 UPDATE attempts
                 SET base_stars = COALESCE(base_stars, @base_stars),
@@ -439,9 +460,10 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
             ? number
             : null;
 
-    private static bool TableExists(SqliteConnection con, string table)
+    private static bool TableExists(SqliteConnection con, SqliteTransaction tx, string table)
     {
         using var cmd = con.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name";
         cmd.Parameters.AddWithValue("@name", table);
         return cmd.ExecuteScalar() is not null;
@@ -451,11 +473,12 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
     {
         using var cmd = con.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO sessions(started_at, key1_binding, key2_binding)
-            VALUES(@started_at, 'Z', 'X')
+            INSERT INTO sessions(started_at, started_at_utc_ms, key1_binding, key2_binding)
+            VALUES(@started_at, @started_at_utc_ms, 'Z', 'X')
             RETURNING id
             """;
         cmd.Parameters.AddWithValue("@started_at", IsoFromUnixSeconds(wallTime));
+        cmd.Parameters.AddWithValue("@started_at_utc_ms", UnixMilliseconds(wallTime));
         return (long)cmd.ExecuteScalar()!;
     }
 
@@ -869,10 +892,13 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
     private static string IsoFromUnixSeconds(double unixSeconds) =>
         DateTimeOffset.FromUnixTimeMilliseconds((long)(unixSeconds * 1000)).ToString("O");
 
-    private static void EnsureColumn(SqliteConnection con, string table, string column, string definition)
+    private static long UnixMilliseconds(double unixSeconds) => (long)(unixSeconds * 1000);
+
+    private static void EnsureColumn(SqliteConnection con, SqliteTransaction tx, string table, string column, string definition)
     {
         using (var info = con.CreateCommand())
         {
+            info.Transaction = tx;
             info.CommandText = $"PRAGMA table_info({table})";
             using var reader = info.ExecuteReader();
             while (reader.Read())
@@ -885,6 +911,7 @@ public sealed class AttemptSqliteSink : IAttemptSink, ISessionSink
         }
 
         using var alter = con.CreateCommand();
+        alter.Transaction = tx;
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
         alter.ExecuteNonQuery();
     }

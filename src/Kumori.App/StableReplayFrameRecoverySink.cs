@@ -7,6 +7,7 @@ using osu.Game.Beatmaps;
 using osu.Game.Rulesets;
 using osu.Game.Rulesets.Osu;
 using osu.Game.Rulesets.Osu.Replays;
+using osu.Game.Rulesets.Scoring;
 using osu.Game.Scoring.Legacy;
 using Serilog;
 
@@ -22,7 +23,10 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
     private readonly Func<long?> _attemptId;
     private readonly MovementCaptureStore _movement;
     private readonly MovementRepository _repository;
+    private readonly ReplayResultRecoveryStore resultRecovery;
     private readonly Action<long>? movementReplaced;
+    private readonly Action<ReplayResultRecoveryContext>? resultRecovered;
+    private readonly bool recoverMovement;
     private readonly CancellationToken cancellationToken;
     private AttemptStart? _start;
     private DateTime _startedUtc;
@@ -31,27 +35,33 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         SqliteConnectionFactory factory,
         Func<long?> attemptId,
         Action<long>? movementReplaced = null,
+        Action<ReplayResultRecoveryContext>? resultRecovered = null,
+        bool recoverMovement = true,
         CancellationToken cancellationToken = default)
     {
         _attemptId = attemptId;
         _movement = new MovementCaptureStore(factory);
         _repository = new MovementRepository(factory);
+        resultRecovery = new ReplayResultRecoveryStore(factory);
         this.movementReplaced = movementReplaced;
+        this.resultRecovered = resultRecovered;
+        this.recoverMovement = recoverMovement;
         this.cancellationToken = cancellationToken;
-        StableReplayFrameDiagnostics.Update(status =>
-        {
-            status.Enabled = true;
-            status.State = "waiting_for_stable_play";
-            status.Detail = "Stable replay recovery is enabled and waiting for an osu!stable attempt.";
-            status.LastError = null;
-        });
+        if (recoverMovement)
+            StableReplayFrameDiagnostics.Update(status =>
+            {
+                status.Enabled = true;
+                status.State = "waiting_for_stable_play";
+                status.Detail = "Stable replay recovery is enabled and waiting for an osu!stable attempt.";
+                status.LastError = null;
+            });
     }
 
     public void StartAttempt(AttemptStart start)
     {
         _start = start.ClientKind == OsuClientKind.Stable ? start : null;
         _startedUtc = DateTime.UtcNow;
-        if (_start is not null)
+        if (_start is not null && recoverMovement)
         {
             StableReplayFrameDiagnostics.Update(status =>
             {
@@ -74,7 +84,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
 
     public void DiscardIfEmpty(AttemptDiscard discard)
     {
-        if (_start is not null)
+        if (_start is not null && recoverMovement)
             StableReplayFrameDiagnostics.Update(status =>
             {
                 status.State = "discarded";
@@ -93,12 +103,13 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         if (start is null || attemptId is null)
             return;
 
-        StableReplayFrameDiagnostics.Update(status =>
-        {
-            status.State = "searching";
-            status.Detail = $"Attempt {attemptId} finalized; searching stable's local replay store.";
-            status.ActiveAttemptId = attemptId;
-        });
+        if (recoverMovement)
+            StableReplayFrameDiagnostics.Update(status =>
+            {
+                status.State = "searching";
+                status.Detail = $"Attempt {attemptId} finalized; searching stable's local replay store.";
+                status.ActiveAttemptId = attemptId;
+            });
 
         _ = Task.Run(() => RecoverAsync(start, attemptId.Value, startedUtc), cancellationToken);
     }
@@ -142,11 +153,19 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
                         status.CandidateReplayPath = candidate;
                         status.CandidatesChecked++;
                     });
-                    if (TryRead(candidate, beatmapPath, start.Checksum, out var samples))
+                    if (TryRead(candidate, beatmapPath, start.Checksum, out var samples, out var replayResult))
                     {
+                        var recovery = await ApplyResultAfterFinalizationAsync(attemptId, replayResult, "stable_replay");
+                        if (!recoverMovement)
+                        {
+                            NotifyResultRecovery(recovery, attemptId, candidate, beatmapPath, samples);
+                            return;
+                        }
+
                         var existing = _repository.GetMetadata(attemptId);
                         if (existing is { SampleCount: > 0 } && existing.Source is not ("stable_replay" or "stable_memory" or "stable_live"))
                         {
+                            NotifyResultRecovery(recovery, attemptId, candidate, beatmapPath, samples);
                             UpdateForAttempt(attemptId, status =>
                             {
                                 status.State = "existing_capture_preserved";
@@ -176,6 +195,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
                         }));
                         Log.Information("Recovered {Count} exact osu!stable replay frames for attempt {AttemptId}", samples.Count, attemptId);
                         movementReplaced?.Invoke(attemptId);
+                        NotifyResultRecovery(recovery, attemptId, candidate, beatmapPath, samples);
                         UpdateForAttempt(attemptId, status =>
                         {
                             status.State = "stored";
@@ -271,8 +291,17 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
     }
 
     internal static bool TryRead(string replayPath, string beatmapPath, string? checksum, out IReadOnlyList<MovementSample> samples)
+        => TryRead(replayPath, beatmapPath, checksum, out samples, out _);
+
+    internal static bool TryRead(
+        string replayPath,
+        string beatmapPath,
+        string? checksum,
+        out IReadOnlyList<MovementSample> samples,
+        out ReplayResultData result)
     {
         samples = [];
+        result = new ReplayResultData(0, 0, null, 0, 0, 0, 0, 0, 0, 0);
         try
         {
             using var stream = File.Open(replayPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -281,6 +310,24 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
             if (!string.IsNullOrWhiteSpace(checksum) &&
                 !decoder.ReplayBeatmapHash.Equals(checksum, StringComparison.OrdinalIgnoreCase))
                 return false;
+
+            var score = decoded.ScoreInfo;
+            result = new ReplayResultData(
+                score.TotalScore,
+                score.Accuracy * 100d,
+                score.Rank.ToString(),
+                score.MaxCombo,
+                score.Statistics.GetValueOrDefault(HitResult.Great),
+                score.Statistics.GetValueOrDefault(HitResult.Ok),
+                score.Statistics.GetValueOrDefault(HitResult.Meh),
+                score.Statistics.GetValueOrDefault(HitResult.Miss),
+                score.Statistics.GetValueOrDefault(HitResult.Perfect),
+                score.Statistics.GetValueOrDefault(HitResult.Good),
+                score.Statistics.GetValueOrDefault(HitResult.LargeTickHit),
+                score.Statistics.GetValueOrDefault(HitResult.LargeTickMiss),
+                score.Statistics.GetValueOrDefault(HitResult.SmallTickHit),
+                score.Statistics.GetValueOrDefault(HitResult.SmallTickMiss),
+                score.Statistics.GetValueOrDefault(HitResult.SliderTailHit));
 
             samples = decoded.Replay.Frames.OfType<OsuReplayFrame>().Select((frame, index) => new MovementSample
             {
@@ -300,6 +347,40 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         {
             return false;
         }
+    }
+
+    private async Task<ReplayResultRecoveryOutcome> ApplyResultAfterFinalizationAsync(
+        long attemptId,
+        ReplayResultData result,
+        string source)
+    {
+        for (var pass = 0; pass < 40; pass++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var outcome = resultRecovery.Apply(attemptId, result, source);
+            if (outcome.AttemptReady)
+                return outcome;
+            await Task.Delay(50, cancellationToken);
+        }
+        return ReplayResultRecoveryOutcome.NotReady;
+    }
+
+    private void NotifyResultRecovery(
+        ReplayResultRecoveryOutcome recovery,
+        long attemptId,
+        string replayPath,
+        string beatmapPath,
+        IReadOnlyList<MovementSample> samples)
+    {
+        if (!recovery.Applied) return;
+        resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+            attemptId,
+            recovery,
+            replayPath,
+            beatmapPath,
+            Path.GetDirectoryName(beatmapPath),
+            null,
+            samples));
     }
 
     private static string? ResolveBeatmapPath(AttemptStart start)

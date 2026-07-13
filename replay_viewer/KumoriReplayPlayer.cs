@@ -38,6 +38,12 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     /// <summary>Called when the advanced analyzer should open.</summary>
     public Action? OpenMissAnalyzer { get; set; }
 
+    /// <summary>Opens Kumori's dedicated comparison settings sidebar.</summary>
+    public Action? OpenComparisonMenu { get; set; }
+
+    /// <summary>Restores the collapsed comparison overlay after the player reloads in comparison mode.</summary>
+    public Action? ComparisonSessionReady { get; set; }
+
     /// <summary>Called after lazer's native hold-to-exit completes.</summary>
     public Action? RequestWindowClose { get; set; }
 
@@ -62,8 +68,14 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     /// </summary>
     public double? RecordedAccuracyOverride { get; init; }
 
+    /// <summary>Optional second attempt displayed as a synchronized playfield cursor.</summary>
+    public ComparisonContract? Comparison { get; init; }
+
+    public AttemptContract? PrimaryAttempt { get; init; }
+    public FinalHitsContract? PrimaryHits { get; init; }
     private readonly List<ReplayJudgementSnapshot> analysisJudgements = [];
     private bool analysisMode;
+    private bool comparisonMode;
     private bool playbackEndReached;
 
     public Action<IReadOnlyList<ReplayJudgementSnapshot>>? AnalysisJudgementsReady { get; set; }
@@ -142,7 +154,43 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
                 Drawable markerProxy = selectedClickMarker.CreateProxy();
                 markerProxy.Depth = float.NegativeInfinity;
                 osuDrawable.Overlays.Add(markerProxy);
+
+                if (Comparison is { } comparison)
+                {
+                    // Keep lazer's native primary cursor and trail untouched.
+                    // Only the synchronized comparison overlay is recoloured.
+                    var comparisonCursor = new KumoriComparisonCursor(
+                        comparison.Samples,
+                        () => GameplayTime,
+                        ViewerConfig!.GetBindable<Colour4>(KumoriViewerSetting.ComparisonReplayCursorColour),
+                        ViewerConfig!.GetBindable<Colour4>(KumoriViewerSetting.ComparisonReplayCursorTrailColour));
+                    osuDrawable.PlayfieldAdjustmentContainer.Add(comparisonCursor);
+                    var comparisonProxy = comparisonCursor.CreateProxy();
+                    comparisonProxy.Depth = float.NegativeInfinity;
+                    osuDrawable.Overlays.Add(comparisonProxy);
+
+                    var comparisonJudgements = new KumoriComparisonJudgementOverlay(
+                        comparison.JudgementEvents,
+                        comparison.Samples,
+                        () => GameplayTime,
+                        ViewerConfig!.GetBindable<Colour4>(KumoriViewerSetting.ComparisonReplayCursorColour));
+                    osuDrawable.PlayfieldAdjustmentContainer.Add(comparisonJudgements);
+                    var judgementProxy = comparisonJudgements.CreateProxy();
+                    judgementProxy.Depth = float.NegativeInfinity;
+                    osuDrawable.Overlays.Add(judgementProxy);
+
+                    if (PrimaryAttempt is { } primaryAttempt)
+                    {
+                        AddInternal(new KumoriComparisonStatsOverlay(
+                            primaryAttempt,
+                            PrimaryHits,
+                            comparison,
+                            ViewerConfig!.GetBindable<Colour4>(KumoriViewerSetting.ComparisonReplayCursorColour)));
+                    }
+                }
             }
+
+            ComparisonSessionReady?.Invoke();
 
         }
         catch (Exception e)
@@ -159,7 +207,7 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     {
         base.Update();
 
-        if (analysisMode)
+        if (analysisMode || comparisonMode)
         {
             // Upstream replay hotkeys and hover logic may attempt to show or
             // expand this overlay after the analyzer has opened. The analyzer
@@ -219,10 +267,11 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     protected virtual void ConfigureReplaySidebar()
     {
         ReplayOverlay.Settings.RemoveAll(d => d is VisualSettings || d is AudioSettings || d is ReplayAnalysisSettings, true);
-        ReplayOverlay.Settings.Add(new KumoriSeekBarSettings(ViewerConfig!, RequestReload, SeekBar, OpenMissAnalyzer));
+        ReplayOverlay.Settings.Add(new KumoriSeekBarSettings(
+            ViewerConfig!, RequestReload, SeekBar, OpenMissAnalyzer, OpenComparisonMenu));
         ReplayOverlay.Settings.Add(new KumoriAudioSettings(ViewerConfig!));
         ReplayOverlay.Settings.Add(new KumoriBackgroundSettings(ViewerConfig!));
-        Logger.Log("Kumori: seek bar, audio, and background settings groups added to replay side menu.");
+        Logger.Log("Kumori: seek bar, comparison controls, audio, and background settings groups added to replay side menu.");
     }
 
     public void PauseGameplay()
@@ -267,9 +316,24 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
         ReplayOverlay.Show();
     }
 
+    public void EnterComparisonMode()
+    {
+        comparisonMode = true;
+        ReplayOverlay.Settings.Expanded.Value = false;
+        ReplayOverlay.ClearTransforms();
+        ReplayOverlay.Hide();
+    }
+
+    public void ExitComparisonMode()
+    {
+        comparisonMode = false;
+        ReplayOverlay.ClearTransforms();
+        ReplayOverlay.Show();
+    }
+
     private void replaySettingsExpandedChanged(osu.Framework.Bindables.ValueChangedEvent<bool> expanded)
     {
-        if (analysisMode && expanded.NewValue)
+        if ((analysisMode || comparisonMode) && expanded.NewValue)
         {
             ReplayOverlay.Settings.Expanded.Value = false;
             return;

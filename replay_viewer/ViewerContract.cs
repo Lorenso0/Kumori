@@ -41,10 +41,29 @@ public sealed record ViewerContract
                 {
                     "pulse" => "pulse",
                     "windows-fluent" => "windows-fluent",
+                    "custom" => "custom",
                     _ => "refined-kumori",
                 };
             }
             return "refined-kumori";
+        }
+    }
+
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, string> CustomThemeColors
+    {
+        get
+        {
+            if (!Settings.TryGetValue("kumori_custom_theme", out var value)
+                || value.ValueKind != JsonValueKind.Object)
+                return new Dictionary<string, string>();
+
+            return value.EnumerateObject()
+                .Where(property => property.Value.ValueKind == JsonValueKind.String)
+                .ToDictionary(
+                    property => property.Name,
+                    property => property.Value.GetString() ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -59,6 +78,11 @@ public sealed record ViewerContract
 
     [JsonPropertyName("recent_attempts")]
     public List<RecentAttemptContract> RecentAttempts { get; init; } = [];
+    [JsonPropertyName("comparison")]
+    public ComparisonContract? Comparison { get; init; }
+
+    [JsonPropertyName("comparison_options")]
+    public List<ComparisonContract> ComparisonOptions { get; init; } = [];
 
     /// <summary>
     /// Last map time backed by real capture evidence for an unfinished play.
@@ -160,6 +184,9 @@ public sealed record AttemptContract
     [JsonPropertyName("accuracy")]
     public double Accuracy { get; init; }
 
+    [JsonPropertyName("score")]
+    public long Score { get; init; }
+
     [JsonPropertyName("grade")]
     public string Grade { get; init; } = "";
 
@@ -249,4 +276,23 @@ public sealed record RecentAttemptContract
     public int SliderBreaks { get; init; }
     [JsonPropertyName("mean_offset")]
     public double? MeanOffset { get; init; }
+}
+public sealed record ComparisonContract
+{
+    [JsonPropertyName("attempt_id")] public long AttemptId { get; init; }
+    [JsonPropertyName("ephemeral")] public bool Ephemeral { get; init; }
+    [JsonPropertyName("source_name")] public string SourceName { get; init; } = "";
+    [JsonPropertyName("started_at")] public string StartedAt { get; init; } = "";
+    [JsonPropertyName("outcome")] public string Outcome { get; init; } = "";
+    [JsonPropertyName("mods_key")] public string ModsKey { get; init; } = "NM";
+    [JsonPropertyName("accuracy")] public double Accuracy { get; init; }
+    [JsonPropertyName("score")] public long Score { get; init; }
+    [JsonPropertyName("pp")] public double Pp { get; init; }
+    [JsonPropertyName("combo")] public int Combo { get; init; }
+    [JsonPropertyName("n300")] public int N300 { get; init; }
+    [JsonPropertyName("n100")] public int N100 { get; init; }
+    [JsonPropertyName("n50")] public int N50 { get; init; }
+    [JsonPropertyName("misses")] public int Misses { get; init; }
+    [JsonPropertyName("judgement_events")] public List<JudgementEventContract> JudgementEvents { get; init; } = [];
+    [JsonPropertyName("samples")] public List<MovementSample> Samples { get; init; } = [];
 }

@@ -82,9 +82,17 @@ internal static class LazerMediaStore
         .FirstOrDefault(root => File.Exists(Path.Combine(root, "client.realm")) && Directory.Exists(Path.Combine(root, "files")));
 
     public static string? ResolveReplayFile(string beatmapHash, DateTimeOffset startedAt, string? gameFolder = null, DateTimeOffset? endedAt = null)
+        => ResolveReplayFiles(beatmapHash, startedAt, gameFolder, endedAt).FirstOrDefault();
+
+    public static IReadOnlyList<string> ResolveReplayFiles(string beatmapHash, DateTimeOffset startedAt, string? gameFolder = null, DateTimeOffset? endedAt = null)
     {
-        if (string.IsNullOrWhiteSpace(beatmapHash)) return null;
+        if (string.IsNullOrWhiteSpace(beatmapHash)) return [];
         var media = new TosuMediaInfo { GameFolder = gameFolder };
+        var resolved = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var earliest = startedAt.AddSeconds(-30);
+        var latest = (endedAt ?? startedAt).AddMinutes(5);
+        var targetTime = endedAt ?? startedAt;
         foreach (var root in CandidateRoots(media))
         {
             var realmPath = Path.Combine(root, "client.realm");
@@ -93,19 +101,28 @@ internal static class LazerMediaStore
             try
             {
                 using var realm = Realm.GetInstance(createScoreConfiguration(realmPath));
-                var score = realm.All<LazerScore>()
-                    .Where(s => s.BeatmapHash == beatmapHash && !s.DeletePending)
+                // Current lazer stores a SHA-256 BeatmapHash while tosu and the
+                // legacy .osr header identify the beatmap by MD5. Keep an exact
+                // match first for older schemas, then expose nearby scores so the
+                // caller can validate each replay header against the requested MD5.
+                var scores = realm.All<LazerScore>()
+                    .Where(s => !s.DeletePending && s.Date >= earliest && s.Date <= latest)
                     .AsEnumerable()
-                    .Where(s => s.Date >= startedAt.AddSeconds(-5))
-                    .Where(s => endedAt is null || s.Date <= endedAt.Value.AddMinutes(5))
-                    .OrderBy(s => Math.Abs((s.Date - (endedAt ?? startedAt)).TotalMilliseconds))
-                    .FirstOrDefault(s => s.Files.Any(file => file.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase)));
-                var replay = score?.Files.FirstOrDefault(file => file.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase));
-                var hash = replay?.File.Hash;
-                if (!string.IsNullOrWhiteSpace(hash) && hash.Length >= 2)
+                    .Where(s => s.Files.Any(file => file.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase)))
+                    .OrderByDescending(s => string.Equals(s.BeatmapHash, beatmapHash, StringComparison.OrdinalIgnoreCase))
+                    .ThenBy(s => Math.Abs((s.Date - targetTime).TotalMilliseconds))
+                    .Take(24)
+                    .ToArray();
+
+                foreach (var score in scores)
                 {
+                    var replay = score.Files.FirstOrDefault(file => file.Filename.EndsWith(".osr", StringComparison.OrdinalIgnoreCase));
+                    var hash = replay?.File.Hash;
+                    if (string.IsNullOrWhiteSpace(hash) || hash.Length < 2)
+                        continue;
                     var path = Path.Combine(filesRoot, hash[..1], hash[..2], hash);
-                    if (File.Exists(path)) return path;
+                    if (File.Exists(path) && seen.Add(path))
+                        resolved.Add(path);
                 }
             }
             catch (Exception ex) when (ex is RealmException or IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -113,7 +130,7 @@ internal static class LazerMediaStore
                 Serilog.Log.Debug(ex, "Could not read osu!lazer replay store at {Root}", root);
             }
         }
-        return null;
+        return resolved;
     }
 
     public static LazerStorageDiagnostics GetDiagnostics()
@@ -160,28 +177,44 @@ internal static class LazerMediaStore
         Schema = new[] { typeof(LazerScore), typeof(LazerNamedFileUsage), typeof(LazerRealmFile) },
     };
 
-    public static bool TryLink(string source, string destination)
+    public static bool TryLink(
+        string source,
+        string destination,
+        string hardLinkSource = "local-file-hardlink",
+        string symbolicLinkSource = "local-file-symlink",
+        string? reason = "Kumori referenced an existing local file instead of duplicating it.")
     {
         try
         {
+            if (!File.Exists(source))
+                return false;
+
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             var isNew = !File.Exists(destination);
-            if (File.Exists(destination))
+            var pending = destination + $".link-{Guid.NewGuid():N}";
+            try
             {
-                File.Delete(destination);
-            }
+                if (CreateHardLink(pending, source, IntPtr.Zero))
+                {
+                    File.Move(pending, destination, overwrite: true);
+                    if (isNew) CacheActivityLog.RecordAddition(destination, hardLinkSource, reason: reason);
+                    return true;
+                }
 
-            if (CreateHardLink(destination, source, IntPtr.Zero))
-            {
-                if (isNew) CacheActivityLog.RecordAddition(destination, "osu-lazer-hardlink");
+                // Hard links cannot cross volumes. A file symlink keeps the cache
+                // zero-copy when lazer has been moved to another drive.
+                var linked = CreateSymbolicLink(pending, source, symbolic_link_allow_unprivileged_create);
+                if (!linked || !File.Exists(pending))
+                    return false;
+
+                File.Move(pending, destination, overwrite: true);
+                if (isNew) CacheActivityLog.RecordAddition(destination, symbolicLinkSource, reason: reason);
                 return true;
             }
-
-            // Hard links cannot cross volumes. A file symlink keeps the cache
-            // zero-copy when lazer has been moved to another drive.
-            var linked = CreateSymbolicLink(destination, source, symbolic_link_allow_unprivileged_create);
-            if (linked && isNew) CacheActivityLog.RecordAddition(destination, "osu-lazer-symlink");
-            return linked;
+            finally
+            {
+                try { File.Delete(pending); } catch { }
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

@@ -4,21 +4,33 @@ using Kumori.Core.Settings;
 
 namespace Kumori.App;
 
-public sealed record SkinLibraryItem(string Name, string Path, bool IsFolder, long SizeBytes);
+public sealed record SkinLibraryItem(
+    string Name,
+    string Path,
+    bool IsFolder,
+    long SizeBytes,
+    bool IsBuiltIn = false);
 
 public static class SkinLibraryService
 {
+    public const string BuiltInArgonProPath = "builtin://argon-pro";
+
     public static string SkinDirectory => AppPaths.SkinsDir;
 
     public static IReadOnlyList<SkinLibraryItem> List()
     {
         Directory.CreateDirectory(SkinDirectory);
+        SkinLibraryItem[] builtIn =
+        [
+            new SkinLibraryItem("Argon Pro", BuiltInArgonProPath, false, 0, IsBuiltIn: true),
+        ];
         var files = Directory.EnumerateFiles(SkinDirectory, "*.osk")
             .Select(path => new SkinLibraryItem(Path.GetFileNameWithoutExtension(path), path, false, SafeFileSize(path)));
         var folders = Directory.EnumerateDirectories(SkinDirectory)
             .Select(path => new SkinLibraryItem(Path.GetFileName(path), path, true, SafeDirectorySize(path)));
-        return files.Concat(folders)
-            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+        return builtIn.Concat(files).Concat(folders)
+            .OrderByDescending(item => item.IsBuiltIn)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
@@ -41,6 +53,11 @@ public static class SkinLibraryService
 
     public static void DeleteImported(string path)
     {
+        if (IsBuiltInPath(path))
+        {
+            throw new InvalidOperationException("Argon Pro is built into the replay viewer and cannot be deleted.");
+        }
+
         var fullPath = Path.GetFullPath(path);
         var fullSkinDir = Path.GetFullPath(SkinDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
@@ -60,6 +77,12 @@ public static class SkinLibraryService
 
     public static void Activate(SettingsService settings, string path)
     {
+        if (IsBuiltInPath(path))
+        {
+            settings.Update(s => s.ReplayViewer.SkinPath = "");
+            return;
+        }
+
         var fullPath = Path.GetFullPath(path);
         if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
         {
@@ -68,6 +91,27 @@ public static class SkinLibraryService
 
         settings.Update(s => s.ReplayViewer.SkinPath = fullPath);
     }
+
+    public static bool EnsureValidSelection(SettingsService settings)
+    {
+        var path = (settings.Current.ReplayViewer.SkinPath ?? "").Trim();
+        if (IsBuiltInPath(path) || File.Exists(path) || Directory.Exists(path))
+        {
+            return false;
+        }
+
+        settings.Update(s => s.ReplayViewer.SkinPath = "");
+        return true;
+    }
+
+    public static bool IsBuiltInPath(string? path) =>
+        string.IsNullOrWhiteSpace(path)
+        || string.Equals(path, BuiltInArgonProPath, StringComparison.OrdinalIgnoreCase);
+
+    public static bool MatchesSelection(string libraryPath, string? configuredPath) =>
+        IsBuiltInPath(libraryPath)
+            ? IsBuiltInPath(configuredPath)
+            : string.Equals(libraryPath, configuredPath, StringComparison.OrdinalIgnoreCase);
 
     private static string SafeName(string? source, string fallback)
     {

@@ -13,11 +13,12 @@ public partial class SkinLibraryWindow : Window
     public SkinLibraryWindow(SettingsService settings)
     {
         _settings = settings;
+        SkinLibraryService.EnsureValidSelection(_settings);
         InitializeComponent();
         Refresh();
     }
 
-    private void ImportFile_Click(object sender, RoutedEventArgs e)
+    private async void ImportFile_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
@@ -28,13 +29,10 @@ public partial class SkinLibraryWindow : Window
         {
             return;
         }
-        var path = SkinLibraryService.ImportFile(dialog.FileName);
-        SkinLibraryService.Activate(_settings, path);
-        StatusText.Text = $"Imported and activated {Path.GetFileName(path)}.";
-        Refresh(path);
+        await ImportAndActivateAsync(() => SkinLibraryService.ImportFile(dialog.FileName));
     }
 
-    private void ImportFolder_Click(object sender, RoutedEventArgs e)
+    private async void ImportFolder_Click(object sender, RoutedEventArgs e)
     {
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
@@ -45,10 +43,29 @@ public partial class SkinLibraryWindow : Window
         {
             return;
         }
-        var path = SkinLibraryService.ImportFolder(dialog.SelectedPath);
-        SkinLibraryService.Activate(_settings, path);
-        StatusText.Text = $"Imported and activated {Path.GetFileName(path)}.";
-        Refresh(path);
+        await ImportAndActivateAsync(() => SkinLibraryService.ImportFolder(dialog.SelectedPath));
+    }
+
+    private async Task ImportAndActivateAsync(Func<string> import)
+    {
+        IsEnabled = false;
+        StatusText.Text = "Importing skin...";
+        try
+        {
+            var path = await Task.Run(import);
+            SkinLibraryService.Activate(_settings, path);
+            StatusText.Text = $"Imported and activated {Path.GetFileName(path)}.";
+            Refresh(path);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "Skin import failed.";
+            KumoriDialog.Show(this, ex.Message, "Kumori", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsEnabled = true;
+        }
     }
 
     private void Use_Click(object sender, RoutedEventArgs e)
@@ -67,6 +84,11 @@ public partial class SkinLibraryWindow : Window
         if (SkinList.SelectedItem is not SkinRow row)
         {
             StatusText.Text = "Select a skin first.";
+            return;
+        }
+        if (!row.CanDelete)
+        {
+            StatusText.Text = "Argon Pro is built in and cannot be deleted.";
             return;
         }
         if (!KumoriDialog.Confirm(this, $"Delete {row.Name}?", "Kumori", MessageBoxImage.Warning))
@@ -90,7 +112,9 @@ public partial class SkinLibraryWindow : Window
 
     private void SkinList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        ActivePathText.Text = SkinList.SelectedItem is SkinRow row ? row.Path : "";
+        var row = SkinList.SelectedItem as SkinRow;
+        ActivePathText.Text = row?.DisplayPath ?? "";
+        DeleteButton.IsEnabled = row?.CanDelete == true;
         ActivePathText.ScrollToHorizontalOffset(0);
     }
 
@@ -109,11 +133,16 @@ public partial class SkinLibraryWindow : Window
             .ToArray();
         SkinList.ItemsSource = rows;
         SkinList.SelectedItem = rows.FirstOrDefault(row =>
-            string.Equals(row.Path, selectPath ?? _settings.Current.ReplayViewer.SkinPath, StringComparison.OrdinalIgnoreCase));
-        ActivePathText.Text = SkinList.SelectedItem is SkinRow row ? row.Path : "";
+            SkinLibraryService.MatchesSelection(row.Path, selectPath ?? _settings.Current.ReplayViewer.SkinPath));
+        var selected = SkinList.SelectedItem as SkinRow;
+        ActivePathText.Text = selected?.DisplayPath ?? "";
+        DeleteButton.IsEnabled = selected?.CanDelete == true;
         if (string.IsNullOrWhiteSpace(StatusText.Text))
         {
-            StatusText.Text = rows.Length == 0 ? "No skins imported yet." : $"{rows.Length} imported skin(s).";
+            var importedCount = rows.Count(row => row.CanDelete);
+            StatusText.Text = importedCount == 0
+                ? "Argon Pro is ready. Import another skin to add more choices."
+                : $"Argon Pro and {importedCount} imported skin(s) are available.";
         }
     }
 
@@ -123,13 +152,17 @@ public partial class SkinLibraryWindow : Window
         {
             Name = item.Name;
             Path = item.Path;
-            TypeText = item.IsFolder ? "Folder" : ".osk";
-            SizeText = $"{item.SizeBytes / 1_048_576.0:0.0} MB";
+            DisplayPath = item.IsBuiltIn ? "Included with osu!lazer" : item.Path;
+            TypeText = item.IsBuiltIn ? "Built-in" : item.IsFolder ? "Folder" : ".osk";
+            SizeText = item.IsBuiltIn ? "—" : $"{item.SizeBytes / 1_048_576.0:0.0} MB";
+            CanDelete = !item.IsBuiltIn;
         }
 
         public string Name { get; }
         public string Path { get; }
+        public string DisplayPath { get; }
         public string TypeText { get; }
         public string SizeText { get; }
+        public bool CanDelete { get; }
     }
 }

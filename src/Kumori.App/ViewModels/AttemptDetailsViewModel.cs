@@ -30,6 +30,8 @@ public partial class AttemptDetailsViewModel : ObservableObject
     private readonly Dictionary<long, AttemptDetails> _cache = new();
     private readonly Dictionary<long, IReadOnlyList<PressurePoint>> _curveCache = new();
     private readonly Dictionary<string, double> _originalStarCache = new(StringComparer.OrdinalIgnoreCase);
+    private const int DetailCacheLimit = 32;
+    private const int StarCacheLimit = 64;
     private CancellationTokenSource? _loadCts;
     private long? _requestedAttemptId;
     private double? _calculatedOriginalStars;
@@ -110,6 +112,12 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string ProgressValue => Details is { } d ? d.Summary.Progress.ToString("P1", CultureInfo.InvariantCulture) : "";
     public string MissValue => Details is { } d ? $"{d.Summary.Misses}" : "";
     public string StarsValue => Details?.Summary.Stars is { } s ? Invariant($"{s:0.0}*") : "-";
+    public bool HasReplayRecoveredResult => Details?.ResultRecoveredFromReplay == true;
+    public string ReplayRecoveryNotice => Details is { ResultRecoveredFromReplay: true } details
+        ? details.ResultRecoverySimulationCompleted
+            ? "tosu gameplay data was unavailable for this play. Result data was recovered from the saved replay, then the play was re-simulated for timing and judgement details."
+            : "tosu gameplay data was unavailable for this play. Result data was recovered from the saved replay."
+        : "";
 
     // ── Mod-settings badge summary (ports _mod_settings_summary) ──
     public string ModSettingsSummary => Details is { } d ? BuildModSettingsSummary(d.Mods) : "";
@@ -386,6 +394,8 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(ProgressValue));
         OnPropertyChanged(nameof(MissValue));
         OnPropertyChanged(nameof(StarsValue));
+        OnPropertyChanged(nameof(HasReplayRecoveredResult));
+        OnPropertyChanged(nameof(ReplayRecoveryNotice));
         OnPropertyChanged(nameof(ModSettingsSummary));
         OnPropertyChanged(nameof(StarsDisplay));
         OnPropertyChanged(nameof(StarsNumberDisplay));
@@ -507,6 +517,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
             {
                 original = await Task.Run(() => BeatmapStarRatingCalculator.CalculateOriginal(path));
                 _originalStarCache[path] = original;
+                TrimCache(_originalStarCache, StarCacheLimit);
             }
 
             if (ReferenceEquals(Details, details))
@@ -546,6 +557,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         {
             var curve = await Task.Run(() => MapPressureGraph.BuildDifficultyCurve(path, details.Mods));
             _curveCache[id] = curve;
+            TrimCache(_curveCache, DetailCacheLimit);
             if (ReferenceEquals(Details, details))
             {
                 PressureCurve = curve;
@@ -724,6 +736,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
             if (loaded is not null)
             {
                 _cache[attemptId.Value] = loaded;
+                TrimCache(_cache, DetailCacheLimit);
             }
             Details = loaded;
         }
@@ -744,7 +757,13 @@ public partial class AttemptDetailsViewModel : ObservableObject
             {
                 IsLoading = false;
             }
+            if (!ReferenceEquals(_loadCts, cts)) cts.Dispose();
         }
+    }
+
+    private static void TrimCache<TKey, TValue>(Dictionary<TKey, TValue> cache, int limit) where TKey : notnull
+    {
+        while (cache.Count > limit) cache.Remove(cache.Keys.First());
     }
 
     /// <summary>Removes deleted attempts from the inspector and its detail cache.</summary>

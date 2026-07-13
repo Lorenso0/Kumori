@@ -42,20 +42,37 @@ public class MissAnalysisBuilderTests
     }
 
     [Fact]
-    public void Build_SlicesReplayFramesAroundEvent()
+    public void Build_KeepsOnlyTheContiguousLocalCursorApproach()
     {
         var model = MissAnalysisBuilder.Build(Contract([
             Event(1000, "miss"),
         ]), Objects(Circle(1000, 256, 192)), Frames(
-            Frame(200, 0, 0),
-            Frame(350, 10, 10),
+            Frame(800, 0, 0),
+            Frame(820, 10, 10),
+            Frame(980, 220, 192),
+            Frame(995, 240, 192),
             Frame(1000, 256, 192),
             Frame(1450, 300, 200),
             Frame(1600, 400, 300)));
 
         var entry = Assert.Single(model.Entries);
-        Assert.Equal([200, 350, 1000, 1450, 1600], entry.ReplayFrames.Select(s => (int)s.Time));
+        Assert.Equal([980, 995, 1000], entry.ReplayFrames.Select(s => (int)s.Time));
         Assert.Equal(0, entry.DistanceFromTarget);
+    }
+
+    [Fact]
+    public void Confidence_PromotesMappedCaptureWithContinuousReplayInput()
+    {
+        var model = MissAnalysisBuilder.Build(Contract([
+            Event(1000, "miss"),
+        ]), Objects(Circle(1000, 256, 192)), Frames(
+            Frame(970, 220, 192),
+            Frame(985, 245, 192, OsuAction.LeftButton),
+            Frame(1000, 250, 192, OsuAction.LeftButton)));
+
+        MissAnalysisEntry entry = Assert.Single(model.Entries);
+        Assert.Equal(AnalyzerEvidenceConfidence.High, AdvancedAnalyzerMetrics.Confidence(entry));
+        Assert.Equal("HIGH CONFIDENCE · CAPTURE + REPLAY CORROBORATED", AdvancedAnalyzerMetrics.EvidenceLabel(entry));
     }
 
     [Fact]

@@ -12,11 +12,9 @@ public static class AppDataOrganizer
 
         EnsureStructure(root);
         MoveKnownContent(root);
-        RotateBeatmapCacheForLazerLinks(root);
         EnsureStructure(root);
         DeleteObsoleteRootFiles(root);
         DeleteObsoleteToolFiles(root);
-        PruneLogs(root, now ?? DateTimeOffset.Now);
         PruneRuntime(root, now ?? DateTimeOffset.Now);
     }
 
@@ -45,14 +43,14 @@ public static class AppDataOrganizer
         }
     }
 
-    public static void PruneLogs(string? root = null, DateTimeOffset? now = null)
+    public static void PruneLogs(string? root = null, DateTimeOffset? now = null, int? retentionDays = null)
     {
         root ??= AppPaths.AppDataDir;
-        var cutoff = (now ?? DateTimeOffset.Now).UtcDateTime.AddDays(-AppPaths.LogRetentionDays);
-        foreach (var dir in LogDirectories(root))
-        {
-            DeleteOldFiles(dir, cutoff);
-        }
+        var days = LogRetentionPolicy.NormalizeDays(retentionDays ?? AppPaths.DefaultLogRetentionDays);
+        var cutoff = (now ?? DateTimeOffset.Now).UtcDateTime.AddDays(-days);
+        // Prune the complete tree rather than a list of known producers. This
+        // automatically covers root logs, helper tools, and future subfolders.
+        DeleteOldFiles(Path.Combine(root, "logs"), cutoff);
     }
 
     public static void PruneRuntime(string? root = null, DateTimeOffset? now = null)
@@ -103,39 +101,9 @@ public static class AppDataOrganizer
         MoveDirectoryFiles(Path.Combine(root, "logs"), Path.Combine(root, "logs", "app"), "*.log");
     }
 
-    private static void RotateBeatmapCacheForLazerLinks(string root)
-    {
-        var beatmaps = Path.Combine(root, "cache", "beatmaps");
-        var marker = Path.Combine(beatmaps, ".lazer-linked-cache-v1");
-        if (File.Exists(marker))
-        {
-            return;
-        }
-
-        try
-        {
-            foreach (var name in new[] { "media", "covers", "files" })
-            {
-                var current = Path.Combine(beatmaps, name);
-                var old = Path.Combine(beatmaps, name + ".old");
-                if (Directory.Exists(current) && !Directory.Exists(old))
-                {
-                    Directory.Move(current, old);
-                }
-            }
-
-            Directory.CreateDirectory(beatmaps);
-            File.WriteAllText(marker, "Cache rolled over for lazer-linked media.");
-            CacheActivityLog.RecordAddition(marker, "cache-migration-marker", Path.Combine(root, "logs", "cache-additions.jsonl"));
-        }
-        catch
-        {
-            // Keep the current cache active if a running viewer prevents the rename.
-        }
-    }
-
     private static void DeleteObsoleteRootFiles(string root)
     {
+        DeleteFile(Path.Combine(root, "cache", "beatmaps", ".lazer-linked-cache-v1"));
         foreach (var name in new[] { ".rename-migration-v1", ".shift-migration-v1", "Kumori-Gui-Singleton.pid", "Kumori-Service-Singleton.pid" })
         {
             DeleteFile(Path.Combine(root, name));
@@ -381,14 +349,6 @@ public static class AppDataOrganizer
         {
             DeleteFile(file);
         }
-    }
-
-    private static IEnumerable<string> LogDirectories(string root)
-    {
-        yield return Path.Combine(root, "logs", "app");
-        yield return Path.Combine(root, "logs", "viewer");
-        yield return Path.Combine(root, "logs", "tosu");
-        yield return Path.Combine(root, "logs", "legacy");
     }
 
     private static void DeleteFile(string path)

@@ -12,7 +12,10 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
     private readonly Func<long?> attemptId;
     private readonly MovementCaptureStore movement;
     private readonly MovementRepository repository;
+    private readonly ReplayResultRecoveryStore resultRecovery;
     private readonly Action<long>? movementReplaced;
+    private readonly Action<ReplayResultRecoveryContext>? resultRecovered;
+    private readonly bool recoverMovement;
     private readonly CancellationToken cancellationToken;
     private AttemptStart? start;
     private long generation;
@@ -21,12 +24,17 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         SqliteConnectionFactory factory,
         Func<long?> attemptId,
         Action<long>? movementReplaced = null,
+        Action<ReplayResultRecoveryContext>? resultRecovered = null,
+        bool recoverMovement = true,
         CancellationToken cancellationToken = default)
     {
         this.attemptId = attemptId;
         movement = new MovementCaptureStore(factory);
         repository = new MovementRepository(factory);
+        resultRecovery = new ReplayResultRecoveryStore(factory);
         this.movementReplaced = movementReplaced;
+        this.resultRecovered = resultRecovered;
+        this.recoverMovement = recoverMovement;
         this.cancellationToken = cancellationToken;
     }
 
@@ -62,11 +70,24 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
             for (var pass = 0; pass < 240; pass++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var replay = LazerStorage.ResolveReplayFile(attempt.Checksum!, startedAt, attempt.GameFolder, endedAt);
-                if (replay is not null && StableReplayFrameRecoverySink.TryRead(replay, beatmap.BeatmapPath, attempt.Checksum, out var samples))
+                foreach (var replay in LazerStorage.ResolveReplayFiles(attempt.Checksum!, startedAt, attempt.GameFolder, endedAt))
                 {
+                    if (!StableReplayFrameRecoverySink.TryRead(
+                            replay, beatmap.BeatmapPath, attempt.Checksum, out var samples, out var replayResult))
+                        continue;
+                    var recovery = await ApplyResultAfterFinalizationAsync(id, replayResult);
+                    if (!recoverMovement)
+                    {
+                        NotifyResultRecovery(recovery, id, replay, beatmap.BeatmapPath, beatmap.Files, samples);
+                        return;
+                    }
+
                     var existing = repository.GetMetadata(id);
-                    if (existing is { SampleCount: > 0 } && existing.Source is not ("lazer_memory" or "lazer_replay_frame" or "lazer_replay")) return;
+                    if (existing is { SampleCount: > 0 } && existing.Source is not ("lazer_memory" or "lazer_replay_frame" or "lazer_replay"))
+                    {
+                        NotifyResultRecovery(recovery, id, replay, beatmap.BeatmapPath, beatmap.Files, samples);
+                        return;
+                    }
                     movement.Start(id);
                     movement.AddSamples(samples);
                     movement.Complete(0, "lazer_replay", JsonSerializer.Serialize(new
@@ -85,6 +106,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
                     });
                     Log.Information("Replaced lazer memory capture with {Count} persisted Realm replay frames for attempt {AttemptId}", samples.Count, id);
                     movementReplaced?.Invoke(id);
+                    NotifyResultRecovery(recovery, id, replay, beatmap.BeatmapPath, beatmap.Files, samples);
                     return;
                 }
                 UpdateIfCurrent(capturedGeneration, status => status.LocalReplayState = "waiting");
@@ -122,8 +144,42 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
 
     private void UpdateIfCurrent(long capturedGeneration, Action<LazerReplayFrameStatus> mutate)
     {
-        if (capturedGeneration != Volatile.Read(ref generation))
+        if (!recoverMovement || capturedGeneration != Volatile.Read(ref generation))
             return;
         LazerReplayFrameDiagnostics.Update(mutate);
+    }
+
+    private async Task<ReplayResultRecoveryOutcome> ApplyResultAfterFinalizationAsync(
+        long id,
+        ReplayResultData result)
+    {
+        for (var pass = 0; pass < 40; pass++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var outcome = resultRecovery.Apply(id, result, "lazer_replay");
+            if (outcome.AttemptReady)
+                return outcome;
+            await Task.Delay(50, cancellationToken);
+        }
+        return ReplayResultRecoveryOutcome.NotReady;
+    }
+
+    private void NotifyResultRecovery(
+        ReplayResultRecoveryOutcome recovery,
+        long id,
+        string replayPath,
+        string beatmapPath,
+        IReadOnlyDictionary<string, string> mediaPaths,
+        IReadOnlyList<Kumori.Core.Models.MovementSample> samples)
+    {
+        if (!recovery.Applied) return;
+        resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+            id,
+            recovery,
+            replayPath,
+            beatmapPath,
+            null,
+            mediaPaths,
+            samples));
     }
 }

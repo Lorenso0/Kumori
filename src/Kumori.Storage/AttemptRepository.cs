@@ -23,7 +23,8 @@ public sealed class AttemptRepository
     /// Optional search matches artist/title/difficulty/mods (case-insensitive).
     /// </summary>
     public List<AttemptSummary> GetRecentAttempts(
-        long? beforeId = null, int limit = 100, string? search = null, long? sessionId = null)
+        long? beforeId = null, int limit = 100, string? search = null, long? sessionId = null,
+        string? mapKey = null)
     {
         var results = new List<AttemptSummary>(limit);
         if (!_factory.DatabaseExists)
@@ -42,6 +43,13 @@ public sealed class AttemptRepository
         var hasAdjustedStars = HasColumn(con, "attempts", "adjusted_stars");
         var hasMaxCombo = HasColumn(con, "beatmaps", "max_combo");
         var hasKeyCounts = HasColumn(con, "attempts", "z_count") && HasColumn(con, "attempts", "x_count");
+        var mapBeatmapId = hasExternalBeatmapId ? "b.beatmap_id" : "NULL";
+        var mapChecksum = hasChecksum ? "COALESCE(b.checksum, b.identity)" : "b.identity";
+        var mapMapper = hasMapper ? "COALESCE(b.mapper,'')" : "''";
+        var mapKeyExpression = $"CASE WHEN {mapBeatmapId} IS NOT NULL AND {mapBeatmapId} > 0 " +
+            $"THEN 'id:' || {mapBeatmapId} WHEN {mapChecksum} IS NOT NULL AND length({mapChecksum}) > 0 " +
+            $"THEN 'hash:' || lower({mapChecksum}) ELSE 'meta:' || lower(COALESCE(b.artist,'')) || char(31) || " +
+            $"lower(COALESCE(b.title,'')) || char(31) || lower(COALESCE(b.difficulty,'')) || char(31) || lower({mapMapper}) END";
         using var cmd = con.CreateCommand();
         cmd.CommandText = $"""
             SELECT a.id, a.session_id, a.started_at, a.ended_at, a.outcome,
@@ -64,6 +72,7 @@ public sealed class AttemptRepository
             JOIN beatmaps b ON b.id = a.beatmap_id
             WHERE (@beforeId IS NULL OR a.id < @beforeId)
               AND (@sessionId IS NULL OR a.session_id = @sessionId)
+              AND (@mapKey IS NULL OR {mapKeyExpression} = @mapKey)
               AND (@search IS NULL OR
                    b.artist LIKE @search ESCAPE '\' OR
                    b.title LIKE @search ESCAPE '\' OR
@@ -75,6 +84,7 @@ public sealed class AttemptRepository
         cmd.Parameters.AddWithValue("@beforeId", (object?)beforeId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@limit", limit);
         cmd.Parameters.AddWithValue("@sessionId", (object?)sessionId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@mapKey", (object?)mapKey ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@search",
             string.IsNullOrWhiteSpace(search)
                 ? DBNull.Value
@@ -120,6 +130,70 @@ public sealed class AttemptRepository
 
     public List<AttemptSummary> GetAttemptsForSession(long sessionId, int limit = 100_000) =>
         GetRecentAttempts(limit: limit, sessionId: sessionId);
+
+    public List<AttemptSummary> GetAttemptsForMap(string mapKey, long? beforeId = null, int limit = 1000) =>
+        GetRecentAttempts(beforeId, limit, mapKey: mapKey);
+
+    public List<MapSummary> GetMapSummaries()
+    {
+        var result = new List<MapSummary>();
+        if (!_factory.DatabaseExists) return result;
+        using var con = _factory.Open();
+        var hasBeatmapId = HasColumn(con, "beatmaps", "beatmap_id");
+        var hasSetId = HasColumn(con, "beatmaps", "set_id");
+        var hasChecksum = HasColumn(con, "beatmaps", "checksum");
+        var hasMapper = HasColumn(con, "beatmaps", "mapper");
+        var hasAdjustedStars = HasColumn(con, "attempts", "adjusted_stars");
+        using var cmd = con.CreateCommand();
+        var beatmapId = hasBeatmapId ? "b.beatmap_id" : "NULL";
+        var checksum = hasChecksum ? "COALESCE(b.checksum, b.identity)" : "b.identity";
+        var mapper = hasMapper ? "COALESCE(b.mapper,'')" : "''";
+        var mapKey = $"CASE WHEN {beatmapId} IS NOT NULL AND {beatmapId} > 0 " +
+            $"THEN 'id:' || {beatmapId} WHEN {checksum} IS NOT NULL AND length({checksum}) > 0 " +
+            $"THEN 'hash:' || lower({checksum}) ELSE 'meta:' || lower(COALESCE(b.artist,'')) || char(31) || " +
+            $"lower(COALESCE(b.title,'')) || char(31) || lower(COALESCE(b.difficulty,'')) || char(31) || lower({mapper}) END";
+        cmd.CommandText = $"""
+            SELECT {mapKey} map_key,
+                   MAX(a.id), MAX({beatmapId}), MAX({(hasSetId ? "b.set_id" : "NULL")}), MAX({checksum}),
+                   MAX(COALESCE(b.artist,'')), MAX(COALESCE(b.title,'')), MAX(COALESCE(b.difficulty,'')), MAX({mapper}),
+                   MAX(a.started_at), COUNT(*),
+                   SUM(CASE WHEN a.outcome='completed' THEN 1 ELSE 0 END),
+                   MAX(a.pp), MAX(a.accuracy), MAX(a.combo),
+                   AVG(a.accuracy), AVG(a.pp), AVG(a.combo),
+                   MAX({(hasAdjustedStars ? "COALESCE(a.adjusted_stars, a.base_stars, b.stars)" : "b.stars")})
+            FROM attempts a
+            JOIN beatmaps b ON b.id=a.beatmap_id
+            GROUP BY {mapKey}
+            ORDER BY COUNT(*) DESC, MAX(a.id) DESC
+            """;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            result.Add(new MapSummary
+            {
+                MapKey = reader.GetString(0),
+                LastAttemptId = reader.GetInt64(1),
+                OsuBeatmapId = reader.IsDBNull(2) ? null : reader.GetInt64(2),
+                BeatmapSetId = reader.IsDBNull(3) ? null : reader.GetInt64(3),
+                Checksum = reader.IsDBNull(4) ? null : reader.GetString(4),
+                Artist = reader.GetString(5),
+                Title = reader.GetString(6),
+                Difficulty = reader.GetString(7),
+                Mapper = reader.GetString(8),
+                LastStartedAt = reader.GetString(9),
+                PlayCount = (int)reader.GetInt64(10),
+                CompletedCount = (int)reader.GetInt64(11),
+                BestPp = reader.GetDouble(12),
+                BestAccuracy = reader.GetDouble(13),
+                BestCombo = (int)reader.GetInt64(14),
+                AverageAccuracy = reader.GetDouble(15),
+                AveragePp = reader.GetDouble(16),
+                AverageCombo = reader.GetDouble(17),
+                Stars = reader.IsDBNull(18) ? null : reader.GetDouble(18),
+            });
+        }
+        return result;
+    }
 
     private static bool HasColumn(SqliteConnection con, string table, string column)
     {

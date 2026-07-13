@@ -6,9 +6,10 @@ internal sealed record PreparedReplayAnalysis(
     int Version,
     long AttemptId,
     IReadOnlyList<PreparedReplayJudgement> Judgements,
-    IReadOnlyList<PreparedReplayFrame> Frames)
+    IReadOnlyList<PreparedReplayFrame> Frames,
+    PreparedReplaySimulationSummary? Summary = null)
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 4;
 
     public static string PathFor(string contractPath) => contractPath + ".analysis.json";
 
@@ -30,6 +31,37 @@ internal sealed record PreparedReplayAnalysis(
         File.Move(temporary, path, true);
     }
 }
+
+internal sealed record PreparedReplaySimulationSummary(
+    int SliderBreaks,
+    int LargeTickHits,
+    int LargeTickMisses,
+    int SmallTickHits,
+    int SmallTickMisses,
+    int SliderTailHits,
+    int SliderTailMisses,
+    double UnstableRate,
+    IReadOnlyList<double> TimingOffsets,
+    double Pp,
+    double FcPp,
+    double MaxPp,
+    double BaseStars,
+    double AdjustedStars,
+    double ApproachRate,
+    double AdjustedApproachRate,
+    double CircleSize,
+    double AdjustedCircleSize,
+    double OverallDifficulty,
+    double AdjustedOverallDifficulty,
+    double DrainRate,
+    double AdjustedDrainRate,
+    double Bpm,
+    double AdjustedBpm,
+    double ClockRate,
+    int MaxCombo,
+    int CircleCount,
+    int SliderCount,
+    int SpinnerCount);
 
 internal sealed record PreparedReplayJudgement(
     KumoriTimelineMarkerKind Kind,

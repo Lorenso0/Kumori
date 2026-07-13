@@ -21,6 +21,7 @@ internal sealed class AdvancedAnalyzerViewModel
     public BindableBool RecolourSelectedNote { get; } = new();
     public BindableBool ShowSelectedNoteIndicator { get; } = new();
     public Bindable<Colour4> SelectedNoteColour { get; } = new();
+    public Bindable<Colour4> ComparisonCursorColour { get; } = new();
     public BindableDouble LoopBefore { get; } = new();
     public BindableDouble LoopAfter { get; } = new();
     public BindableDouble PlaybackRate { get; } = new();
@@ -35,6 +36,7 @@ internal sealed class AdvancedAnalyzerViewModel
     public bool UsesFallbackData => model.Entries.Any(e => e.Source == AnalysisDataSource.Inferred);
     public bool AnalyzerOpen { get; private set; }
     public string RecentTrendSummary { get; }
+    public ComparisonContract? Comparison { get; }
 
     public event Action? FiltersChanged;
     public event Action? SelectionChanged;
@@ -48,6 +50,7 @@ internal sealed class AdvancedAnalyzerViewModel
         this.model = model;
         this.config = config;
         RecentTrendSummary = AdvancedAnalyzerMetrics.RecentTrendSummary(contract);
+        Comparison = contract?.Comparison;
         initialise(ShowMisses, KumoriViewerSetting.ShowMissMarkers);
         initialise(ShowMehs, KumoriViewerSetting.ShowMehMarkers);
         initialise(ShowOks, KumoriViewerSetting.ShowOkMarkers);
@@ -60,6 +63,7 @@ internal sealed class AdvancedAnalyzerViewModel
         initialise(RecolourSelectedNote, KumoriViewerSetting.MissAnalyzerRecolourSelectedNote);
         initialise(ShowSelectedNoteIndicator, KumoriViewerSetting.MissAnalyzerShowSelectedNoteIndicator);
         initialise(SelectedNoteColour, KumoriViewerSetting.MissAnalyzerSelectedNoteColour);
+        initialise(ComparisonCursorColour, KumoriViewerSetting.ComparisonReplayCursorColour);
         initialise(LoopBefore, KumoriViewerSetting.MissAnalyzerLoopBefore, 150, 2000, 50);
         initialise(LoopAfter, KumoriViewerSetting.MissAnalyzerLoopAfter, 150, 2000, 50);
         initialise(PlaybackRate, KumoriViewerSetting.MissAnalyzerPlaybackRate, 0.05, 2, 0.01);
@@ -167,13 +171,13 @@ internal sealed class AdvancedAnalyzerViewModel
 
     private void initialise(BindableBool bindable, KumoriViewerSetting setting)
     {
-        bindable.BindTo(config.GetBindable<bool>(setting));
+        config.BindWith(setting, bindable);
         bindable.ValueChanged += _ => config.Save();
     }
 
     private void initialise(Bindable<Colour4> bindable, KumoriViewerSetting setting)
     {
-        bindable.BindTo(config.GetBindable<Colour4>(setting));
+        config.BindWith(setting, bindable);
         bindable.ValueChanged += _ => config.Save();
     }
 
@@ -182,7 +186,7 @@ internal sealed class AdvancedAnalyzerViewModel
         bindable.MinValue = min;
         bindable.MaxValue = max;
         bindable.Precision = precision;
-        bindable.BindTo(config.GetBindable<double>(setting));
+        config.BindWith(setting, bindable);
         bindable.ValueChanged += _ => config.Save();
     }
 }

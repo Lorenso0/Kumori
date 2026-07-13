@@ -4,6 +4,7 @@ using System.IO.Compression;
 using osu.Framework.Allocation;
 using osu.Framework.Audio;
 using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
 using osu.Framework.Configuration;
 using osu.Framework.Extensions;
 using osu.Framework.Graphics;
@@ -50,7 +51,12 @@ public partial class ReplayViewerGame : OsuGameBase
     private KumoriReplayPlayer? currentPlayer;
     private AdvancedAnalyzerOverlay? advancedAnalyzerOverlay;
     private AdvancedAnalyzerViewModel? advancedAnalyzerViewModel;
+    private KumoriComparisonOverlay? comparisonOverlay;
     private GameHost? gameHost;
+    private ComparisonContract? activeComparison;
+    private ComparisonContract? importedComparison;
+    private readonly Bindable<string> comparisonImportStatus = new(string.Empty);
+    private bool osrPickerOpen;
 
     internal ReplayViewerGame(ViewerContract contract, BeatmapAnalysis analysis, PreparedReplayAnalysis? preparedAnalysis = null)
     {
@@ -128,6 +134,10 @@ public partial class ReplayViewerGame : OsuGameBase
         if (screenStack == null || ruleset == null || workingBeatmap == null || viewerConfig == null)
             return;
 
+        ViewerContract sessionContract = contract with { Comparison = activeComparison };
+        IReadOnlyList<ComparisonContract> comparisonOptions = importedComparison == null
+            ? contract.ComparisonOptions
+            : [importedComparison, .. contract.ComparisonOptions];
         Score score = ReplayScoreFactory.Create(
             contract,
             ruleset,
@@ -145,6 +155,9 @@ public partial class ReplayViewerGame : OsuGameBase
             PlaybackEndTime = contract.ReplayPlaybackEnd,
             PlaybackRestartTime = firstHitTime,
             RecordedAccuracyOverride = usesAuthoritativeStableJudgements() ? contract.Attempt.Accuracy : null,
+            Comparison = activeComparison,
+            PrimaryAttempt = contract.Attempt,
+            PrimaryHits = contract.FinalHits,
         };
         currentPlayer = player;
 
@@ -195,16 +208,34 @@ public partial class ReplayViewerGame : OsuGameBase
             seekBar.SetMarkers(initialModel.Markers);
             Logger.Log($"Kumori: loaded {initialModel.Entries.Count} exact judgements from prepared replay analysis.");
         }
-        advancedAnalyzerViewModel = new AdvancedAnalyzerViewModel(initialModel, viewerConfig, contract);
+        advancedAnalyzerViewModel = new AdvancedAnalyzerViewModel(initialModel, viewerConfig, sessionContract);
         var analyzerRuntime = new AdvancedAnalyzerRuntime(() => currentPlayer);
         advancedAnalyzerOverlay = new AdvancedAnalyzerOverlay(advancedAnalyzerViewModel, analyzerRuntime);
         Add(advancedAnalyzerOverlay);
+        comparisonOverlay = new KumoriComparisonOverlay(
+            viewerConfig,
+            comparisonOptions,
+            activeComparison?.AttemptId,
+            () => currentPlayer?.EnterComparisonMode(),
+            () => currentPlayer?.ExitComparisonMode(),
+            selectComparison,
+            chooseOsrComparison,
+            comparisonImportStatus,
+            stopComparison,
+            () => currentPlayer);
+        Add(comparisonOverlay);
         seekBar.BindAnalyzer(advancedAnalyzerViewModel, entry =>
         {
             advancedAnalyzerOverlay.Open();
             advancedAnalyzerViewModel.Select(entry);
         });
         player.OpenMissAnalyzer = advancedAnalyzerOverlay.Open;
+        player.OpenComparisonMenu = comparisonOverlay.Open;
+        player.ComparisonSessionReady = () =>
+        {
+            if (activeComparison is not null)
+                comparisonOverlay.ActivateCollapsed();
+        };
         if (preparedAnalysis == null && !authoritativeStableJudgements)
             player.AnalysisJudgementsReady = snapshots => Schedule(() =>
         {
@@ -244,6 +275,7 @@ public partial class ReplayViewerGame : OsuGameBase
             advancedAnalyzerOverlay?.Close();
             advancedAnalyzerOverlay = null;
             advancedAnalyzerViewModel = null;
+            comparisonOverlay = null;
             Clear();
             screenStack = new OsuScreenStack
             {
@@ -251,8 +283,91 @@ public partial class ReplayViewerGame : OsuGameBase
             };
             Add(screenStack);
             loadReplayScreen();
-            Logger.Log("Kumori: replay player reloaded after Hidden mod setting changed.");
+            Logger.Log("Kumori: replay player reloaded after a viewer setting changed.");
         });
+    }
+
+    private void selectComparison(ComparisonContract? comparison)
+    {
+        if (activeComparison?.AttemptId == comparison?.AttemptId)
+            return;
+
+        if (comparison is not { Ephemeral: true })
+        {
+            importedComparison = null;
+            comparisonImportStatus.Value = string.Empty;
+        }
+        activeComparison = comparison;
+        reloadReplayScreen();
+    }
+
+    private void stopComparison()
+    {
+        if (activeComparison is null)
+            return;
+
+        bool wasImported = activeComparison.Ephemeral;
+        activeComparison = null;
+        if (wasImported)
+        {
+            importedComparison = null;
+            comparisonImportStatus.Value = string.Empty;
+        }
+        reloadReplayScreen();
+    }
+
+    private void chooseOsrComparison()
+    {
+        if (osrPickerOpen)
+            return;
+
+        osrPickerOpen = true;
+        comparisonImportStatus.Value = "Opening replay picker...";
+        Task.Run(WindowsReplayFilePicker.SelectOsr)
+            .ContinueWith(task => Schedule(() =>
+            {
+                osrPickerOpen = false;
+
+                if (task.IsFaulted)
+                {
+                    Exception error = task.Exception?.GetBaseException()
+                                      ?? new InvalidOperationException("The replay picker could not be opened.");
+                    comparisonImportStatus.Value = error.Message;
+                    NativeViewerLog.Error(error, "Replay comparison picker failed");
+                    return;
+                }
+
+                string? path = task.Result;
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    comparisonImportStatus.Value = string.Empty;
+                    return;
+                }
+
+                osrSelected(new System.IO.FileInfo(path));
+            }), TaskScheduler.Default);
+    }
+
+    private void osrSelected(System.IO.FileInfo file)
+    {
+        comparisonImportStatus.Value = $"Validating {file.Name}...";
+        Task.Run(() => OsrComparisonImporter.Import(file.FullName, contract.BeatmapPath, contract.Attempt))
+            .ContinueWith(task => Schedule(() =>
+            {
+                if (task.IsFaulted)
+                {
+                    Exception error = task.Exception?.GetBaseException()
+                                      ?? new InvalidDataException("The replay could not be loaded.");
+                    comparisonImportStatus.Value = error.Message;
+                    NativeViewerLog.Error(error, $"Rejected temporary comparison replay {file.Name}");
+                    return;
+                }
+
+                importedComparison = task.Result;
+                activeComparison = importedComparison;
+                comparisonImportStatus.Value = $"Loaded {file.Name} for this viewer session only.";
+                reloadReplayScreen();
+            }), TaskScheduler.Default);
     }
 
     private void showLoadFailure(Exception ex)
@@ -352,15 +467,15 @@ public partial class ReplayViewerGame : OsuGameBase
             viewerConfig.SetValue(KumoriViewerSetting.ContractSettingsSeeded, true);
         }
 
-        if (getStringSetting("osu_replay_skin_path") is { Length: > 0 } skinPath)
-        {
-            string storedPath = viewerConfig.GetBindable<string>(KumoriViewerSetting.SkinPath).Value;
+        string skinPath = getStringSetting("osu_replay_skin_path")?.Trim() ?? string.Empty;
+        string storedPath = viewerConfig.GetBindable<string>(KumoriViewerSetting.SkinPath).Value;
 
-            if (!string.Equals(storedPath, skinPath, StringComparison.OrdinalIgnoreCase))
-            {
-                viewerConfig.SetValue(KumoriViewerSetting.SkinPath, skinPath);
-                viewerConfig.SetValue(KumoriViewerSetting.SkinId, string.Empty);
-            }
+        // Empty is meaningful: it explicitly selects the protected built-in
+        // Argon Pro skin and must clear a previously imported skin ID.
+        if (!string.Equals(storedPath, skinPath, StringComparison.OrdinalIgnoreCase))
+        {
+            viewerConfig.SetValue(KumoriViewerSetting.SkinPath, skinPath);
+            viewerConfig.SetValue(KumoriViewerSetting.SkinId, string.Empty);
         }
 
         viewerConfig.Save();
@@ -377,8 +492,10 @@ public partial class ReplayViewerGame : OsuGameBase
     {
         string? skinPath = viewerConfig?.GetBindable<string>(KumoriViewerSetting.SkinPath).Value;
         string? skinId = viewerConfig?.GetBindable<string>(KumoriViewerSetting.SkinId).Value;
+        bool hasUsableCustomSource = !string.IsNullOrWhiteSpace(skinPath)
+                                     && (File.Exists(skinPath) || Directory.Exists(skinPath));
 
-        if (Guid.TryParse(skinId, out Guid parsedSkinId))
+        if (hasUsableCustomSource && Guid.TryParse(skinId, out Guid parsedSkinId))
         {
             var existing = SkinManager.GetAllUsableSkins().FirstOrDefault(s => s.ID == parsedSkinId);
 
@@ -392,58 +509,58 @@ public partial class ReplayViewerGame : OsuGameBase
             Logger.Log($"Kumori: saved skin {parsedSkinId} was not found; re-importing its source.", level: LogLevel.Important);
         }
 
-        if (!string.IsNullOrWhiteSpace(skinPath))
+        if (hasUsableCustomSource)
         {
-            if (File.Exists(skinPath) || Directory.Exists(skinPath))
+            try
             {
+                string importPath = prepareSkinImportPath(skinPath!);
+
                 try
                 {
-                    string importPath = prepareSkinImportPath(skinPath);
+                    var imported = SkinManager.Import(new ImportTask(importPath)).GetResultSafely();
 
-                    try
+                    if (imported != null)
                     {
-                        var imported = SkinManager.Import(new ImportTask(importPath)).GetResultSafely();
-
-                        if (imported != null)
-                        {
-                            SkinManager.CurrentSkinInfo.Value = imported;
-                            viewerConfig?.SetValue(KumoriViewerSetting.SkinPath, skinPath);
-                            viewerConfig?.SetValue(KumoriViewerSetting.SkinId, imported.ID.ToString());
-                            viewerConfig?.Save();
-                            Logger.Log($"Kumori: imported and remembered skin {imported} ({imported.ID}).");
-                            return;
-                        }
-
-                        Logger.Log($"Custom skin import returned nothing for \"{skinPath}\"; falling back to Argon Pro.", level: LogLevel.Important);
+                        SkinManager.CurrentSkinInfo.Value = imported;
+                        viewerConfig?.SetValue(KumoriViewerSetting.SkinPath, skinPath!);
+                        viewerConfig?.SetValue(KumoriViewerSetting.SkinId, imported.ID.ToString());
+                        viewerConfig?.Save();
+                        Logger.Log($"Kumori: imported and remembered skin {imported} ({imported.ID}).");
+                        return;
                     }
-                    finally
-                    {
-                        if (!string.Equals(importPath, skinPath, StringComparison.OrdinalIgnoreCase))
-                        {
-                            try
-                            {
-                                File.Delete(importPath);
-                            }
-                            catch (Exception e)
-                            {
-                                Logger.Error(e, $"Kumori: could not remove temporary skin archive \"{importPath}\".");
-                            }
-                        }
-                    }
+
+                    Logger.Log($"Custom skin import returned nothing for \"{skinPath}\"; falling back to Argon Pro.", level: LogLevel.Important);
                 }
-                catch (Exception e)
+                finally
                 {
-                    Logger.Error(e, $"Failed to import custom skin \"{skinPath}\"; falling back to Argon Pro.");
+                    if (!string.Equals(importPath, skinPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            File.Delete(importPath);
+                        }
+                        catch (Exception e)
+                        {
+                            Logger.Error(e, $"Kumori: could not remove temporary skin archive \"{importPath}\".");
+                        }
+                    }
                 }
             }
-            else
-                Logger.Log($"Custom skin \"{skinPath}\" does not exist; falling back to Argon Pro.", level: LogLevel.Important);
+            catch (Exception e)
+            {
+                Logger.Error(e, $"Failed to import custom skin \"{skinPath}\"; falling back to Argon Pro.");
+            }
         }
+        else if (!string.IsNullOrWhiteSpace(skinPath))
+            Logger.Log($"Custom skin \"{skinPath}\" does not exist; falling back to Argon Pro.", level: LogLevel.Important);
 
         // Select the protected built-in skin through SkinManager. This is the
         // same path used by lazer itself and avoids copied colours/assets.
         SkinManager.CurrentSkinInfo.Value = SkinManager.GetAllUsableSkins()
                                                        .Single(s => s.ID == ArgonProSkin.CreateInfo().ID);
+        viewerConfig?.SetValue(KumoriViewerSetting.SkinPath, string.Empty);
+        viewerConfig?.SetValue(KumoriViewerSetting.SkinId, string.Empty);
+        viewerConfig?.Save();
     }
 
     /// <summary>
@@ -581,10 +698,19 @@ internal sealed class MappedResourceStore : IResourceStore<byte[]>
 
     public MappedResourceStore(IReadOnlyDictionary<string, string> paths) => this.paths = paths;
 
-    public byte[] Get(string name) => paths.TryGetValue(name, out var path) && File.Exists(path) ? File.ReadAllBytes(path) : null!;
+    public byte[] Get(string name) => resolve(name) is { } path ? File.ReadAllBytes(path) : null!;
     public Task<byte[]> GetAsync(string name, CancellationToken cancellationToken = default) => Task.FromResult(Get(name));
-    public Stream? GetStream(string name) => paths.TryGetValue(name, out var path) && File.Exists(path) ? File.OpenRead(path) : null;
+    public Stream? GetStream(string name) => resolve(name) is { } path ? File.OpenRead(path) : null;
     public Task<Stream?> GetStreamAsync(string name, CancellationToken cancellationToken = default) => Task.FromResult(GetStream(name));
     public IEnumerable<string> GetAvailableResources() => paths.Keys;
     public void Dispose() { }
+
+    private string? resolve(string name)
+    {
+        if (paths.TryGetValue(name, out var exact) && File.Exists(exact))
+            return exact;
+
+        var safeName = Path.GetFileName(name.Replace('\\', '/'));
+        return paths.TryGetValue(safeName, out var flattened) && File.Exists(flattened) ? flattened : null;
+    }
 }

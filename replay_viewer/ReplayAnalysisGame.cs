@@ -7,13 +7,17 @@ using osu.Framework.Screens;
 using osu.Game;
 using osu.Game.Beatmaps;
 using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Difficulty;
 using osu.Game.Rulesets.Objects;
 using osu.Game.Rulesets.Osu;
+using osu.Game.Rulesets.Osu.Difficulty;
 using osu.Game.Rulesets.Osu.Objects;
 using osu.Game.Rulesets.Osu.Replays;
+using osu.Game.Rulesets.Scoring;
 using osu.Game.Scoring;
 using osu.Game.Screens;
 using osu.Game.Screens.Play;
+using osu.Game.Utils;
 using osuTK;
 
 namespace Kumori.ReplayViewer;
@@ -59,7 +63,7 @@ internal partial class ReplayAnalysisGame : OsuGameBase
             Score score = ReplayScoreFactory.Create(contract, ruleset, workingBeatmap, disableHidden: false);
             sourceScore = score;
             SelectedMods.Value = score.ScoreInfo.Mods;
-            var player = new ReplaySimulationPlayer(score, complete, fail)
+            var player = new ReplaySimulationPlayer(score, ruleset, workingBeatmap, complete, fail)
             {
                 RelativeSizeAxes = Axes.Both,
             };
@@ -73,7 +77,9 @@ internal partial class ReplayAnalysisGame : OsuGameBase
         }
     }
 
-    private void complete(IReadOnlyList<PreparedReplayJudgement> judgements)
+    private void complete(
+        IReadOnlyList<PreparedReplayJudgement> judgements,
+        PreparedReplaySimulationSummary summary)
     {
         if (finishing)
             return;
@@ -84,7 +90,8 @@ internal partial class ReplayAnalysisGame : OsuGameBase
                 PreparedReplayAnalysis.CurrentVersion,
                 contract.Attempt.Id,
                 judgements,
-                prepareFrames()).Save(contractPath);
+                prepareFrames(),
+                summary).Save(contractPath);
             Succeeded = true;
             NativeViewerLog.Write($"Prepared exact replay analysis with {judgements.Count} bad judgements.");
         }
@@ -157,16 +164,23 @@ internal partial class ReplayAnalysisGame : OsuGameBase
 internal partial class ReplaySimulationPlayer : ReplayPlayer
 {
     private readonly Score sourceScore;
-    private readonly Action<IReadOnlyList<PreparedReplayJudgement>> completed;
+    private readonly OsuRuleset ruleset;
+    private readonly WorkingBeatmap workingBeatmap;
+    private readonly Action<IReadOnlyList<PreparedReplayJudgement>, PreparedReplaySimulationSummary> completed;
     private readonly Action<Exception> failed;
     private readonly List<PreparedReplayJudgement> badJudgements = [];
     private readonly HashSet<(double Root, double Object, KumoriTimelineMarkerKind Kind)> seen = [];
+    private readonly Dictionary<HitResult, int> resultCounts = [];
+    private readonly List<double> timingOffsets = [];
+    private int sliderTailMisses;
     private readonly Stopwatch stopwatch = Stopwatch.StartNew();
     private bool finished;
 
     public ReplaySimulationPlayer(
         Score score,
-        Action<IReadOnlyList<PreparedReplayJudgement>> completed,
+        OsuRuleset ruleset,
+        WorkingBeatmap workingBeatmap,
+        Action<IReadOnlyList<PreparedReplayJudgement>, PreparedReplaySimulationSummary> completed,
         Action<Exception> failed)
         : base(score, new PlayerConfiguration
         {
@@ -178,6 +192,8 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         })
     {
         sourceScore = score;
+        this.ruleset = ruleset;
+        this.workingBeatmap = workingBeatmap;
         this.completed = completed;
         this.failed = failed;
     }
@@ -217,7 +233,7 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         {
             finished = true;
             ScoreProcessor.NewJudgement -= collect;
-            completed(badJudgements);
+            completed(badJudgements, createSummary());
         }
         else if (stopwatch.Elapsed > TimeSpan.FromSeconds(30))
         {
@@ -227,6 +243,13 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
 
     private void collect(JudgementResult result)
     {
+        resultCounts[result.Type] = resultCounts.GetValueOrDefault(result.Type) + 1;
+        if (result.Type == HitResult.Miss && result.HitObject is SliderTailCircle)
+            sliderTailMisses++;
+        if (result.Type is HitResult.Great or HitResult.Ok or HitResult.Meh
+            && result.HitObject is HitCircle or SliderHeadCircle)
+            timingOffsets.Add(result.TimeOffset);
+
         if (KumoriTimelineMarkers.KindFromJudgement(result) is not { } kind)
             return;
 
@@ -256,6 +279,105 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
             result.ComboAfterJudgement,
             frameStart,
             frameEnd));
+    }
+
+    private PreparedReplaySimulationSummary createSummary()
+    {
+        double unstableRate = 0;
+        if (timingOffsets.Count > 0)
+        {
+            double mean = timingOffsets.Average();
+            unstableRate = Math.Sqrt(timingOffsets.Average(value => Math.Pow(value - mean, 2))) * 10;
+        }
+
+        var score = sourceScore.ScoreInfo.DeepClone();
+        score.BeatmapInfo = workingBeatmap.BeatmapInfo;
+        ScoreProcessor.PopulateScore(score);
+
+        DifficultyAttributes baseDifficulty = ruleset.CreateDifficultyCalculator(workingBeatmap).Calculate();
+        DifficultyAttributes adjustedDifficulty = ruleset.CreateDifficultyCalculator(workingBeatmap).Calculate(score.Mods);
+        var adjustedOsuDifficulty = (OsuDifficultyAttributes)adjustedDifficulty;
+        var performance = ruleset.CreatePerformanceCalculator();
+        double pp = performance.Calculate(score, adjustedDifficulty).Total;
+        double fcPp = performance.Calculate(createFullComboProjection(score, adjustedDifficulty.MaxCombo), adjustedDifficulty).Total;
+        double maxPp = performance.Calculate(createPerfectProjection(score, adjustedDifficulty.MaxCombo), adjustedDifficulty).Total;
+
+        var baseMapDifficulty = workingBeatmap.BeatmapInfo.Difficulty;
+        var displayDifficulty = ruleset.GetAdjustedDisplayDifficulty(workingBeatmap.BeatmapInfo, score.Mods);
+        double clockRate = ModUtils.CalculateRateWithMods(score.Mods);
+        double beatLength = workingBeatmap.Beatmap.GetMostCommonBeatLength();
+        double bpm = beatLength > 0 ? 60000 / beatLength : 0;
+
+        return new PreparedReplaySimulationSummary(
+            resultCounts.GetValueOrDefault(HitResult.ComboBreak),
+            resultCounts.GetValueOrDefault(HitResult.LargeTickHit),
+            resultCounts.GetValueOrDefault(HitResult.LargeTickMiss),
+            resultCounts.GetValueOrDefault(HitResult.SmallTickHit),
+            resultCounts.GetValueOrDefault(HitResult.SmallTickMiss),
+            resultCounts.GetValueOrDefault(HitResult.SliderTailHit),
+            sliderTailMisses,
+            unstableRate,
+            timingOffsets,
+            pp,
+            fcPp,
+            maxPp,
+            baseDifficulty.StarRating,
+            adjustedDifficulty.StarRating,
+            baseMapDifficulty.ApproachRate,
+            displayDifficulty.ApproachRate,
+            baseMapDifficulty.CircleSize,
+            displayDifficulty.CircleSize,
+            baseMapDifficulty.OverallDifficulty,
+            displayDifficulty.OverallDifficulty,
+            baseMapDifficulty.DrainRate,
+            displayDifficulty.DrainRate,
+            bpm,
+            bpm * clockRate,
+            clockRate,
+            adjustedDifficulty.MaxCombo,
+            adjustedOsuDifficulty.HitCircleCount,
+            adjustedOsuDifficulty.SliderCount,
+            adjustedOsuDifficulty.SpinnerCount);
+    }
+
+    private static ScoreInfo createFullComboProjection(ScoreInfo actual, int maxCombo)
+    {
+        ScoreInfo projected = actual.DeepClone();
+        int misses = projected.Statistics.GetValueOrDefault(HitResult.Miss);
+        projected.Statistics[HitResult.Great] = projected.Statistics.GetValueOrDefault(HitResult.Great) + misses;
+        projected.Statistics[HitResult.Miss] = 0;
+        int missedComboTicks = projected.Statistics.GetValueOrDefault(HitResult.LargeTickMiss);
+        projected.Statistics[HitResult.LargeTickHit] =
+            projected.Statistics.GetValueOrDefault(HitResult.LargeTickHit) + missedComboTicks;
+        projected.Statistics[HitResult.LargeTickMiss] = 0;
+        projected.MaxCombo = maxCombo;
+        projected.Accuracy = accuracyFrom(projected.Statistics);
+        // A legacy score value describes the original miss/combo state and
+        // must not influence the hypothetical full-combo projection.
+        projected.IsLegacyScore = false;
+        projected.LegacyTotalScore = null;
+        return projected;
+    }
+
+    private static ScoreInfo createPerfectProjection(ScoreInfo actual, int maxCombo)
+    {
+        ScoreInfo projected = actual.DeepClone();
+        projected.Statistics = new Dictionary<HitResult, int>(projected.MaximumStatistics);
+        projected.MaxCombo = maxCombo;
+        projected.Accuracy = 1;
+        projected.IsLegacyScore = false;
+        projected.LegacyTotalScore = null;
+        return projected;
+    }
+
+    private static double accuracyFrom(IReadOnlyDictionary<HitResult, int> statistics)
+    {
+        int great = statistics.GetValueOrDefault(HitResult.Great);
+        int ok = statistics.GetValueOrDefault(HitResult.Ok);
+        int meh = statistics.GetValueOrDefault(HitResult.Meh);
+        int miss = statistics.GetValueOrDefault(HitResult.Miss);
+        int total = great + ok + meh + miss;
+        return total == 0 ? 1 : (great * 300d + ok * 100d + meh * 50d) / (total * 300d);
     }
 
     private (double Start, double End) frameBounds(HitObject judged, HitObject root, double resultTime)

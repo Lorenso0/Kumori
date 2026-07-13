@@ -44,19 +44,25 @@ public sealed class AttemptDetailsRepository
             LocalBeatmapPath = source.BeatmapPath,
             LocalMediaDirectory = source.MediaDirectory,
             ClientKind = source.ClientKind,
+            ResultRecoveredFromReplay = source.ResultRecovered,
+            ResultRecoverySource = source.RecoverySource,
+            ResultRecoverySimulationCompleted = source.SimulationCompleted,
         };
     }
 
-    private static (string? BeatmapPath, string? MediaDirectory, string ClientKind) ReadSourceContext(SqliteConnection con, long attemptId)
+    private static (string? BeatmapPath, string? MediaDirectory, string ClientKind,
+        bool ResultRecovered, string? RecoverySource, bool SimulationCompleted) ReadSourceContext(
+        SqliteConnection con,
+        long attemptId)
     {
         if (!TableExists(con, "attempt_context"))
-            return (null, null, "unknown");
+            return (null, null, "unknown", false, null, false);
         using var cmd = con.CreateCommand();
         cmd.CommandText = "SELECT source_json FROM attempt_context WHERE attempt_id = @id";
         cmd.Parameters.AddWithValue("@id", attemptId);
         string? json = cmd.ExecuteScalar() as string;
         if (string.IsNullOrWhiteSpace(json))
-            return (null, null, "unknown");
+            return (null, null, "unknown", false, null, false);
         try
         {
             using var document = JsonDocument.Parse(json);
@@ -69,11 +75,19 @@ public sealed class AttemptDetailsRepository
             string clientKind = document.RootElement.TryGetProperty("client_kind", out var clientElement)
                 ? clientElement.GetString() ?? "unknown"
                 : "unknown";
-            return (beatmap, media, clientKind);
+            bool recovered = document.RootElement.TryGetProperty("result_recovery", out var recovery)
+                             && recovery.ValueKind == JsonValueKind.Object;
+            string? recoverySource = recovered && recovery.TryGetProperty("source", out var sourceElement)
+                ? sourceElement.GetString()
+                : null;
+            bool simulationCompleted = recovered
+                                       && recovery.TryGetProperty("simulation", out var simulation)
+                                       && simulation.GetString()?.Equals("completed", StringComparison.OrdinalIgnoreCase) == true;
+            return (beatmap, media, clientKind, recovered, recoverySource, simulationCompleted);
         }
         catch (JsonException)
         {
-            return (null, null, "unknown");
+            return (null, null, "unknown", false, null, false);
         }
     }
 
@@ -115,6 +129,93 @@ public sealed class AttemptDetailsRepository
             });
         }
         return result;
+    }
+
+    /// <summary>
+    /// Returns finished attempts which can be overlaid on <paramref name="attemptId"/>.
+    /// Matching the internal beatmap row guarantees the same map and difficulty.
+    /// Candidates must additionally have movement and an identical normalized
+    /// mod/settings signature so their timeline, geometry, judgements and score
+    /// can be compared without mixing different gameplay configurations.
+    /// </summary>
+    public IReadOnlyList<ReplayComparisonSummary> GetComparableAttempts(long attemptId, int limit = 20)
+    {
+        if (!_factory.DatabaseExists)
+            return [];
+
+        using var con = _factory.Open();
+        string primaryModsKey;
+        using (var primary = con.CreateCommand())
+        {
+            primary.CommandText = "SELECT COALESCE(mods_key, 'NM') FROM attempts WHERE id = @id";
+            primary.Parameters.AddWithValue("@id", attemptId);
+            primaryModsKey = primary.ExecuteScalar() as string ?? "NM";
+        }
+        string primarySignature = ReplayComparisonCompatibility.Signature(
+            primaryModsKey,
+            ReadMods(con, attemptId));
+
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = """
+            SELECT a.id, a.started_at, a.outcome, COALESCE(a.mods_key, 'NM'),
+                   a.accuracy, a.score, a.pp, a.combo,
+                   a.n300, a.n100, a.n50, a.misses
+            FROM attempts a
+            WHERE a.beatmap_id = (SELECT beatmap_id FROM attempts WHERE id = @id)
+              AND a.id <> @id
+              AND a.outcome <> 'active'
+              AND EXISTS (
+                  SELECT 1 FROM attempt_movement_chunks movement
+                  WHERE movement.attempt_id = a.id
+              )
+            ORDER BY a.id DESC
+            """;
+        cmd.Parameters.AddWithValue("@id", attemptId);
+
+        using var reader = cmd.ExecuteReader();
+        var candidates = new List<ReplayComparisonSummary>();
+        while (reader.Read())
+        {
+            candidates.Add(new ReplayComparisonSummary(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetDouble(4),
+                reader.GetInt64(5),
+                reader.GetDouble(6),
+                (int)reader.GetInt64(7),
+                (int)reader.GetInt64(8),
+                (int)reader.GetInt64(9),
+                (int)reader.GetInt64(10),
+                (int)reader.GetInt64(11)));
+        }
+
+        reader.Close();
+        int clampedLimit = Math.Clamp(limit, 1, 25);
+        var result = new List<ReplayComparisonSummary>(clampedLimit);
+        foreach (ReplayComparisonSummary candidate in candidates)
+        {
+            string candidateSignature = ReplayComparisonCompatibility.Signature(
+                candidate.ModsKey,
+                ReadMods(con, candidate.Id));
+            if (!string.Equals(primarySignature, candidateSignature, StringComparison.Ordinal))
+                continue;
+
+            result.Add(candidate);
+            if (result.Count == clampedLimit)
+                break;
+        }
+        return result;
+    }
+
+    public IReadOnlyList<JudgementEvent> GetJudgementEvents(long attemptId)
+    {
+        if (!_factory.DatabaseExists)
+            return [];
+
+        using var con = _factory.Open();
+        return ReadEvents(con, attemptId);
     }
 
     private static AttemptDetails? ReadAttemptRow(SqliteConnection con, long attemptId)
@@ -451,3 +552,17 @@ public sealed class AttemptDetailsRepository
         return reader.Read();
     }
 }
+
+public sealed record ReplayComparisonSummary(
+    long Id,
+    string StartedAt,
+    string Outcome,
+    string ModsKey,
+    double Accuracy,
+    long Score,
+    double Pp,
+    int Combo,
+    int N300,
+    int N100,
+    int N50,
+    int Misses);

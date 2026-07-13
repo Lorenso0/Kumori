@@ -10,6 +10,7 @@ public sealed class ReplayViewerThemeTests
     [Theory]
     [InlineData("pulse", "pulse")]
     [InlineData("windows-fluent", "windows-fluent")]
+    [InlineData("custom", "custom")]
     [InlineData("unknown", "refined-kumori")]
     public void ContractNormalisesTheme(string input, string expected)
     {
@@ -30,6 +31,26 @@ public sealed class ReplayViewerThemeTests
         Assert.Equal(Color4Extensions.FromHex("#ff4eb8"), AdvancedAnalyzerColours.Accent);
         AdvancedAnalyzerColours.Configure("unknown");
         Assert.Equal(Color4Extensions.FromHex("#ff2da8"), AdvancedAnalyzerColours.Accent);
+    }
+
+    [Fact]
+    public void CustomPaletteConfiguresAnalyzerSemanticColours()
+    {
+        var colors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PanelBackground"] = "#101112",
+            ["AccentPink"] = "#131415",
+            ["Danger"] = "#161718",
+            ["Warning"] = "#191A1B",
+            ["Success"] = "#1C1D1E",
+        };
+
+        AdvancedAnalyzerColours.Configure("custom", colors);
+
+        Assert.Equal(Color4Extensions.FromHex("#131415"), AdvancedAnalyzerColours.Accent);
+        Assert.Equal(Color4Extensions.FromHex("#161718"), AdvancedAnalyzerColours.Miss);
+        Assert.Equal(Color4Extensions.FromHex("#191A1B"), AdvancedAnalyzerColours.Meh);
+        Assert.Equal(Color4Extensions.FromHex("#1C1D1E"), AdvancedAnalyzerColours.Ok);
     }
 
     private static ViewerContract Contract(string? theme)

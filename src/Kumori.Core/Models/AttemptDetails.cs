@@ -52,6 +52,9 @@ public sealed record AttemptDetails
     public string? LocalBeatmapPath { get; init; }
     public string? LocalMediaDirectory { get; init; }
     public string ClientKind { get; init; } = "unknown";
+    public bool ResultRecoveredFromReplay { get; init; }
+    public string? ResultRecoverySource { get; init; }
+    public bool ResultRecoverySimulationCompleted { get; init; }
 
     /// <summary>
     /// Per-attempt captured map values from attempt_context.beatmap_json, keyed

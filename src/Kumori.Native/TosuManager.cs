@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Kumori.Core;
@@ -23,6 +24,7 @@ public static class TosuManager
     };
     private static readonly object ProcessGate = new();
     private static readonly SemaphoreSlim InstallGate = new(1, 1);
+    private static readonly SemaphoreSlim RestartGate = new(1, 1);
     private static Process? _ownedProcess;
 
     static TosuManager()
@@ -89,7 +91,7 @@ public static class TosuManager
         }
 
         ValidateExecutable(candidatePath);
-        TryVerifyWindowsSignature(candidatePath);
+        ValidateWindowsSignaturePolicy(candidatePath);
 
         var tempExe = Path.Combine(AppPaths.TosuDir, "tosu.new.exe");
         File.Copy(candidatePath, tempExe, overwrite: true);
@@ -180,11 +182,76 @@ public static class TosuManager
         }
     }
 
+    /// <summary>Restarts Kumori's managed tosu process and returns the replacement process.</summary>
+    public static async Task<Process> RestartAsync(CancellationToken cancellationToken = default)
+    {
+        await RestartGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Log.Warning("Restarting tosu after replay-based result recovery");
+            Exception? firstFailure = null;
+            for (var attempt = 1; attempt <= 2; attempt++)
+            {
+                CloseOwned();
+                await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+                var process = await EnsureInstalledAndLaunchAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await WaitForWebSocketAsync(process, cancellationToken).ConfigureAwait(false);
+                    Log.Information("tosu restarted successfully with process id {ProcessId} and a ready websocket", process.Id);
+                    return process;
+                }
+                catch (Exception ex) when (attempt == 1 && ex is not OperationCanceledException)
+                {
+                    firstFailure = ex;
+                    Log.Warning(ex, "tosu restart process was not ready; retrying once");
+                }
+            }
+            throw new InvalidOperationException("tosu did not expose its websocket after two restart attempts.", firstFailure);
+        }
+        finally
+        {
+            RestartGate.Release();
+        }
+    }
+
+    private static async Task WaitForWebSocketAsync(Process process, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
+        Exception? lastError = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (process.HasExited)
+                throw new InvalidOperationException($"tosu exited during restart with code {process.ExitCode}.");
+
+            using var socket = new ClientWebSocket();
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probeCts.CancelAfter(TimeSpan.FromSeconds(1));
+            try
+            {
+                await socket.ConnectAsync(new Uri("ws://127.0.0.1:24051/websocket/v2"), probeCts.Token).ConfigureAwait(false);
+                if (socket.State == WebSocketState.Open)
+                {
+                    socket.Abort();
+                    return;
+                }
+            }
+            catch (Exception ex) when ((ex is WebSocketException or OperationCanceledException) && !cancellationToken.IsCancellationRequested)
+            {
+                lastError = ex;
+            }
+            await Task.Delay(300, cancellationToken).ConfigureAwait(false);
+        }
+        throw new TimeoutException("tosu process started but its websocket did not become ready within 20 seconds.", lastError);
+    }
+
     public static void EnsureEnvironment()
     {
         Directory.CreateDirectory(AppPaths.TosuDir);
         Directory.CreateDirectory(AppPaths.TosuLogDir);
         MoveToolLocalLogs();
+        AppDataOrganizer.PruneLogs(retentionDays: LogRetentionPolicy.ReadConfiguredDays());
         var lines = File.Exists(AppPaths.TosuEnvFile)
             ? File.ReadAllLines(AppPaths.TosuEnvFile).ToList()
             : new List<string>();
@@ -340,6 +407,10 @@ public static class TosuManager
         {
             throw new InvalidOperationException("Downloaded tosu archive did not contain tosu.exe.");
         }
+        if (entry.Length is <= 0 or > MaxDownloadBytes)
+        {
+            throw new InvalidDataException("Downloaded tosu executable exceeds the extraction size limit.");
+        }
         entry.ExtractToFile(destination, overwrite: true);
     }
 
@@ -386,11 +457,36 @@ public static class TosuManager
         return "sha256:" + Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
-    private static bool TryVerifyWindowsSignature(string path)
+    private static void ValidateWindowsSignaturePolicy(string path)
+    {
+        var status = GetWindowsSignatureStatus(path);
+        if (status.Equals("Valid", StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Information("tosu Authenticode signature is valid");
+            return;
+        }
+
+        // Official tosu releases are not consistently Authenticode-signed. A
+        // missing signature therefore uses the already-mandatory GitHub SHA-256
+        // digest policy. An explicitly invalid or untrusted signature is a
+        // stronger signal and must never be installed.
+        if (status.Equals("NotSigned", StringComparison.OrdinalIgnoreCase) ||
+            status.Equals("Unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Warning(
+                "tosu Authenticode status is {Status}; continuing under the verified GitHub SHA-256 digest policy",
+                status);
+            return;
+        }
+
+        throw new InvalidDataException($"Downloaded tosu executable has unacceptable Authenticode status: {status}.");
+    }
+
+    private static string GetWindowsSignatureStatus(string path)
     {
         if (!OperatingSystem.IsWindows())
         {
-            return true;
+            return "Unavailable";
         }
         var command = "$signature=Get-AuthenticodeSignature -LiteralPath $env:KUMORI_TOSU_VERIFY_PATH;$signature.Status.ToString()";
         var start = new ProcessStartInfo
@@ -410,24 +506,24 @@ public static class TosuManager
         if (process is null)
         {
             Log.Warning("Could not start PowerShell for tosu signature validation.");
-            return false;
+            return "Unavailable";
         }
         if (!process.WaitForExit(30_000))
         {
             try { process.Kill(entireProcessTree: true); } catch { }
             Log.Warning("tosu signature validation timed out.");
-            return false;
+            return "Unavailable";
         }
         var stdout = process.StandardOutput.ReadToEnd().Trim();
         var stderr = process.StandardError.ReadToEnd().Trim();
-        if (process.ExitCode != 0 || !string.Equals(stdout, "Valid", StringComparison.OrdinalIgnoreCase))
+        if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(stdout))
         {
             Log.Warning(
                 "tosu signature validation did not report Valid: {Status}",
                 stdout.NullIfEmpty() ?? stderr.NullIfEmpty() ?? "unknown status");
-            return false;
+            return "Unavailable";
         }
-        return true;
+        return stdout;
     }
 
     private static Process? FindManagedProcess()
