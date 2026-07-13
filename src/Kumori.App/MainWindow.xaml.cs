@@ -284,6 +284,8 @@ public partial class MainWindow : Window
 
     private void PerformanceNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Performance");
     private void MapsNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Maps");
+    private void ChangelogNavigation_Click(object sender, RoutedEventArgs e) =>
+        OpenWorkspaceTab(new ChangelogWindow(), "Changelog");
     private void DiscordNavigation_Click(object sender, RoutedEventArgs e)
     {
         try

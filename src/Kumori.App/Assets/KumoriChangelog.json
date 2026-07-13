@@ -1,0 +1,166 @@
+[
+  {
+    "version": "0.3.1",
+    "date": "2026-07-13",
+    "major": [
+      "Added secure in-app updates with download progress, SHA-256 verification, safe executable replacement, rollback, and automatic relaunch"
+    ],
+    "features": [
+      "Added a bundled changelog covering every Kumori release with major, feature, improvement, and fix groups",
+      "Added Changelog actions above Discord in the main navigation and inside Settings & tools",
+      "The latest changelog now opens automatically after Kumori successfully installs an update"
+    ],
+    "improvements": [
+      "Available updates now appear as an in-app prompt as well as a tray notification",
+      "The changelog is maintained in the repository and remains available without an internet connection",
+      "Settings & tools is less cluttered with grouped maintenance, folder, and replay-diagnostic actions plus a separated bottom developer area",
+      "Developer capture, recovery-test, log-retention, and cache-activity controls now live on a dedicated Developer settings page",
+      "Recent stable and lazer replay recoveries made with an older simulation schema are upgraded automatically once"
+    ],
+    "fixes": [
+      "Fixed Settings crashing while loading changelog information",
+      "Fixed the Launch tosu action repeatedly appearing and disappearing when the tracker connection briefly changes",
+      "Corrected replay-recovered accuracy using official simulated score statistics",
+      "Restored exact miss, 100, 50, and slider-break events to the map-pressure graph after replay recovery",
+      "Added updater timeout handling, staged-download verification, failure reporting, and restoration of the previous executable"
+    ]
+  },
+  {
+    "version": "0.3.0",
+    "date": "2026-07-13",
+    "major": [
+      "Replay comparison now overlays a second compatible replay with independently coloured skin cursor, trail, judgement markers, playback controls, and score statistics",
+      "Custom themes now provide live in-app colour editing, previews, import, and export"
+    ],
+    "features": [
+      "Added temporary checksum-validated .osr comparison without saving imported replay data to history",
+      "Added replay-result recovery when tosu gameplay values are unavailable, including accelerated lazer simulation, PP, difficulty, timing, and rich judgement recovery",
+      "Added database backups and staged restore, a built-in Argon Pro fallback skin, developer recovery testing, and cache-addition diagnostics"
+    ],
+    "improvements": [
+      "Kumori now reads osu!lazer Realm resources directly where possible and avoids unnecessary local cache copies",
+      "Replay comparison eligibility now matches gameplay-altering speed, geometry, layout, target-motion, and difficulty-adjustment mods while ignoring visibility-only mods",
+      "Replay comparison, analyzer menus, dashboard sizing, maximized-window bounds, colour picking, and selected-play artwork were refined for readability and responsiveness",
+      "Logs and cache-addition records now share configurable age and size rotation"
+    ],
+    "fixes": [
+      "Prevented watched local, other-player, and autoplay replays from being recorded as new plays",
+      "Fixed backup database locking and themed backup presentation",
+      "Fixed replay comparison crashes, dark recolours, uneven trails, clipped cards, stale menus, and invalid .osr file-picker marshaling",
+      "Fixed missing or deleted replay skins continuing to override the built-in fallback"
+    ]
+  },
+  {
+    "version": "0.2.0",
+    "date": "2026-07-12",
+    "features": [
+      "Published the refreshed Kumori desktop experience with stable and lazer replay support"
+    ],
+    "improvements": [
+      "Rewrote the project documentation and made pressure-graph validation self-contained"
+    ]
+  },
+  {
+    "version": "0.1.9",
+    "date": "2026-07-12",
+    "major": [
+      "Added osu!stable replay capture and recovery alongside osu!lazer"
+    ],
+    "features": [
+      "Added a responsive themed interface and guided first-run onboarding"
+    ],
+    "improvements": [
+      "Optimized osu! companion detection and startup sequencing"
+    ]
+  },
+  {
+    "version": "0.1.8",
+    "date": "2026-07-11",
+    "improvements": [
+      "osu!lazer media is resolved directly from Realm-backed resources instead of being duplicated into Kumori cache"
+    ],
+    "fixes": [
+      "Suppressed watched replay and autoplay sessions so they are not added to play history"
+    ]
+  },
+  {
+    "version": "0.1.7",
+    "date": "2026-07-11",
+    "features": [
+      "Added .osr replay validation against the selected play and beatmap"
+    ],
+    "improvements": [
+      "Expanded tosu diagnostics, replay resilience, companion controls, launch handling, and tracking fallbacks"
+    ],
+    "fixes": [
+      "Fixed PP telemetry, session playtime, and tosu restart after display-mode osu! relaunches"
+    ]
+  },
+  {
+    "version": "0.1.6",
+    "date": "2026-07-11",
+    "features": [
+      "Added replay attempt trends, timing insights, and original beatmap star display"
+    ],
+    "improvements": [
+      "Expanded analyzer overlays, partial playback, event inspection, miss evidence, and navigation controls",
+      "Managed tosu now checks for updates during startup",
+      "Improved dashboard PP, star-rating accuracy, and replay analysis contracts"
+    ],
+    "fixes": [
+      "Corrected Kumori release-page URLs used by update checks"
+    ]
+  },
+  {
+    "version": "0.1.5",
+    "date": "2026-07-10",
+    "major": [
+      "Rebuilt the Replay Analyzer on the official osu! NuGet packages"
+    ],
+    "improvements": [
+      "Hardened tracking and replay persistence and expanded advanced event inspection"
+    ],
+    "fixes": [
+      "Prevented stale play details from remaining visible after selection changes"
+    ]
+  },
+  {
+    "version": "0.1.4",
+    "date": "2026-07-10",
+    "fixes": [
+      "Applied the tracked osu! replay-viewer compatibility patch"
+    ]
+  },
+  {
+    "version": "0.1.3",
+    "date": "2026-07-10",
+    "fixes": [
+      "Handled an empty osu!lazer dependency checkout during replay-viewer bootstrap"
+    ]
+  },
+  {
+    "version": "0.1.2",
+    "date": "2026-07-10",
+    "improvements": [
+      "Pinned and bootstrapped the osu!lazer dependency used by local replay-viewer builds",
+      "Embedded the replay viewer into the single-file Kumori release"
+    ]
+  },
+  {
+    "version": "0.1.1",
+    "date": "2026-07-10",
+    "features": [
+      "Shipped the replay viewer inside the standalone Kumori executable"
+    ]
+  },
+  {
+    "version": "0.1.0",
+    "date": "2026-07-10",
+    "major": [
+      "Initial Kumori release: local osu! play tracking, session history, detailed score inspection, and native replay analysis"
+    ],
+    "features": [
+      "Added dashboard, play history, hit timing, map pressure, replay movement capture, system-tray operation, and GitHub release builds"
+    ]
+  }
+]

@@ -442,6 +442,7 @@
                                          DashboardRequested="DashboardNavigation_Click"
                                          PerformanceRequested="PerformanceNavigation_Click"
                                          MapsRequested="MapsNavigation_Click"
+                                         ChangelogRequested="ChangelogNavigation_Click"
                                          DiscordRequested="DiscordNavigation_Click"
                                          SettingsRequested="SettingsNavigation_Click"
                                          ToggleRequested="NavigationToggle_Click" />
@@ -539,7 +540,7 @@
                                 <MenuItem Header="Setup wizard" Command="{Binding OpenSetupWizardCommand}" />
                                 <MenuItem Header="Skin library" Command="{Binding OpenSkinLibraryCommand}" />
                                 <MenuItem Header="tosu setup" Command="{Binding OpenTosuSetupCommand}" />
-                                <MenuItem Header="Launch tosu" Command="{Binding LaunchTosuCommand}" Visibility="{Binding IsTosuLaunchVisible, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
+                                <MenuItem Header="Launch tosu" Command="{Binding LaunchTosuCommand}" />
                                 <Separator />
                                 <MenuItem Header="Maintenance" IsEnabled="False" />
                                 <MenuItem Header="Health dashboard" Command="{Binding OpenHealthDashboardCommand}" />
@@ -1897,35 +1898,68 @@
         <Grid x:Name="WorkspacePage" Grid.Row="1" Grid.Column="1" Visibility="Collapsed" Margin="16" MaxWidth="1920">
             <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Style="{StaticResource PagePanel}" Padding="10">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <StackPanel>
                         <TextBlock Text="Settings &amp; tools" FontSize="18" FontWeight="SemiBold" Margin="6,4,6,2"/>
-                        <TextBlock Text="Everything stays inside Kumori" Foreground="{DynamicResource Brush.TextMuted}" FontSize="10" TextWrapping="Wrap" Margin="6,0,6,14"/>
+                        <TextBlock Text="Everything stays inside Kumori" Foreground="{DynamicResource Brush.TextMuted}" FontSize="10" TextWrapping="Wrap" Margin="6,0,6,10"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="0,0,0,8">
                         <TextBlock Text="SETTINGS" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
-                        <Button Content="Refresh dashboard" Command="{Binding RefreshCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Appearance &amp; application" Command="{Binding OpenSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Setup wizard" Command="{Binding OpenSetupWizardCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Skin library" Command="{Binding OpenSkinLibraryCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="tosu setup" Command="{Binding OpenTosuSetupCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,12"/>
-                        <Button Content="Launch tosu" Command="{Binding LaunchTosuCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,12" Visibility="{Binding IsTosuLaunchVisible, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"/>
+                        <Button Content="tosu setup" Command="{Binding OpenTosuSetupCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                        <Button Content="Launch tosu" Command="{Binding LaunchTosuCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,10"/>
                         <TextBlock Text="STATUS &amp; MAINTENANCE" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
                         <Button Content="Health dashboard" Command="{Binding OpenHealthDashboardCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Backup &amp; restore" Command="{Binding OpenBackupsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Clear beatmap cache" Command="{Binding ClearBeatmapCacheCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Cleanup invalid attempts" Command="{Binding CleanupInvalidAttemptsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Delete entries before…" Command="{Binding DeleteEntriesBeforeCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Delete all tracking data" Command="{Binding DeleteAllTrackingDataCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Foreground="{DynamicResource Brush.Danger}" Margin="0,0,0,12"/>
+                        <Button Content="Data maintenance…" Click="ActionsButton_Click" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,10">
+                            <Button.ContextMenu>
+                                <ContextMenu Placement="Right">
+                                    <MenuItem Header="Clear beatmap cache" Command="{Binding ClearBeatmapCacheCommand}" />
+                                    <MenuItem Header="Cleanup invalid attempts" Command="{Binding CleanupInvalidAttemptsCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="Delete entries before…" Command="{Binding DeleteEntriesBeforeCommand}" />
+                                    <MenuItem Header="Delete all tracking data" Command="{Binding DeleteAllTrackingDataCommand}" Foreground="{DynamicResource Brush.Danger}" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
                         <TextBlock Text="SUPPORT" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
+                        <Button Content="Changelog" Command="{Binding OpenChangelogCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                        <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Report a problem" Command="{Binding ExportProblemReportCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Open logs" Command="{Binding OpenLogsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Open AppData" Command="{Binding OpenAppDataCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,12"/>
-                        <TextBlock Text="DEVELOPER" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
-                        <Button Content="tosu diagnostics" Command="{Binding OpenTosuDiagnosticsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Lazer frame debug" Command="{Binding OpenLazerFrameDebugCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Stable frame debug" Command="{Binding OpenStableFrameDebugCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left"/>
+                        <Button Content="Open app folders…" Click="ActionsButton_Click" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left">
+                            <Button.ContextMenu>
+                                <ContextMenu Placement="Right">
+                                    <MenuItem Header="Open logs" Command="{Binding OpenLogsCommand}" />
+                                    <MenuItem Header="Open AppData" Command="{Binding OpenAppDataCommand}" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
                     </StackPanel>
-                </ScrollViewer>
+                    </ScrollViewer>
+                    <Border Grid.Row="2" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+                        <StackPanel>
+                            <TextBlock Text="DEVELOPER" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
+                            <Button Content="Developer settings" Command="{Binding OpenDeveloperSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                            <Button Content="tosu diagnostics" Command="{Binding OpenTosuDiagnosticsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                            <Button Content="Replay capture diagnostics…" Click="ActionsButton_Click" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left">
+                                <Button.ContextMenu>
+                                    <ContextMenu Placement="Right">
+                                        <MenuItem Header="Lazer frame debug" Command="{Binding OpenLazerFrameDebugCommand}" />
+                                        <MenuItem Header="Stable frame debug" Command="{Binding OpenStableFrameDebugCommand}" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Border>
             <Border Grid.Column="2" Style="{StaticResource PagePanel}" Padding="0" ClipToBounds="True">
                 <Grid>

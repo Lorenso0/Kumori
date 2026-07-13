@@ -415,58 +415,6 @@
                     </StackPanel>
                 </Border>
 
-                <Border Style="{StaticResource SettingsCard}">
-                    <StackPanel>
-                        <TextBlock Text="Developer" Style="{StaticResource SettingsTitle}" />
-                        <TextBlock Text="Diagnostic capture options intended for tracker development and debugging." Style="{StaticResource SettingsHint}" />
-                        <CheckBox x:Name="PacketRecordingEnabled" Content="Record raw tosu packet fixtures" />
-                        <TextBlock Text="Writes every raw tosu WebSocket packet to timestamped JSONL fixture files. Leave this disabled during normal use because recordings can consume significant disk space."
-                                   Style="{StaticResource Text.Muted}"
-                                   FontSize="10"
-                                   TextWrapping="Wrap"
-                                   Margin="16,-2,0,0" />
-                        <Separator Margin="0,12,0,12" />
-                        <CheckBox x:Name="ForceReplayRecoveryNextPlay"
-                                  Content="Test replay recovery on the next completed play" />
-                        <TextBlock Text="One shot: Kumori will deliberately discard the next completed play's tosu result values, recover them from its local replay, restart tosu, and refresh the dashboard. It switches off automatically. Use a short test map and allow up to two minutes for the local replay to appear; if osu! does not save a matching replay, that test entry will remain incomplete."
-                                   Style="{StaticResource Text.Muted}"
-                                   FontSize="10"
-                                   TextWrapping="Wrap"
-                                   Margin="16,-2,0,0" />
-                        <Separator Margin="0,12,0,12" />
-                        <TextBlock Text="Log rotation and retention" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
-                        <TextBlock Text="Applies recursively to app, crash, replay viewer, tosu, cache-addition, legacy, and helper-tool logs. Plain logs also rotate at 10 MB."
-                                   Style="{StaticResource SettingsHint}" Margin="0,3,0,6" TextWrapping="Wrap" />
-                        <WrapPanel Margin="0,0,0,12">
-                            <TextBlock Text="Keep logs for" Style="{StaticResource SettingsLabel}" Margin="0,7,8,0" />
-                            <TextBox x:Name="LogRetentionDays" Width="70" Margin="0,0,8,0" />
-                            <TextBlock Text="days" Style="{StaticResource SettingsLabel}" Margin="0,7,0,0" />
-                        </WrapPanel>
-                        <TextBlock Text="Cache additions" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
-                        <TextBlock Text="Inspect why Kumori added or installed each local cache item. Newest entries appear first."
-                                   Style="{StaticResource SettingsHint}" Margin="0,3,0,6" />
-                        <TextBlock x:Name="CacheActivityPath" Style="{StaticResource Text.Muted}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
-                        <Grid Height="190" Margin="0,0,0,8">
-                            <ListBox x:Name="CacheActivityList">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
-                                            <TextBlock Text="{Binding Reason}" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" Margin="0,2,0,0" />
-                                            <TextBlock Text="{Binding Details}" Foreground="{DynamicResource Brush.TextMuted}" FontSize="10" Margin="0,3,0,0" />
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                            <TextBlock x:Name="CacheActivityEmpty" Text="No cache additions have been recorded yet." Style="{StaticResource Text.Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
-                        </Grid>
-                        <WrapPanel>
-                            <Button Content="Refresh" Click="RefreshCacheLog_Click" Margin="0,0,8,8" />
-                            <Button Content="Open cache-additions.jsonl" Click="OpenCacheLog_Click" Margin="0,0,8,8" />
-                            <Button Content="Open cache folder" Click="OpenCacheFolder_Click" Margin="0,0,0,8" />
-                        </WrapPanel>
-                    </StackPanel>
-                </Border>
             </StackPanel>
         </ScrollViewer>
 

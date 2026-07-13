@@ -29,7 +29,7 @@
                 <RowDefinition Height="0" />
                 <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                <RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                <RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <Button Grid.Row="0" Visibility="Collapsed" Click="Toggle_Click" Style="{StaticResource NavigationButton}" Margin="0,0,0,8" ToolTip="Expand or collapse navigation">
@@ -55,7 +55,14 @@
                     <TextBlock Grid.Column="1" Text="Collapse" Style="{StaticResource NavigationLabel}" FontWeight="Normal" Foreground="{DynamicResource Brush.TextMuted}"/>
                 </Grid>
             </Button>
-            <Button Grid.Row="9" Click="Discord_Click" Style="{StaticResource NavigationButton}" ToolTip="Join the Kumori Discord">
+            <Button Grid.Row="9" Click="Changelog_Click" Style="{StaticResource NavigationButton}" ToolTip="Changelog">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="Changelog" Style="{StaticResource NavigationLabel}"/>
+                </Grid>
+            </Button>
+            <Button Grid.Row="10" Click="Discord_Click" Style="{StaticResource NavigationButton}" ToolTip="Join the Kumori Discord">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Viewbox Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -65,7 +72,7 @@
                     <TextBlock Grid.Column="1" Text="Discord" Style="{StaticResource NavigationLabel}"/>
                 </Grid>
             </Button>
-            <Button x:Name="SettingsButton" Grid.Row="10" Click="Settings_Click" Style="{StaticResource NavigationButton}" ToolTip="Settings"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Settings" Style="{StaticResource NavigationLabel}"/></Grid></Button>
+            <Button x:Name="SettingsButton" Grid.Row="11" Click="Settings_Click" Style="{StaticResource NavigationButton}" ToolTip="Settings"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Settings" Style="{StaticResource NavigationLabel}"/></Grid></Button>
         </Grid>
     </Border>
 </UserControl>

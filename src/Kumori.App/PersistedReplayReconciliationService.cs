@@ -74,7 +74,8 @@ internal sealed class PersistedReplayReconciliationService
                      .Select(file => file.Path))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!StableReplayFrameRecoverySink.TryRead(replay, beatmapPath, candidate.Checksum, out var samples))
+            if (!StableReplayFrameRecoverySink.TryRead(
+                    replay, beatmapPath, candidate.Checksum, out var samples, out var replayResult))
                 continue;
             var existing = movementRepository.GetMetadata(candidate.AttemptId);
             if (existing is { SampleCount: > 0 } && existing.Source is "stable_memory" or "stable_live")
@@ -88,7 +89,20 @@ internal sealed class PersistedReplayReconciliationService
                     status.ComparisonSummary = comparison.Summary;
                 });
             }
-            Store(candidate.AttemptId, samples, "stable_replay", replay, "Data/r reconciliation");
+            ReplayResultRecoveryOutcome recovery = resultRecovery.Apply(candidate.AttemptId, replayResult, "stable_replay_reconciliation");
+            if (!candidate.MovementSource.Equals("stable_replay", StringComparison.OrdinalIgnoreCase))
+                Store(candidate.AttemptId, samples, "stable_replay", replay, "Data/r reconciliation");
+            if (recovery.Applied || candidate.NeedsResultResimulation)
+            {
+                resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+                    candidate.AttemptId,
+                    recovery,
+                    replay,
+                    beatmapPath,
+                    Path.GetDirectoryName(beatmapPath),
+                    null,
+                    samples));
+            }
             return;
         }
     }
@@ -105,8 +119,9 @@ internal sealed class PersistedReplayReconciliationService
                     replay, beatmap.BeatmapPath, candidate.Checksum, out var samples, out var replayResult))
                 continue;
             ReplayResultRecoveryOutcome recovery = resultRecovery.Apply(candidate.AttemptId, replayResult, "lazer_replay_reconciliation");
-            Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation");
-            if (recovery.Applied)
+            if (!candidate.MovementSource.Equals("lazer_replay", StringComparison.OrdinalIgnoreCase))
+                Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation");
+            if (recovery.Applied || candidate.NeedsResultResimulation)
             {
                 resultRecovered?.Invoke(new ReplayResultRecoveryContext(
                     candidate.AttemptId,
@@ -153,9 +168,8 @@ internal sealed class PersistedReplayReconciliationService
             LEFT JOIN attempt_movement m ON m.attempt_id = a.id
             WHERE a.outcome <> 'active'
               AND a.started_at >= @cutoff
-              AND COALESCE(m.source, '') IN ('', 'stable_memory', 'stable_live', 'lazer_memory', 'lazer_replay_frame')
             ORDER BY a.id DESC
-            LIMIT 200
+            LIMIT 1000
             """;
         command.Parameters.AddWithValue("@cutoff", DateTimeOffset.UtcNow.AddDays(-14).ToString("O", CultureInfo.InvariantCulture));
         using var reader = command.ExecuteReader();
@@ -171,11 +185,16 @@ internal sealed class PersistedReplayReconciliationService
                 string client = Property(source.RootElement, "client_kind") ?? "unknown";
                 string? beatmapPath = Property(source.RootElement, "beatmap_path");
                 string? gameFolder = Property(source.RootElement, "game_folder");
+                string movementSource = reader.GetString(8);
+                bool needsResultResimulation = NeedsCurrentResultSimulation(source.RootElement);
+                bool needsMovementRecovery = movementSource is "" or "stable_memory" or "stable_live" or "lazer_memory" or "lazer_replay_frame";
+                if (!needsMovementRecovery && !needsResultResimulation)
+                    continue;
                 string checksum = reader.GetString(3);
                 if (string.IsNullOrWhiteSpace(checksum)) continue;
                 result.Add(new Candidate(reader.GetInt64(0), started, ended, checksum,
                     reader.GetInt64(4), reader.GetInt64(5), reader.GetString(6), client,
-                    beatmapPath, gameFolder));
+                    beatmapPath, gameFolder, movementSource, needsResultResimulation));
             }
             catch (JsonException) { }
         }
@@ -210,7 +229,19 @@ internal sealed class PersistedReplayReconciliationService
     private static string? Property(JsonElement element, string name)
         => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
+    internal static bool NeedsCurrentResultSimulation(JsonElement source)
+    {
+        if (!source.TryGetProperty("result_recovery", out var recovery)
+            || !recovery.TryGetProperty("reason", out var reason)
+            || !string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal))
+            return false;
+
+        return !recovery.TryGetProperty("simulation_schema", out var schema)
+               || !schema.TryGetInt32(out int version)
+               || version < 2;
+    }
+
     private sealed record Candidate(long AttemptId, DateTimeOffset StartedAt, DateTimeOffset EndedAt,
         string Checksum, long BeatmapId, long BeatmapSetId, string Difficulty, string ClientKind,
-        string? BeatmapPath, string? GameFolder);
+        string? BeatmapPath, string? GameFolder, string MovementSource, bool NeedsResultResimulation);
 }

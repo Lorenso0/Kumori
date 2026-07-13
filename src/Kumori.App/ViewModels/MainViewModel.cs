@@ -55,7 +55,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _tosuChipColor = "#FF4F7B";
     [ObservableProperty] private bool _isUpdateAvailable;
     [ObservableProperty] private string _updateAvailableText = "Update available";
-    [ObservableProperty] private bool _isTosuLaunchVisible = true;
+    [ObservableProperty] private bool _canStartTosu = true;
     [ObservableProperty] private bool _isLaunchingTosu;
     [ObservableProperty] private bool _isReplayAnalyzerLoading;
     [ObservableProperty] private string _replayAnalyzerLoadingText = "";
@@ -148,11 +148,11 @@ public partial class MainViewModel : ObservableObject
     public bool IsThumbnailArtwork => SelectedArtworkMode == "Thumbnail cards";
     public string ResultsText => $"{Attempts.Count:N0} results";
     public string ResultsShortText => $"{Attempts.Count:N0}";
-    public bool CanLaunchTosu => IsTosuLaunchVisible && !IsLaunchingTosu;
+    public bool CanLaunchTosu => CanStartTosu && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.3.0"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.3.1"}";
 
-    partial void OnIsTosuLaunchVisibleChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
+    partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
 
     partial void OnSelectedAttemptChanged(AttemptRowViewModel? value)
@@ -439,6 +439,12 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void OpenDeveloperSettings()
+    {
+        OpenInWorkspace(new DeveloperSettingsWindow(_settings), "Developer settings");
+    }
+
+    [RelayCommand]
     private void OpenSettings()
     {
         OpenInWorkspace(new SettingsWindow(_settings), "Settings");
@@ -460,6 +466,12 @@ public partial class MainViewModel : ObservableObject
     private void CheckForUpdates()
     {
         OpenInWorkspace(new UpdateCheckWindow(), "Updates");
+    }
+
+    [RelayCommand]
+    private void OpenChangelog()
+    {
+        OpenInWorkspace(new ChangelogWindow(), "Changelog");
     }
 
     [RelayCommand]
@@ -1007,7 +1019,7 @@ public partial class MainViewModel : ObservableObject
                     HealthLevel.Error => "#FF4F7B",
                     _ => "#A86C9E",
                 };
-            IsTosuLaunchVisible = !tracking.TosuConnected;
+            CanStartTosu = !tracking.TosuConnected;
             IsUpdateAvailable = state.ApplicationUpdate.IsAvailable;
             UpdateAvailableText = string.IsNullOrWhiteSpace(state.ApplicationUpdate.Version)
                 ? "Update available"

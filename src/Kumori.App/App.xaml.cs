@@ -47,6 +47,9 @@ public partial class App : Application
     private bool? _trayDualModeToggleEnabled;
     private bool _exitRequested;
     private bool _shutdownCleanupCompleted;
+    private KumoriUpdateResult? _pendingUpdatePrompt;
+    private string? _promptedUpdateVersion;
+    private bool _updatePromptOpen;
     private readonly object _osuCompanionGate = new();
     private readonly CancellationTokenSource _backgroundCts = new();
     private readonly object _backgroundGate = new();
@@ -55,6 +58,13 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (KumoriUpdateInstaller.TryRunUpdater(e.Args))
+        {
+            Shutdown();
+            return;
+        }
+        KumoriUpdateInstaller.CleanupStaleFiles();
 
         _singleInstance = new SingleInstance();
         if (!_singleInstance.IsPrimaryInstance)
@@ -114,8 +124,24 @@ public partial class App : Application
 
         // Shell first — no data work before first paint.
         _mainWindow = new MainWindow(viewModel, settings);
+        _mainWindow.StateChanged += (_, _) => ScheduleAvailableUpdatePrompt();
+        _mainWindow.IsVisibleChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         _mainWindow.Show();
         await Dispatcher.Yield(DispatcherPriority.Loaded);
+        TrackBackground(Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), _backgroundCts.Token);
+            KumoriUpdateInstaller.CleanupStaleFiles();
+        }, _backgroundCts.Token), "stale updater cleanup");
+        if (KumoriUpdateInstaller.ConsumeFailure() is { } updateFailure)
+        {
+            _ = Dispatcher.InvokeAsync(() => KumoriDialog.Show(
+                _mainWindow,
+                updateFailure,
+                "Update was not installed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error), DispatcherPriority.ContextIdle);
+        }
         // Establish and migrate the application-owned schema after first paint,
         // even when live tracking is disabled, so application-owned schema
         // migrations are always applied consistently.
@@ -129,6 +155,12 @@ public partial class App : Application
             {
                 _mainWindow.OpenOnboarding(new WelcomeWindow(settings, store));
             }, DispatcherPriority.ContextIdle);
+        }
+        if (e.Args.Any(argument => string.Equals(argument, "--show-changelog", StringComparison.Ordinal)))
+        {
+            _ = Dispatcher.InvokeAsync(
+                () => _mainWindow.OpenWorkspaceTab(new ChangelogWindow(), "Changelog"),
+                DispatcherPriority.ContextIdle);
         }
 
         _tray = new TrayIconService(
@@ -464,6 +496,7 @@ public partial class App : Application
             {
                 _tray?.ShowUpdateNotification(result.LatestTag);
                 Log.Information("Kumori update {Version} is available at {Url}", result.LatestTag, result.ReleaseUrl);
+                QueueAvailableUpdatePrompt(result);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -495,6 +528,97 @@ public partial class App : Application
         }
         _mainWindow.Show();
         _mainWindow.Activate();
+        ScheduleAvailableUpdatePrompt();
+    }
+
+    private void QueueAvailableUpdatePrompt(KumoriUpdateResult update)
+    {
+        if (string.Equals(_promptedUpdateVersion, update.LatestTag, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        _pendingUpdatePrompt = update;
+        ScheduleAvailableUpdatePrompt();
+    }
+
+    private void ScheduleAvailableUpdatePrompt()
+    {
+        if (_pendingUpdatePrompt is null || _updatePromptOpen || _exitRequested)
+        {
+            return;
+        }
+        _ = Dispatcher.InvokeAsync(TryShowAvailableUpdatePrompt, DispatcherPriority.ContextIdle);
+    }
+
+    private void TryShowAvailableUpdatePrompt()
+    {
+        if (_pendingUpdatePrompt is not { } update ||
+            _updatePromptOpen ||
+            _exitRequested ||
+            _mainWindow is not { IsVisible: true } owner ||
+            owner.WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        _pendingUpdatePrompt = null;
+        _promptedUpdateVersion = update.LatestTag;
+        _updatePromptOpen = true;
+        try
+        {
+            var prompt = new UpdateAvailableWindow(update) { Owner = owner };
+            prompt.ShowDialog();
+            if (prompt.SelectedAction == UpdateAvailableAction.ViewRelease)
+            {
+                OpenAvailableUpdate(update.ReleaseUrl);
+            }
+            else if (prompt.SelectedAction == UpdateAvailableAction.Install && prompt.StagedUpdate is { } staged)
+            {
+                BeginUpdateShutdown(staged);
+            }
+        }
+        finally
+        {
+            _updatePromptOpen = false;
+        }
+    }
+
+    private void BeginUpdateShutdown(StagedKumoriUpdate update)
+    {
+        try
+        {
+            KumoriUpdateInstaller.LaunchUpdater(update);
+        }
+        catch (Exception ex)
+        {
+            KumoriUpdateInstaller.Discard(update);
+            KumoriUpdateInstaller.CleanupStaleFiles();
+            Log.Warning(ex, "Could not launch the Kumori updater");
+            KumoriDialog.Show(
+                _mainWindow,
+                $"The update was downloaded and verified, but the updater could not start.\n\n{ex.Message}",
+                "Update could not start",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
+        _exitRequested = true;
+        if (_mainWindow is not null)
+        {
+            _mainWindow.ForceClose = true;
+        }
+        var statusWindow = new ShutdownStatusWindow();
+        if (_mainWindow?.IsVisible == true)
+        {
+            statusWindow.Owner = _mainWindow;
+            statusWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        }
+        statusWindow.Show();
+        statusWindow.UpdateStatus($"Installing Kumori {update.Version}...");
+        Dispatcher.BeginInvoke(
+            new Action(() => _ = ShutdownFromTrayAsync(statusWindow)),
+            DispatcherPriority.ContextIdle);
     }
 
     private void InstallCrashHandlers()

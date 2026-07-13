@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -43,7 +42,6 @@ public partial class SettingsWindow : Window
         IntegratedColorPicker.ColourChanged += Picker_ColourChanged;
         IntegratedColorPicker.CloseRequested += () => CustomColorPickerPopup.IsOpen = false;
         LoadValues();
-        RefreshCacheActivity();
         _loading = false;
         Closed += (_, _) =>
         {
@@ -64,9 +62,6 @@ public partial class SettingsWindow : Window
     {
         var s = _settings.Current;
         TrackingEnabled.IsChecked = s.Tracking.Enabled;
-        PacketRecordingEnabled.IsChecked = s.Tracking.PacketRecordingEnabled;
-        ForceReplayRecoveryNextPlay.IsChecked = s.Developer.ForceReplayRecoveryNextPlay;
-        LogRetentionDays.Text = s.Developer.LogRetentionDays.ToString(CultureInfo.InvariantCulture);
         RetentionDays.Text = s.Tracking.RetentionDays.ToString(CultureInfo.InvariantCulture);
         LazerReplayFrameEnabled.IsChecked = s.Capture.LazerReplayFrameEnabled;
         OtdPath.Text = s.OpenTabletDriver.InstallPath;
@@ -118,8 +113,7 @@ public partial class SettingsWindow : Window
     {
         if (!int.TryParse(RetentionDays.Text, out var retention)
             || !int.TryParse(BackupInterval.Text, out var backupInterval)
-            || !int.TryParse(BackupRetention.Text, out var backupRetention)
-            || !int.TryParse(LogRetentionDays.Text, out var logRetentionDays))
+            || !int.TryParse(BackupRetention.Text, out var backupRetention))
         {
             ErrorText.Text = "Check numeric values.";
             return;
@@ -132,9 +126,6 @@ public partial class SettingsWindow : Window
         _settings.Update(s =>
         {
             s.Tracking.Enabled = TrackingEnabled.IsChecked == true;
-            s.Tracking.PacketRecordingEnabled = PacketRecordingEnabled.IsChecked == true;
-            s.Developer.ForceReplayRecoveryNextPlay = ForceReplayRecoveryNextPlay.IsChecked == true;
-            s.Developer.LogRetentionDays = LogRetentionPolicy.NormalizeDays(logRetentionDays);
             s.Tracking.RetentionDays = Math.Max(0, retention);
             s.Capture.LazerReplayFrameEnabled = LazerReplayFrameEnabled.IsChecked == true;
             s.OpenTabletDriver.InstallPath = OtdPath.Text.Trim();
@@ -154,8 +145,6 @@ public partial class SettingsWindow : Window
             s.Backup.RetentionCount = Math.Clamp(backupRetention, 1, 365);
             s.Backup.Directory = BackupDirectory.Text.Trim();
         });
-        CacheActivityLog.ConfigureRotationDays(_settings.Current.Developer.LogRetentionDays);
-        AppDataOrganizer.PruneLogs(retentionDays: _settings.Current.Developer.LogRetentionDays);
         _themes?.Apply(SelectedThemeId, persist: false);
         try
         {
@@ -455,71 +444,6 @@ public partial class SettingsWindow : Window
         SkinLibraryService.DeleteImported(path);
         SkinPath.Text = "";
         ErrorText.Text = "Imported skin deleted.";
-    }
-
-    private void RefreshCacheLog_Click(object sender, RoutedEventArgs e) => RefreshCacheActivity();
-
-    private void OpenCacheLog_Click(object sender, RoutedEventArgs e)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.CacheActivityLog)!);
-        if (!File.Exists(AppPaths.CacheActivityLog))
-            File.WriteAllText(AppPaths.CacheActivityLog, string.Empty);
-
-        var start = new ProcessStartInfo("notepad.exe") { UseShellExecute = true };
-        start.ArgumentList.Add(AppPaths.CacheActivityLog);
-        Process.Start(start);
-    }
-
-    private void OpenCacheFolder_Click(object sender, RoutedEventArgs e)
-    {
-        Directory.CreateDirectory(AppPaths.CacheDir);
-        Process.Start(new ProcessStartInfo(AppPaths.CacheDir) { UseShellExecute = true });
-    }
-
-    private void RefreshCacheActivity()
-    {
-        CacheActivityPath.Text = AppPaths.CacheActivityLog;
-        var rows = CacheActivityLog.ReadRecent(30)
-            .Select(entry => new CacheActivityRow(entry))
-            .ToArray();
-        CacheActivityList.ItemsSource = rows;
-        CacheActivityEmpty.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private sealed class CacheActivityRow(CacheActivityEntry entry)
-    {
-        public string Title => entry.BeatmapId is { } beatmapId
-            ? $"Beatmap {beatmapId} · {entry.FileName}"
-            : entry.FileName;
-
-        public string Reason => !string.IsNullOrWhiteSpace(entry.Reason)
-            ? entry.Reason
-            : FriendlyReason(entry.Source);
-
-        public string Details => $"{entry.TimestampUtc.ToLocalTime():dd MMM yyyy HH:mm:ss} · {entry.Source} · {FormatBytes(entry.Bytes)}";
-
-        private static string FriendlyReason(string source) => source switch
-        {
-            "local-beatmap" => "Copied the beatmap definition from the local osu! installation.",
-            "local-beatmap-media" => "Copied media required by the cached beatmap and replay viewer.",
-            "beatmap-manifest" => "Created the media manifest that lets Kumori reopen this cached map.",
-            "osu-lazer-hardlink" or "osu-lazer-symlink" => "Linked an existing osu!lazer file without duplicating its contents.",
-            "embedded-replay-viewer" => "Installed a bundled replay-viewer runtime file.",
-            "tosu-memory-offsets" => "Cached the current osu!lazer memory layout used for replay-frame capture.",
-            _ when source.StartsWith("mirror:", StringComparison.OrdinalIgnoreCase) => "Downloaded media that was unavailable from the local osu! installation.",
-            _ => "Added by a Kumori cache or runtime component.",
-        };
-
-        private static string FormatBytes(long? bytes)
-        {
-            if (bytes is null)
-                return "size unavailable";
-            if (bytes < 1024)
-                return $"{bytes} B";
-            if (bytes < 1024 * 1024)
-                return $"{bytes / 1024d:0.0} KB";
-            return $"{bytes / 1_048_576d:0.0} MB";
-        }
     }
 
     private sealed class CustomColorRow : INotifyPropertyChanged

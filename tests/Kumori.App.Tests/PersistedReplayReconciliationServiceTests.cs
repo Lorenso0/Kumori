@@ -13,4 +13,16 @@ public sealed class PersistedReplayReconciliationServiceTests
 
         Assert.Equal(expected, PersistedReplayReconciliationService.ReplayFileTime(path));
     }
+
+    [Theory]
+    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation\":\"completed\"}}", true)]
+    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":1}}", true)]
+    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":2}}", false)]
+    [InlineData("{}", false)]
+    public void Detects_result_recoveries_that_need_current_simulation_schema(string json, bool expected)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+
+        Assert.Equal(expected, PersistedReplayReconciliationService.NeedsCurrentResultSimulation(document.RootElement));
+    }
 }

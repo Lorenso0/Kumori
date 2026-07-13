@@ -1,0 +1,131 @@
+<Window x:Class="Kumori.App.UpdateAvailableWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Kumori update available"
+        Width="480"
+        SizeToContent="Height"
+        MinWidth="420"
+        MaxWidth="560"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        Background="{DynamicResource Brush.AppBackground}"
+        Foreground="{DynamicResource Brush.TextPrimary}"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+    <Border Background="{DynamicResource Brush.CardBackground}"
+            BorderBrush="{DynamicResource Brush.SubtleBorder}"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource Radius.ThemeCard}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Background="{DynamicResource Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                    BorderThickness="0,0,0,1"
+                    CornerRadius="4,4,0,0">
+                <Grid>
+                    <TextBlock Text="Kumori update"
+                               Margin="12,0,42,0"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="SemiBold" />
+                    <Button x:Name="CloseButton"
+                            Content="x"
+                            Width="28"
+                            MinHeight="24"
+                            Padding="0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Margin="0,0,4,0"
+                            Click="Later_Click"
+                            Style="{StaticResource Button.Icon}"
+                            ToolTip="Later" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" Margin="22,22,22,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="48" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Width="34"
+                        Height="34"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
+                        Background="{DynamicResource Brush.ControlBackground}"
+                        BorderBrush="{DynamicResource Brush.AccentPink}"
+                        BorderThickness="1"
+                        CornerRadius="17">
+                    <TextBlock Text="&#8595;"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               Foreground="{DynamicResource Brush.AccentPink}" />
+                </Border>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="A new version is ready"
+                               FontSize="18"
+                               FontWeight="SemiBold" />
+                    <Border HorizontalAlignment="Left"
+                            Margin="0,8,0,0"
+                            Padding="9,4"
+                            Background="{DynamicResource Brush.CardSelectedBackground}"
+                            BorderBrush="{DynamicResource Brush.AccentPink}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                        <TextBlock x:Name="VersionText"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Brush.AccentPink}" />
+                    </Border>
+                    <TextBlock x:Name="DescriptionText"
+                               Margin="0,12,0,0"
+                               Foreground="{DynamicResource Brush.TextSecondary}"
+                               FontSize="12"
+                               TextWrapping="Wrap"
+                               LineHeight="18" />
+                    <TextBlock x:Name="InstallHintText"
+                               Margin="0,8,0,0"
+                               Foreground="{DynamicResource Brush.TextMuted}"
+                               FontSize="10"
+                               TextWrapping="Wrap" />
+                    <StackPanel x:Name="ProgressPanel" Margin="0,16,0,0" Visibility="Collapsed">
+                        <ProgressBar x:Name="DownloadProgress"
+                                     Height="5"
+                                     Minimum="0"
+                                     Maximum="100"
+                                     Foreground="{DynamicResource Brush.AccentPink}"
+                                     Background="{DynamicResource Brush.ControlBackground}" />
+                        <TextBlock x:Name="ProgressText"
+                                   Margin="0,7,0,0"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   FontSize="11" />
+                    </StackPanel>
+                    <TextBlock x:Name="ErrorText"
+                               Margin="0,12,0,0"
+                               Foreground="{DynamicResource Brush.Danger}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Visibility="Collapsed" />
+                </StackPanel>
+            </Grid>
+
+            <Border Grid.Row="2"
+                    Background="{DynamicResource Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                    BorderThickness="0,1,0,0"
+                    Padding="20,12">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="LaterButton" Content="Later" Click="Later_Click" MinWidth="78" />
+                    <Button x:Name="ReleaseButton" Content="View release" Click="Release_Click" MinWidth="96" Margin="8,0,0,0" />
+                    <Button x:Name="InstallButton" Content="Install update" Click="Install_Click" MinWidth="106" Margin="8,0,0,0" Style="{StaticResource Button.Primary}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

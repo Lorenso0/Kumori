@@ -41,7 +41,8 @@ public partial class UpdateCheckWindow : Window
 
                 {availability}
 
-                Kumori notifies you about new releases but does not install them automatically.
+                Published builds can download, verify, install, and relaunch from the automatic update prompt.
+                You can also use Open releases to download manually.
                 """;
         }
         catch (Exception ex)

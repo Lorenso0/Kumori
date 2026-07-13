@@ -124,7 +124,7 @@ public sealed class ReplayViewerContractService
                 ?? throw new InvalidDataException("Replay simulation result was empty.");
             if (prepared.Summary is null)
                 throw new InvalidDataException("Replay simulation did not return a result summary.");
-            return prepared.Summary;
+            return prepared.Summary with { Judgements = prepared.Judgements };
         }
         finally
         {
@@ -688,6 +688,11 @@ public sealed class ReplayViewerContractService
 
 public sealed record ReplaySimulationResult
 {
+    public int N300 { get; init; }
+    public int N100 { get; init; }
+    public int N50 { get; init; }
+    public int Misses { get; init; }
+    public double Accuracy { get; init; }
     public int SliderBreaks { get; init; }
     public int LargeTickHits { get; init; }
     public int LargeTickMisses { get; init; }
@@ -717,6 +722,16 @@ public sealed record ReplaySimulationResult
     public int CircleCount { get; init; }
     public int SliderCount { get; init; }
     public int SpinnerCount { get; init; }
+    public IReadOnlyList<ReplaySimulationJudgement> Judgements { get; init; } = [];
+}
+
+public sealed record ReplaySimulationJudgement
+{
+    public int Kind { get; init; }
+    public double EventTime { get; init; }
+    public double RootStartTime { get; init; }
+    public double ObjectStartTime { get; init; }
+    public double TimeOffset { get; init; }
 }
 
 internal sealed record PreparedRecoveryAnalysis
@@ -724,4 +739,5 @@ internal sealed record PreparedRecoveryAnalysis
     public int Version { get; init; }
     public long AttemptId { get; init; }
     public ReplaySimulationResult? Summary { get; init; }
+    public IReadOnlyList<ReplaySimulationJudgement> Judgements { get; init; } = [];
 }

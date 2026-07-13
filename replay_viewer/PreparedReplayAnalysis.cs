@@ -9,7 +9,7 @@ internal sealed record PreparedReplayAnalysis(
     IReadOnlyList<PreparedReplayFrame> Frames,
     PreparedReplaySimulationSummary? Summary = null)
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     public static string PathFor(string contractPath) => contractPath + ".analysis.json";
 
@@ -33,6 +33,11 @@ internal sealed record PreparedReplayAnalysis(
 }
 
 internal sealed record PreparedReplaySimulationSummary(
+    int N300,
+    int N100,
+    int N50,
+    int Misses,
+    double Accuracy,
     int SliderBreaks,
     int LargeTickHits,
     int LargeTickMisses,

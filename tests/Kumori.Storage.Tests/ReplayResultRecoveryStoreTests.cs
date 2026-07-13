@@ -196,6 +196,11 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
 
         var outcome = store.ApplySimulation(id, new ReplaySimulationResult
         {
+            N300 = 80,
+            N100 = 10,
+            N50 = 2,
+            Misses = 8,
+            Accuracy = 83.6666667,
             SliderBreaks = 2,
             LargeTickHits = 40,
             LargeTickMisses = 3,
@@ -225,6 +230,11 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
             CircleCount = 300,
             SliderCount = 200,
             SpinnerCount = 3,
+            Judgements =
+            [
+                new ReplaySimulationJudgement { Kind = 0, RootStartTime = 50_000, ObjectStartTime = 50_000, EventTime = 50_120, TimeOffset = 120 },
+                new ReplaySimulationJudgement { Kind = 2, RootStartTime = 60_000, ObjectStartTime = 60_000, EventTime = 60_040, TimeOffset = 40 },
+            ],
         });
 
         Assert.True(outcome.Applied);
@@ -285,6 +295,14 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
         Assert.Equal(6.34, details.AdjustedStars!.Value, 4);
         Assert.Equal(10.33, details.CapturedDifficulty["ar"].Converted!.Value, 4);
         Assert.Equal(270, details.CapturedDifficulty["bpm"].Converted!.Value, 4);
+        Assert.Equal(80, details.N300);
+        Assert.Equal(10, details.N100);
+        Assert.Equal(2, details.N50);
+        Assert.Equal(8, details.Summary.Misses);
+        Assert.Equal(83.6666667, details.Summary.Accuracy, 4);
+        Assert.Equal(2, details.Events.Count);
+        Assert.Contains(details.Events, entry => entry.EventType == "miss" && entry.MapTimeMs == 50_000);
+        Assert.Contains(details.Events, entry => entry.EventType == "hit_100" && entry.MapTimeMs == 60_000);
 
         using var ppBest = con.CreateCommand();
         ppBest.CommandText = "SELECT value FROM personal_bests WHERE metric='pp'";

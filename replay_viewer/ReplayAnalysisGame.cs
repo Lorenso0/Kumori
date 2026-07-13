@@ -309,6 +309,11 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         double bpm = beatLength > 0 ? 60000 / beatLength : 0;
 
         return new PreparedReplaySimulationSummary(
+            score.Statistics.GetValueOrDefault(HitResult.Great),
+            score.Statistics.GetValueOrDefault(HitResult.Ok),
+            score.Statistics.GetValueOrDefault(HitResult.Meh),
+            score.Statistics.GetValueOrDefault(HitResult.Miss),
+            score.Accuracy * 100,
             resultCounts.GetValueOrDefault(HitResult.ComboBreak),
             resultCounts.GetValueOrDefault(HitResult.LargeTickHit),
             resultCounts.GetValueOrDefault(HitResult.LargeTickMiss),

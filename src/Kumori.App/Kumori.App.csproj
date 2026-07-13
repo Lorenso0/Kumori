@@ -62,6 +62,7 @@
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\ModIcons\*.png" />
+    <Resource Include="Assets\KumoriChangelog.json" />
   </ItemGroup>
   <ItemGroup Condition="Exists('..\..\THIRD-PARTY-NOTICES.md')">
     <Content Include="..\..\THIRD-PARTY-NOTICES.md"

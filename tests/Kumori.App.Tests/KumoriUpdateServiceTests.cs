@@ -15,7 +15,20 @@ public sealed class KumoriUpdateServiceTests
               "tag_name": "v1.3.0",
               "name": "Kumori 1.3.0",
               "html_url": "https://github.com/Lorenso0/Kumori/releases/tag/v1.3.0",
-              "published_at": "2026-07-12T18:00:00Z"
+              "published_at": "2026-07-12T18:00:00Z",
+              "assets": [
+                {
+                  "name": "Kumori.exe",
+                  "browser_download_url": "https://github.com/Lorenso0/Kumori/releases/download/v1.3.0/Kumori.exe",
+                  "size": 123456,
+                  "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "name": "Kumori.exe.sha256",
+                  "browser_download_url": "https://github.com/Lorenso0/Kumori/releases/download/v1.3.0/Kumori.exe.sha256",
+                  "size": 77
+                }
+              ]
             }
             """;
         using var http = new HttpClient(new StubHandler(json));
@@ -25,6 +38,9 @@ public sealed class KumoriUpdateServiceTests
         Assert.True(result.IsUpdateAvailable);
         Assert.Equal(new Version(1, 3, 0, 0), result.LatestVersion);
         Assert.Equal("https://github.com/Lorenso0/Kumori/releases/tag/v1.3.0", result.ReleaseUrl);
+        Assert.True(result.CanAutoInstall);
+        Assert.Equal(123456, result.ExecutableAsset?.Size);
+        Assert.Equal("Kumori.exe.sha256", result.ChecksumAsset?.Name);
     }
 
     [Theory]
@@ -42,11 +58,11 @@ public sealed class KumoriUpdateServiceTests
         Assert.Equal(new Version(major, minor, build, 0), parsed);
     }
 
-    private sealed class StubHandler(string json) : HttpMessageHandler
+    private sealed class StubHandler(string json, string expectedUrl = KumoriUpdateService.LatestApiUrl) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Assert.Equal(KumoriUpdateService.LatestApiUrl, request.RequestUri?.AbsoluteUri);
+            Assert.Equal(expectedUrl, request.RequestUri?.AbsoluteUri);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),

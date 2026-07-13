@@ -152,9 +152,12 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
                    a.unstable_rate,
                    COALESCE((SELECT hit_count FROM attempt_timing WHERE attempt_id=@id), 0),
                    a.pp, a.fc_pp, a.max_pp, a.base_stars, a.adjusted_stars, a.beatmap_id,
-                   b.stars, b.ar, b.cs, b.od, b.hp, b.bpm, b.max_combo
+                   b.stars, b.ar, b.cs, b.od, b.hp, b.bpm, b.max_combo,
+                   a.score, a.accuracy, a.grade, a.combo, a.n300, a.n100, a.n50,
+                   a.misses, a.geki, a.katu, COALESCE(c.source_json, '{}')
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
+            LEFT JOIN attempt_context c ON c.attempt_id = a.id
             WHERE a.id=@id
             """;
         read.Parameters.AddWithValue("@id", attemptId);
@@ -184,9 +187,35 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         double? hp = reader.IsDBNull(20) ? null : reader.GetDouble(20);
         double? bpm = reader.IsDBNull(21) ? null : reader.GetDouble(21);
         int maxCombo = reader.GetInt32(22);
+        long score = reader.GetInt64(23);
+        double accuracy = reader.GetDouble(24);
+        string? grade = reader.IsDBNull(25) ? null : reader.GetString(25);
+        int combo = reader.GetInt32(26);
+        int n300 = reader.GetInt32(27);
+        int n100 = reader.GetInt32(28);
+        int n50 = reader.GetInt32(29);
+        int misses = reader.GetInt32(30);
+        int geki = reader.GetInt32(31);
+        int katu = reader.GetInt32(32);
+        string sourceJson = reader.GetString(33);
         reader.Close();
 
         var fields = new List<string>();
+        bool replayRecovery = IsReplayRecovery(sourceJson);
+        int simulatedCoreTotal = simulation.N300 + simulation.N100 + simulation.N50 + simulation.Misses;
+        if (replayRecovery && simulatedCoreTotal > 0)
+        {
+            Replace(ref n300, simulation.N300, "300");
+            Replace(ref n100, simulation.N100, "100");
+            Replace(ref n50, simulation.N50, "50");
+            Replace(ref misses, simulation.Misses, "misses");
+            double simulatedAccuracy = CalculateAccuracy(simulation.N300, simulation.N100, simulation.N50, simulation.Misses);
+            if (Math.Abs(accuracy - simulatedAccuracy) > 0.000001)
+            {
+                accuracy = simulatedAccuracy;
+                fields.Add("accuracy");
+            }
+        }
         sliderBreaks = FillInt(sliderBreaks, simulation.SliderBreaks, "slider breaks");
         largeTickHits = FillInt(largeTickHits, simulation.LargeTickHits, "large tick hits");
         largeTickMisses = FillInt(largeTickMisses, simulation.LargeTickMisses, "large tick misses");
@@ -217,6 +246,11 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             update.Transaction = tx;
             update.CommandText = """
                 UPDATE attempts SET
+                    accuracy=@accuracy,
+                    n300=@n300,
+                    n100=@n100,
+                    n50=@n50,
+                    misses=@misses,
                     slider_breaks=@slider_breaks,
                     large_tick_hits=@large_tick_hits,
                     large_tick_misses=@large_tick_misses,
@@ -233,6 +267,11 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
                 WHERE id=@id AND outcome <> 'active'
                 """;
             update.Parameters.AddWithValue("@slider_breaks", sliderBreaks);
+            update.Parameters.AddWithValue("@accuracy", accuracy);
+            update.Parameters.AddWithValue("@n300", n300);
+            update.Parameters.AddWithValue("@n100", n100);
+            update.Parameters.AddWithValue("@n50", n50);
+            update.Parameters.AddWithValue("@misses", misses);
             update.Parameters.AddWithValue("@large_tick_hits", largeTickHits);
             update.Parameters.AddWithValue("@large_tick_misses", largeTickMisses);
             update.Parameters.AddWithValue("@small_tick_hits", smallTickHits);
@@ -273,6 +312,15 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             UpsertSimulationTiming(con, tx, attemptId, simulation.TimingOffsets);
             fields.Add("timing offsets");
         }
+        if (replayRecovery)
+        {
+            UpsertScoreContext(
+                con, tx, attemptId, score, grade, n300, n100, n50, misses, geki, katu,
+                largeTickHits, largeTickMisses, smallTickHits, smallTickMisses, sliderTailHits, sliderTailMisses);
+            ReplaceRecoveredJudgementEvents(con, tx, attemptId, simulation.Judgements);
+            if (simulation.Judgements.Count > 0)
+                fields.Add("judgement events");
+        }
         UpsertSimulationContext(con, tx, attemptId, simulation);
         RecordSimulation(con, tx, attemptId, fields);
         RebuildRecoveredPersonalBests(con, tx, attemptId);
@@ -304,6 +352,82 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             if (hasCurrentValue || (!allowZero && simulated <= 0) || simulated < 0) return current;
             fields.Add(field);
             return simulated;
+        }
+
+        void Replace(ref int current, int simulated, string field)
+        {
+            if (current == simulated) return;
+            current = simulated;
+            fields.Add(field);
+        }
+    }
+
+    private static bool IsReplayRecovery(string sourceJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(sourceJson);
+            return document.RootElement.TryGetProperty("result_recovery", out var recovery)
+                   && recovery.TryGetProperty("reason", out var reason)
+                   && string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static double CalculateAccuracy(int n300, int n100, int n50, int misses)
+    {
+        int total = n300 + n100 + n50 + misses;
+        return total == 0 ? 0 : (n300 * 300d + n100 * 100d + n50 * 50d) / (total * 300d) * 100;
+    }
+
+    private static void ReplaceRecoveredJudgementEvents(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId,
+        IReadOnlyList<ReplaySimulationJudgement> judgements)
+    {
+        using (var delete = con.CreateCommand())
+        {
+            delete.Transaction = tx;
+            delete.CommandText = "DELETE FROM attempt_events WHERE attempt_id=@id AND event_type IN ('miss', 'hit_50', 'hit_100', 'slider_break')";
+            delete.Parameters.AddWithValue("@id", attemptId);
+            delete.ExecuteNonQuery();
+        }
+
+        foreach (var judgement in judgements)
+        {
+            string? eventType = judgement.Kind switch
+            {
+                0 => "miss",
+                1 => "hit_50",
+                2 => "hit_100",
+                3 => "slider_break",
+                _ => null,
+            };
+            if (eventType is null) continue;
+
+            double mapTime = judgement.Kind == 3 ? judgement.ObjectStartTime : judgement.RootStartTime;
+            var data = new JsonObject
+            {
+                ["source"] = "replay_simulation",
+                ["time_offset_ms"] = judgement.TimeOffset,
+                ["result_time_ms"] = judgement.EventTime,
+            };
+            using var insert = con.CreateCommand();
+            insert.Transaction = tx;
+            insert.CommandText = """
+                INSERT INTO attempt_events(attempt_id, captured_at, map_time_ms, event_type, value, data_json)
+                VALUES(@id, @captured, @time, @type, 1, @data)
+                """;
+            insert.Parameters.AddWithValue("@id", attemptId);
+            insert.Parameters.AddWithValue("@captured", DateTimeOffset.UtcNow.ToString("O"));
+            insert.Parameters.AddWithValue("@time", Math.Max(0, (long)Math.Round(mapTime)));
+            insert.Parameters.AddWithValue("@type", eventType);
+            insert.Parameters.AddWithValue("@data", data.ToJsonString());
+            insert.ExecuteNonQuery();
         }
     }
 
@@ -619,6 +743,7 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         var simulatedFields = new JsonArray();
         foreach (string field in fields) simulatedFields.Add(field);
         recovery["simulation"] = "completed";
+        recovery["simulation_schema"] = 2;
         recovery["simulation_completed_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
         recovery["simulated_fields"] = simulatedFields;
         root["result_recovery"] = recovery;
