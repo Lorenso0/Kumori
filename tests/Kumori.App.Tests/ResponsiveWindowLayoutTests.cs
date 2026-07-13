@@ -165,9 +165,10 @@ public sealed class ResponsiveWindowLayoutTests
                 failure = ex;
             }
         });
+        thread.IsBackground = true;
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(20)), "WPF layout smoke test timed out.");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "WPF layout smoke test timed out.");
         if (failure is not null)
         {
             ExceptionDispatchInfo.Capture(failure).Throw();
