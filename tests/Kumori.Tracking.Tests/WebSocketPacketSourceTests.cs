@@ -147,14 +147,14 @@ public sealed class WebSocketPacketSourceTests
                 ? Directory.EnumerateFiles(directory, "*.jsonl")
                 : []);
 
-            source.SetGameplayActive(false);
-            await WaitForLinesAsync(directory, "*.partial", expected: 1);
+            // This test is specifically the in-flight gameplay boundary. The
+            // normal resume, completed JSON, and publication path is covered
+            // by PacketRecordingWaitsForGameplayToEndAndConsumerToFinish.
+            // Dispose while still blocked and verify the interrupted packet
+            // is discarded rather than being exposed as a complete fixture.
             await source.DisposeAsync();
-
-            var lines = await WaitForLinesAsync(directory, "*.jsonl", expected: 1);
-            using var recorded = JsonDocument.Parse(lines[0]);
-            Assert.Equal(packet.Raw, recorded.RootElement.GetProperty("raw").GetString());
             Assert.Empty(Directory.EnumerateFiles(directory, "*.partial"));
+            Assert.Empty(Directory.EnumerateFiles(directory, "*.jsonl"));
         }
         finally
         {
@@ -183,7 +183,7 @@ public sealed class WebSocketPacketSourceTests
         // test runs can briefly starve it while other test hosts compile and
         // execute, so this completion wait must not double as a latency bound.
         // The bounded in-flight gameplay transition is asserted separately.
-        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(1);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (DateTime.UtcNow < deadline)
         {
             var path = Directory.Exists(directory)
