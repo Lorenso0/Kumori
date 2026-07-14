@@ -81,22 +81,31 @@ internal static class Program
 
         var factory = new SqliteConnectionFactory(paths.Database, readOnly: false);
         var trackingSink = new AttemptSqliteSink(factory);
+        async Task DeferCapturePersistence(string _, Func<CancellationToken, Task> work)
+        {
+            // Force the continuation off the tosu callback, then wait for the
+            // ordered parent/session queue before writing movement FKs.
+            await Task.Yield();
+            await trackingSink.FlushPendingPersistenceAsync();
+            await work(CancellationToken.None);
+        }
         var frameSource = new LazerMemoryReplayFrameSource(
             TimeSpan.FromMilliseconds(options.PollMs ?? 16),
             status,
             options.Value("offsets"));
-        await using var frameCapture = new LazerReplayFrameCaptureService(
+        var frameCapture = new LazerReplayFrameCaptureService(
             store,
             factory,
             () => trackingSink.CurrentAttemptId,
             frameSource,
             status,
-            "lazer_memory");
+            "lazer_memory",
+            deferPersistence: DeferCapturePersistence);
         frameCapture.Start();
 
-        var attemptSink = new CompositeAttemptSink(trackingSink, frameCapture);
+        var attemptSink = new ParentFirstToolAttemptSink(trackingSink, frameCapture);
         var tosuUri = options.Uri("tosu-url") ?? DefaultVanillaTosuUri;
-        await using var tracker = new TosuTrackingService(
+        var tracker = new TosuTrackingService(
             store,
             tosuUri,
             new AttemptTracker(attemptSink),
@@ -115,8 +124,29 @@ internal static class Program
             e.Cancel = true;
             stop.TrySetResult();
         };
-        await stop.Task;
-        return 0;
+        try
+        {
+            await stop.Task;
+            return 0;
+        }
+        finally
+        {
+            try
+            {
+                await tracker.DisposeAsync();
+            }
+            finally
+            {
+                try
+                {
+                    await trackingSink.FlushPendingPersistenceAsync();
+                }
+                finally
+                {
+                    await frameCapture.DisposeAsync();
+                }
+            }
+        }
     }
 
     private static int Status(ToolPaths paths)
@@ -249,6 +279,40 @@ internal static class Program
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
+}
+
+/// <summary>
+/// The diagnostic tool has one capture source, so it can put the detached
+/// attempt parent into its ordered queue before scheduling movement. The
+/// desktop app uses GameplayWorkCoordinator priority instead.
+/// </summary>
+internal sealed class ParentFirstToolAttemptSink(
+    IAttemptSink parent,
+    IAttemptSink capture) : IAttemptSink
+{
+    public void StartAttempt(AttemptStart start)
+    {
+        parent.StartAttempt(start);
+        capture.StartAttempt(start);
+    }
+
+    public void Checkpoint(AttemptCheckpoint checkpoint)
+    {
+        parent.Checkpoint(checkpoint);
+        capture.Checkpoint(checkpoint);
+    }
+
+    public void DiscardIfEmpty(AttemptDiscard discard)
+    {
+        capture.DiscardIfEmpty(discard);
+        parent.DiscardIfEmpty(discard);
+    }
+
+    public void Finalize(AttemptFinalization finalization)
+    {
+        parent.Finalize(finalization);
+        capture.Finalize(finalization);
+    }
 }
 
 internal sealed record ToolPaths(string Root, string Database, string StatusJson, string LogDir, string ExportDir, string ContractsDir)

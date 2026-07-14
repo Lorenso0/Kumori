@@ -50,6 +50,24 @@ public class ReplayViewerContractServiceTests : IDisposable
     }
 
     [Fact]
+    public void DisabledViewerCannotBeLaunched()
+    {
+        var factory = new SqliteConnectionFactory(_dbPath, readOnly: false);
+        var settings = new KumoriSettings();
+        settings.ReplayViewer.Enabled = false;
+        var service = new ReplayViewerContractService(
+            new AttemptDetailsRepository(factory),
+            new MovementRepository(factory),
+            settings,
+            _contractDirectory);
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            service.LaunchViewer("unused-contract.json", "missing-viewer.exe"));
+
+        Assert.Contains("disabled", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void WriteContract_PreservesCustomRateAdjustSpeed()
     {
         using var con = Open();

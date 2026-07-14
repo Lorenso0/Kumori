@@ -7,20 +7,44 @@ namespace Kumori.App;
 internal static class StableReplayFrameDiagnostics
 {
     private static readonly object Gate = new();
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly System.Threading.Timer FlushTimer = new(
+        _ => Flush(),
+        null,
+        System.Threading.Timeout.Infinite,
+        System.Threading.Timeout.Infinite);
+    private static StableReplayFrameStatus status = LoadFromDisk();
+    private static bool dirty;
+    private static bool flushScheduled;
     public static string StatusPath => AppPaths.StableReplayFrameStatusFile;
+
+    static StableReplayFrameDiagnostics()
+    {
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Flush(force: true);
+    }
 
     public static void Update(Action<StableReplayFrameStatus> mutate)
     {
         lock (Gate)
         {
-            var status = Load();
             mutate(status);
             status.UpdatedAt = DateTimeOffset.UtcNow;
-            Save(status);
+            dirty = true;
+            if (!flushScheduled)
+            {
+                flushScheduled = true;
+                FlushTimer.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+            }
         }
     }
 
     public static StableReplayFrameStatus Load()
+    {
+        lock (Gate)
+            return status with { };
+    }
+
+    private static StableReplayFrameStatus LoadFromDisk()
     {
         try
         {
@@ -31,17 +55,52 @@ internal static class StableReplayFrameDiagnostics
         return new StableReplayFrameStatus();
     }
 
-    private static void Save(StableReplayFrameStatus status)
+    private static void Flush(bool force = false)
+    {
+        StableReplayFrameStatus snapshot;
+        lock (Gate)
+        {
+            flushScheduled = false;
+            if (!dirty)
+                return;
+            if (!force && status.ActiveAttemptId is not null)
+            {
+                flushScheduled = true;
+                FlushTimer.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+                return;
+            }
+            dirty = false;
+            snapshot = status with { };
+        }
+
+        if (!Save(snapshot))
+        {
+            lock (Gate)
+                dirty = true;
+        }
+
+        lock (Gate)
+        {
+            if (dirty && !flushScheduled)
+            {
+                flushScheduled = true;
+                FlushTimer.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    private static bool Save(StableReplayFrameStatus status)
     {
         string? temporary = null;
         try
         {
             Directory.CreateDirectory(AppPaths.StatusDir);
-            temporary = Path.Combine(AppPaths.StatusDir, $"{Path.GetFileName(StatusPath)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
-            File.WriteAllText(temporary, JsonSerializer.Serialize(status, new JsonSerializerOptions { WriteIndented = true }));
+            temporary = Path.Combine(AppPaths.StatusDir, $"{Path.GetFileName(StatusPath)}.{Environment.ProcessId}.tmp");
+            File.WriteAllText(temporary, JsonSerializer.Serialize(status, JsonOptions));
             File.Move(temporary, StatusPath, true);
+            return true;
         }
-        catch { }
+        catch { return false; }
         finally
         {
             try { if (temporary is not null && File.Exists(temporary)) File.Delete(temporary); } catch { }
@@ -91,6 +150,7 @@ internal sealed class StableCaptureStatusSink : Kumori.Native.IReplayFrameStatus
                 target.LiveFramesReceived = status.FramesEmitted;
                 target.LiveFramesBuffered = status.FramesBufferedForAttempt;
                 target.LiveFramesStored = status.FramesStored;
+                target.ActiveAttemptId = status.ActiveAttemptId;
                 const string snapshotMarker = "offline replay analysis: ";
                 int snapshotIndex = status.Detail?.IndexOf(snapshotMarker, StringComparison.OrdinalIgnoreCase) ?? -1;
                 if (snapshotIndex >= 0)

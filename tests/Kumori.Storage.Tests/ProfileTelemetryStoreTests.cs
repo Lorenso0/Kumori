@@ -71,6 +71,125 @@ public sealed class ProfileTelemetryStoreTests : IDisposable
         Assert.Equal(0L, query.ExecuteScalar());
     }
 
+    [Fact]
+    public void RepeatedUnchangedProfile_IsPersistedOnlyOnce()
+    {
+        var store = new ProfileTelemetryStore(new SqliteConnectionFactory(_path, readOnly: false));
+        var snapshot = Snapshot(1, "First", 100, 1_000, 10);
+
+        for (var i = 0; i < 100; i++)
+        {
+            store.Ingest(snapshot with { WallTime = snapshot.WallTime + i / 60.0 });
+        }
+
+        using var verify = new SqliteConnection($"Data Source={_path}");
+        verify.Open();
+        using var query = verify.CreateCommand();
+        query.CommandText = "SELECT COUNT(*) FROM profile_snapshots";
+        Assert.Equal(1L, query.ExecuteScalar());
+    }
+
+    [Fact]
+    public async Task DeferredPersistence_DoesNotTouchSqliteOnIngestThread()
+    {
+        Func<CancellationToken, Task>? deferred = null;
+        var store = new ProfileTelemetryStore(
+            new SqliteConnectionFactory(_path, readOnly: false),
+            (_, work) =>
+            {
+                deferred = work;
+                return Task.CompletedTask;
+            });
+
+        store.Ingest(Snapshot(1, "First", 100, 1_000, 10));
+
+        Assert.False(File.Exists(_path));
+        Assert.NotNull(deferred);
+        await deferred!(CancellationToken.None);
+
+        using var verify = new SqliteConnection($"Data Source={_path}");
+        verify.Open();
+        using var query = verify.CreateCommand();
+        query.CommandText = "SELECT COUNT(*) FROM profile_snapshots";
+        Assert.Equal(1L, query.ExecuteScalar());
+    }
+
+    [Fact]
+    public async Task DeferredPersistence_FailureCanBeRescheduledByRepeatedPacket()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), $"kumori-profile-parent-{Guid.NewGuid():N}");
+        var path = Path.Combine(parent, "profile.sqlite3");
+        var queued = new List<Func<CancellationToken, Task>>();
+        var store = new ProfileTelemetryStore(
+            new SqliteConnectionFactory(path, readOnly: false),
+            (_, work) =>
+            {
+                queued.Add(work);
+                return Task.CompletedTask;
+            });
+        var snapshot = Snapshot(1, "First", 100, 1_000, 10);
+
+        try
+        {
+            store.Ingest(snapshot);
+            await Assert.ThrowsAnyAsync<Exception>(() => queued[0](CancellationToken.None));
+
+            Directory.CreateDirectory(parent);
+            store.Ingest(snapshot);
+            Assert.Equal(2, queued.Count);
+            await queued[1](CancellationToken.None);
+
+            using var verify = new SqliteConnection($"Data Source={path}");
+            verify.Open();
+            using var query = verify.CreateCommand();
+            query.CommandText = "SELECT COUNT(*) FROM profile_snapshots";
+            Assert.Equal(1L, query.ExecuteScalar());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(parent, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task DeferredPersistence_CoalescesNewReadingWithoutLosingPendingAttempt()
+    {
+        using (var con = new SqliteConnection($"Data Source={_path}"))
+        {
+            con.Open();
+            using var command = con.CreateCommand();
+            command.CommandText = "CREATE TABLE attempts(id INTEGER PRIMARY KEY); INSERT INTO attempts VALUES(1);";
+            command.ExecuteNonQuery();
+        }
+
+        var queued = new List<Func<CancellationToken, Task>>();
+        var store = new ProfileTelemetryStore(
+            new SqliteConnectionFactory(_path, readOnly: false),
+            (_, work) =>
+            {
+                queued.Add(work);
+                return Task.CompletedTask;
+            });
+
+        store.Ingest(Snapshot(1, "First", 100, 1_000, 10));
+        store.BeginAttempt(1);
+        store.CompleteAttempt(1, "completed");
+        store.Ingest(Snapshot(1, "First", 105, 990, 11));
+
+        Assert.Single(queued);
+        await queued[0](CancellationToken.None);
+
+        using var verify = new SqliteConnection($"Data Source={_path}");
+        verify.Open();
+        using var query = verify.CreateCommand();
+        query.CommandText = "SELECT old_total_pp, new_total_pp FROM attempt_profile_changes WHERE attempt_id=1";
+        using var reader = query.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(100, reader.GetDouble(0));
+        Assert.Equal(105, reader.GetDouble(1));
+    }
+
     private static TosuSnapshot Snapshot(long id, string name, double pp, long rank, long playCount) => new()
     {
         WallTime = 1_700_000_000 + playCount,

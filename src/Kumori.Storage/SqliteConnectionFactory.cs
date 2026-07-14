@@ -11,11 +11,21 @@ public sealed class SqliteConnectionFactory
 {
     private readonly string _dbPath;
     private readonly bool _readOnly;
+    private readonly string _connectionString;
 
     public SqliteConnectionFactory(string dbPath, bool readOnly = true)
     {
         _dbPath = dbPath;
         _readOnly = readOnly;
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = _readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Default,
+            DefaultTimeout = 5,
+            ForeignKeys = true,
+            Pooling = true,
+        }.ToString();
     }
 
     public string DatabasePath => _dbPath;
@@ -24,18 +34,8 @@ public sealed class SqliteConnectionFactory
 
     public SqliteConnection Open()
     {
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = _dbPath,
-            Mode = _readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Default,
-            DefaultTimeout = 5, // seconds; maps to busy_timeout behavior
-        };
-        var con = new SqliteConnection(builder.ConnectionString);
+        var con = new SqliteConnection(_connectionString);
         con.Open();
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
-        cmd.ExecuteNonQuery();
         return con;
     }
 }

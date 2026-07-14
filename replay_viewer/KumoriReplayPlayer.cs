@@ -136,9 +136,9 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
             // change; keep it suppressed so only Kumori's bar is visible.
             Scheduler.AddDelayed(hideSkinProgress, 500, true);
             hideSkinProgress();
-            if (RecordedAccuracyOverride is not null)
+            if (RecordedAccuracyOverride is { } stableAccuracy)
             {
-                addRecordedAccuracy();
+                SeekBar?.SetStableAccuracyNotice(stableAccuracy);
             }
 
             if (AttachKumoriHud)
@@ -359,23 +359,6 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
     {
         foreach (SongProgress progress in HUDOverlay.ChildrenOfType<SongProgress>())
             progress.Alpha = 0;
-    }
-
-    private void addRecordedAccuracy()
-    {
-        if (RecordedAccuracyOverride is not { } accuracy)
-            return;
-        double truncated = Math.Floor(accuracy * 100) / 100;
-        AddInternal(new SpriteText
-        {
-            Text = $"lazer may not reproduce osu!stable accuracy exactly  ·  stable {truncated:0.00}%",
-            Anchor = Anchor.TopRight,
-            Origin = Anchor.TopRight,
-            Position = new osuTK.Vector2(-20, 48),
-            Font = FontUsage.Default.With(size: 12),
-            Colour = Colour4.White.Opacity(0.72f),
-            Depth = -1000,
-        });
     }
 
     private void beginAnalysisCollection()

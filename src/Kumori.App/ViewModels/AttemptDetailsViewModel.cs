@@ -8,6 +8,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Kumori.App.Controls;
+using Kumori.Core;
 using Kumori.Core.Models;
 using Kumori.Storage;
 using Kumori.Tracking;
@@ -363,7 +364,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
     }
     public IReadOnlyList<UrPoint> UrSamples => BuildUrSamples(Details);
-    public bool CanOpenReplayInspector => Details is not null && _replayViewer is not null;
+    public bool CanOpenReplayInspector => Details is not null && _replayViewer?.IsEnabled == true;
     public bool CanValidateOsr => Details is not null;
 
     partial void OnDetailsChanged(AttemptDetails? value)
@@ -695,7 +696,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
     }
 
-    public async Task LoadAsync(long? attemptId)
+    public async Task LoadAsync(long? attemptId, CancellationToken cancellationToken = default)
     {
         _requestedAttemptId = attemptId;
         _loadCts?.Cancel();
@@ -722,13 +723,19 @@ public partial class AttemptDetailsViewModel : ObservableObject
         // Apart from being misleading, this made a newly highlighted history row
         // appear to have the previous row's title and score in the inspector.
         Details = null;
-        var cts = new CancellationTokenSource();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _loadCts = cts;
         IsLoading = true;
         LoadError = null;
         try
         {
-            var loaded = await Task.Run(() => _repository.GetDetails(attemptId.Value), cts.Token);
+            var loaded = await Task.Run(() =>
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                var result = _repository.GetDetails(attemptId.Value);
+                cts.Token.ThrowIfCancellationRequested();
+                return result;
+            }, cts.Token);
             if (cts.IsCancellationRequested || _requestedAttemptId != attemptId)
             {
                 return;
@@ -781,12 +788,14 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
     }
 
-    public async Task RefreshAfterMovementReplacementAsync(long attemptId)
+    public async Task RefreshAfterMovementReplacementAsync(
+        long attemptId,
+        CancellationToken cancellationToken = default)
     {
         _cache.Remove(attemptId);
         if (_requestedAttemptId == attemptId || Details?.Summary.Id == attemptId)
         {
-            await LoadAsync(attemptId);
+            await LoadAsync(attemptId, cancellationToken);
         }
     }
 
@@ -992,7 +1001,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
     private static string FormatStarted(string started)
     {
-        return LocalTimeDisplay.DateTimeWithSeconds(started, started);
+        return LocalTimeDisplay.DateTimeWithSeconds(started, DisplayDateTime.UnknownDate);
     }
 
     private static string FormatG(double value)

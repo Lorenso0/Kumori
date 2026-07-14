@@ -29,7 +29,7 @@ public sealed class SessionRowViewModel : HistoryRowViewModel
     public string TimeText => LocalTimeDisplay.Time(Model.StartedAt);
 
     public string TimeColor => IsActive ? "#4ADE80" : "#C4B5FD";
-    public string DateText => LocalTimeDisplay.Parse(Model.StartedAt)?.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) ?? "Session";
+    public string DateText => LocalTimeDisplay.Date(Model.StartedAt, "Session");
     public string AttemptCountText => Invariant($"{Model.AttemptCount:N0} plays");
     public string CompletionText => Model.AttemptCount == 0
         ? "0% completed"

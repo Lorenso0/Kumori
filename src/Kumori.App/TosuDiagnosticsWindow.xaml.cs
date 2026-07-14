@@ -17,15 +17,16 @@ public partial class TosuDiagnosticsWindow : Window
     private readonly AppStateStore _appState;
     private readonly DispatcherTimer _refreshTimer;
     private string _lastLog = string.Empty;
+    private bool _refreshing;
 
     public TosuDiagnosticsWindow(AppStateStore appState)
     {
         _appState = appState;
         InitializeComponent();
-        Refresh();
+        _ = RefreshAsync(force: true);
 
-        _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _refreshTimer.Tick += (_, _) => Refresh();
+        _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _refreshTimer.Tick += async (_, _) => await RefreshAsync();
         _refreshTimer.Start();
     }
 
@@ -41,7 +42,7 @@ public partial class TosuDiagnosticsWindow : Window
         base.OnClosed(e);
     }
 
-    private void Refresh_Click(object sender, RoutedEventArgs e) => Refresh();
+    private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync(force: true);
 
     private void Copy_Click(object sender, RoutedEventArgs e) =>
         Clipboard.SetText(Tabs.SelectedIndex switch
@@ -53,11 +54,37 @@ public partial class TosuDiagnosticsWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
-    private void Refresh()
+    private async Task RefreshAsync(bool force = false)
     {
-        RefreshStatus();
-        RefreshTelemetry();
-        RefreshLog();
+        if (_refreshing || (!force && !IsVisible))
+            return;
+
+        _refreshing = true;
+        try
+        {
+            var state = _appState.Current;
+            if (force || Tabs.SelectedIndex == 1)
+                RefreshTelemetry();
+
+            // Process enumeration and log/version reads are diagnostic-only.
+            // Freeze those tabs while a map is active; live telemetry remains
+            // available without touching disk.
+            if (!force && state.Tracking.LatestTelemetry?.IsPlaying == true)
+                return;
+
+            if (force || Tabs.SelectedIndex == 0)
+                StatusText.Text = await Task.Run(() => BuildStatus(state));
+
+            if (force || Tabs.SelectedIndex == 2)
+            {
+                var log = await Task.Run(() => ReadLogTail(FindCurrentLogPath()));
+                ApplyLog(log);
+            }
+        }
+        finally
+        {
+            _refreshing = false;
+        }
     }
 
     private void RefreshTelemetry()
@@ -71,7 +98,7 @@ public partial class TosuDiagnosticsWindow : Window
 
         TelemetryText.Text =
             $"""
-            Latest packet: {telemetry.ReceivedAt:O}
+            Latest packet: {DisplayDateTime.FormatLocalDateTimeWithSeconds(telemetry.ReceivedAt)}
 
             Map
               {telemetry.Artist ?? "unknown"} — {telemetry.Title ?? "unknown"} [{telemetry.Difficulty ?? "unknown"}]
@@ -96,13 +123,12 @@ public partial class TosuDiagnosticsWindow : Window
             """;
     }
 
-    private void RefreshStatus()
+    private static string BuildStatus(AppState state)
     {
-        var state = _appState.Current;
-        var process = FindTosuProcess();
-        var logPath = FindCurrentLogPath();
-        var version = TryReadFile(AppPaths.TosuVersionFile, "unknown").Trim();
-        StatusText.Text =
+        using var process = FindTosuProcess();
+        string? logPath = FindCurrentLogPath();
+        string version = TryReadFile(AppPaths.TosuVersionFile, "unknown").Trim();
+        return
             $"""
             Managed tosu
               Connected to Kumori: {state.Tracking.TosuConnected}
@@ -115,16 +141,14 @@ public partial class TosuDiagnosticsWindow : Window
               Started: {TryProcessStartTime(process) ?? "n/a"}
               Environment: {AppPaths.TosuEnvFile}
               Active log: {logPath ?? "not created yet"}
-              Refreshed: {DateTimeOffset.Now:O}
+              Refreshed: {DisplayDateTime.FormatLocalDateTimeWithSeconds(DateTimeOffset.Now)}
 
             This is the contents tosu writes in place of a visible command window.
             """;
-        process?.Dispose();
     }
 
-    private void RefreshLog()
+    private void ApplyLog(string log)
     {
-        var log = ReadLogTail(FindCurrentLogPath());
         if (log == _lastLog)
         {
             return;
@@ -139,14 +163,37 @@ public partial class TosuDiagnosticsWindow : Window
         }
     }
 
-    private static Process? FindTosuProcess() =>
-        Process.GetProcessesByName("tosu")
-            .OrderByDescending(process => TryProcessStartTime(process) ?? DateTime.MinValue.ToString("O"))
-            .FirstOrDefault();
+    private static Process? FindTosuProcess()
+    {
+        Process? selected = null;
+        DateTime selectedStart = DateTime.MinValue;
+        foreach (var process in Process.GetProcessesByName("tosu"))
+        {
+            try
+            {
+                DateTime start = process.StartTime;
+                if (selected is null || start > selectedStart)
+                {
+                    selected?.Dispose();
+                    selected = process;
+                    selectedStart = start;
+                }
+                else
+                {
+                    process.Dispose();
+                }
+            }
+            catch
+            {
+                process.Dispose();
+            }
+        }
+        return selected;
+    }
 
     private static string? TryProcessStartTime(Process? process)
     {
-        try { return process?.StartTime.ToString("O"); }
+        try { return process is null ? null : DisplayDateTime.FormatDateTimeWithSeconds(process.StartTime); }
         catch { return null; }
     }
 

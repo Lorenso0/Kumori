@@ -59,9 +59,6 @@ public sealed class TrayIconService : IDisposable
         ToastNotificationManagerCompat.OnActivated += args => OnToastActivated(args.Argument);
     }
 
-    public void ShowNotification(string title, string message)
-        => _icon.ShowBalloonTip(5000, title, message, ToolTipIcon.None);
-
     public void ShowUpdateNotification(string version)
     {
         new ToastContentBuilder()

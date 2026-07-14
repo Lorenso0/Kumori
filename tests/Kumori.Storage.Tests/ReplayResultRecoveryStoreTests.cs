@@ -11,10 +11,25 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     private readonly string path = Path.Combine(Path.GetTempPath(), $"kumori-replay-recovery-{Guid.NewGuid():N}.sqlite3");
 
     [Fact]
+    public void Apply_PreCancelledTokenStopsBeforeOpeningDatabase()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            new ReplayResultRecoveryStore(new SqliteConnectionFactory(path, readOnly: false)).Apply(
+                1,
+                new ReplayResultData(100, 100, "X", 1, 1, 0, 0, 0, 0, 0),
+                "test",
+                cancelled.Token));
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public void Apply_RepairsMissingFinalValuesAndRecordsReason()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);
-        var sink = new AttemptSqliteSink(factory);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
         sink.StartAttempt(Start());
         long id = sink.CurrentAttemptId!.Value;
         sink.Finalize(Final(score: 0, accuracy: 0, combo: 0, n300: 0, n100: 0));
@@ -72,7 +87,7 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     public void Apply_PreservesValidTosuValuesAndOnlyFillsMissingFields()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);
-        var sink = new AttemptSqliteSink(factory);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
         sink.StartAttempt(Start());
         long id = sink.CurrentAttemptId!.Value;
         sink.Finalize(Final(score: 900_000, accuracy: 97.1, combo: 321, n300: 600, n100: 0));
@@ -99,10 +114,72 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     }
 
     [Fact]
+    public void Apply_ReplacesPlaceholderAccuracyWhenEntireTosuResultWasMissing()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        sink.Finalize(Final(score: 0, accuracy: 100, combo: 0, n300: 0, n100: 0));
+
+        var outcome = new ReplayResultRecoveryStore(factory).Apply(
+            id,
+            new ReplayResultData(444_621, 87.3526, "B", 63, 113, 13, 0, 9, 0, 0,
+                SliderTailHits: 39),
+            "lazer_replay");
+
+        Assert.True(outcome.Applied);
+        Assert.Contains("accuracy", outcome.RecoveredFields);
+        using var con = factory.Open();
+        using var command = con.CreateCommand();
+        command.CommandText = "SELECT accuracy, n300, n100, misses FROM attempts WHERE id=@id";
+        command.Parameters.AddWithValue("@id", id);
+        using var reader = command.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(87.3526, reader.GetDouble(0), 4);
+        Assert.Equal(113, reader.GetInt32(1));
+        Assert.Equal(13, reader.GetInt32(2));
+        Assert.Equal(9, reader.GetInt32(3));
+    }
+
+    [Fact]
+    public void Apply_RepairsPersistedPerfectPlaceholderFromEarlierRecovery()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        var final = Final(score: 444_621, accuracy: 100, combo: 63, n300: 113, n100: 13);
+        sink.Finalize(final with { Snapshot = final.Snapshot with { Misses = 9 } });
+        using (var con = factory.Open())
+        using (var markRecovered = con.CreateCommand())
+        {
+            markRecovered.CommandText = """
+                UPDATE attempt_context
+                SET source_json='{"result_recovery":{"reason":"tosu_gameplay_values_missing","fields":["score","combo","300","100","misses"]}}'
+                WHERE attempt_id=@id
+                """;
+            markRecovered.Parameters.AddWithValue("@id", id);
+            markRecovered.ExecuteNonQuery();
+        }
+
+        var replay = new ReplayResultData(444_621, 87.3526, "B", 63, 113, 13, 0, 9, 0, 0);
+        var outcome = new ReplayResultRecoveryStore(factory).Apply(id, replay, "lazer_replay_reconciliation");
+
+        Assert.True(outcome.Applied);
+        Assert.Equal(["accuracy"], outcome.RecoveredFields);
+        using var verify = factory.Open();
+        using var accuracy = verify.CreateCommand();
+        accuracy.CommandText = "SELECT accuracy FROM attempts WHERE id=@id";
+        accuracy.Parameters.AddWithValue("@id", id);
+        Assert.Equal(87.3526, Convert.ToDouble(accuracy.ExecuteScalar()), 4);
+    }
+
+    [Fact]
     public void Apply_RepairsAccuracyOverwrittenByLegacySimulation()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);
-        var sink = new AttemptSqliteSink(factory);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
         sink.StartAttempt(Start());
         long id = sink.CurrentAttemptId!.Value;
         sink.Finalize(Final(score: 0, accuracy: 0, combo: 0, n300: 0, n100: 0));
@@ -146,7 +223,7 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     public void Apply_WaitsUntilAttemptIsFinalized()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);
-        var sink = new AttemptSqliteSink(factory);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
         sink.StartAttempt(Start());
 
         var outcome = new ReplayResultRecoveryStore(factory).Apply(
@@ -162,7 +239,7 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     public void ApplySimulation_PreservesValidTelemetry()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);
-        var sink = new AttemptSqliteSink(factory);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
         var capturedMap = new BeatmapStats
         {
             BaseStars = 4.5,
@@ -232,7 +309,7 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     public void ApplySimulation_FillsRichJudgementsAndTimingAndMarksProvenance()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);
-        var sink = new AttemptSqliteSink(factory);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
         sink.StartAttempt(Start());
         long id = sink.CurrentAttemptId!.Value;
         sink.Finalize(Final(score: 0, accuracy: 0, combo: 0, n300: 0, n100: 0));

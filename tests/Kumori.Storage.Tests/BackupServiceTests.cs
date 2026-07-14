@@ -84,6 +84,35 @@ public sealed class BackupServiceTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(backupDirectory, "*.new"));
     }
 
+    [Fact]
+    public void CreateAutomaticIfDue_WithCancellationLeavesNoArchiveArtifacts()
+    {
+        Directory.CreateDirectory(root);
+        var database = Path.Combine(root, "tracking.sqlite3");
+        var backupDirectory = Path.Combine(root, "backups");
+        CreateDatabase(database);
+        var settings = new KumoriSettings.BackupSettings { Directory = backupDirectory };
+        var service = new BackupService(database);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            service.CreateAutomaticIfDue(settings, cancelled.Token));
+        Assert.False(Directory.Exists(backupDirectory));
+    }
+
+    [Fact]
+    public void CopyStream_StopsBeforeWritingAChunkThatTriggeredCancellation()
+    {
+        using var cancelled = new CancellationTokenSource();
+        using var source = new CancellingReadStream(cancelled);
+        using var destination = new MemoryStream();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            BackupService.CopyStream(source, destination, cancelled.Token));
+        Assert.Equal(0, destination.Length);
+    }
+
     private static void CreateDatabase(string path)
     {
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -101,5 +130,15 @@ public sealed class BackupServiceTests : IDisposable
     public void Dispose()
     {
         try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
+    }
+
+    private sealed class CancellingReadStream(CancellationTokenSource cancellation) : MemoryStream(new byte[128 * 1024])
+    {
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = base.Read(buffer, offset, count);
+            cancellation.Cancel();
+            return read;
+        }
     }
 }

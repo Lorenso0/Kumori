@@ -32,7 +32,7 @@ public static class HistoricalBeatmapCacheRecovery
                 Checksum = attempt.Checksum,
                 BeatmapId = attempt.OsuBeatmapId,
                 BeatmapSetId = attempt.BeatmapSetId,
-            }, primaryMirror, fallbackMirrors);
+            }, primaryMirror, fallbackMirrors, cancellationToken);
             if (cached is not null)
             {
                 recovered++;

@@ -80,7 +80,23 @@ public sealed class MovementCaptureStore
     }
 
     public void Complete(int droppedSamples, string? source, string? calibrationJson)
+        => Complete(droppedSamples, source, calibrationJson, CancellationToken.None);
+
+    public void Complete(
+        int droppedSamples,
+        string? source,
+        string? calibrationJson,
+        CancellationToken cancellationToken)
+        => Complete(droppedSamples, source, calibrationJson, cancellationToken, afterReplacementCleared: null);
+
+    internal void Complete(
+        int droppedSamples,
+        string? source,
+        string? calibrationJson,
+        CancellationToken cancellationToken,
+        Action? afterReplacementCleared)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (_attemptId is not { } attemptId)
         {
             return;
@@ -103,107 +119,141 @@ public sealed class MovementCaptureStore
         var averageKps = durationMs > 0 ? totalPresses * 1000.0 / durationMs : 0;
         var peakKps = PeakKps();
 
-        using var con = _factory.Open();
-        using var tx = con.BeginTransaction();
-        Execute(con, tx,
-            """
-            UPDATE sessions
-            SET z_count = MAX(0, z_count - COALESCE((SELECT key1_presses FROM attempt_input_summary WHERE attempt_id = @id), 0)),
-                x_count = MAX(0, x_count - COALESCE((SELECT key2_presses FROM attempt_input_summary WHERE attempt_id = @id), 0))
-            WHERE id = (SELECT session_id FROM attempts WHERE id = @id)
-            """,
-            ("@id", attemptId));
-        Execute(con, tx, "DELETE FROM attempt_movement_chunks WHERE attempt_id = @id", ("@id", attemptId));
-        Execute(con, tx, "DELETE FROM attempt_movement WHERE attempt_id = @id", ("@id", attemptId));
-        Execute(con, tx, "DELETE FROM attempt_input_summary WHERE attempt_id = @id", ("@id", attemptId));
-
-        foreach (var chunk in _pendingChunks)
+        try
         {
-            using var insertChunk = con.CreateCommand();
-            insertChunk.Transaction = tx;
-            insertChunk.CommandText = """
-                INSERT INTO attempt_movement_chunks(attempt_id, position, first_map_time_ms,
-                                                    last_map_time_ms, sample_count, payload_zlib)
-                VALUES(@attempt_id, @position, @first, @last, @count, @payload)
+            cancellationToken.ThrowIfCancellationRequested();
+            using var con = _factory.Open();
+            if (cancellationToken.CanBeCanceled)
+            {
+                // sqlite3_interrupt cannot cut short SQLite's busy handler.
+                // Bound each lock wait so cancellation is observed promptly.
+                con.DefaultTimeout = 1;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            using var interruptRegistration = cancellationToken.Register(
+                static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle),
+                con);
+            using var tx = con.BeginTransaction();
+            Execute(con, tx,
+                """
+                UPDATE sessions
+                SET z_count = MAX(0, z_count - COALESCE((SELECT key1_presses FROM attempt_input_summary WHERE attempt_id = @id), 0)),
+                    x_count = MAX(0, x_count - COALESCE((SELECT key2_presses FROM attempt_input_summary WHERE attempt_id = @id), 0))
+                WHERE id = (SELECT session_id FROM attempts WHERE id = @id)
+                """,
+                cancellationToken,
+                ("@id", attemptId));
+            Execute(con, tx, "DELETE FROM attempt_movement_chunks WHERE attempt_id = @id", cancellationToken, ("@id", attemptId));
+            Execute(con, tx, "DELETE FROM attempt_movement WHERE attempt_id = @id", cancellationToken, ("@id", attemptId));
+            Execute(con, tx, "DELETE FROM attempt_input_summary WHERE attempt_id = @id", cancellationToken, ("@id", attemptId));
+            afterReplacementCleared?.Invoke();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            foreach (var chunk in _pendingChunks)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using var insertChunk = con.CreateCommand();
+                insertChunk.Transaction = tx;
+                insertChunk.CommandText = """
+                    INSERT INTO attempt_movement_chunks(attempt_id, position, first_map_time_ms,
+                                                        last_map_time_ms, sample_count, payload_zlib)
+                    VALUES(@attempt_id, @position, @first, @last, @count, @payload)
+                    """;
+                insertChunk.Parameters.AddWithValue("@attempt_id", attemptId);
+                insertChunk.Parameters.AddWithValue("@position", chunk.Position);
+                insertChunk.Parameters.AddWithValue("@first", chunk.FirstMapTimeMs);
+                insertChunk.Parameters.AddWithValue("@last", chunk.LastMapTimeMs);
+                insertChunk.Parameters.AddWithValue("@count", chunk.SampleCount);
+                insertChunk.Parameters.AddWithValue("@payload", chunk.Payload);
+                insertChunk.ExecuteNonQuery();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            using var movement = con.CreateCommand();
+            movement.Transaction = tx;
+            movement.CommandText = """
+                INSERT INTO attempt_movement(attempt_id, source, sample_rate, sample_count,
+                                             dropped_samples, replay_status, calibration_json, captured_at)
+                VALUES(@attempt_id, @source, @sample_rate, @sample_count,
+                       @dropped, 'not_checked', @calibration, @captured_at)
+                ON CONFLICT(attempt_id) DO UPDATE SET
+                    source = excluded.source,
+                    sample_rate = excluded.sample_rate,
+                    sample_count = excluded.sample_count,
+                    dropped_samples = excluded.dropped_samples,
+                    replay_status = excluded.replay_status,
+                    calibration_json = excluded.calibration_json,
+                    captured_at = excluded.captured_at
                 """;
-            insertChunk.Parameters.AddWithValue("@attempt_id", attemptId);
-            insertChunk.Parameters.AddWithValue("@position", chunk.Position);
-            insertChunk.Parameters.AddWithValue("@first", chunk.FirstMapTimeMs);
-            insertChunk.Parameters.AddWithValue("@last", chunk.LastMapTimeMs);
-            insertChunk.Parameters.AddWithValue("@count", chunk.SampleCount);
-            insertChunk.Parameters.AddWithValue("@payload", chunk.Payload);
-            insertChunk.ExecuteNonQuery();
+            movement.Parameters.AddWithValue("@attempt_id", attemptId);
+            movement.Parameters.AddWithValue("@source", string.IsNullOrWhiteSpace(source) ? "live" : source);
+            movement.Parameters.AddWithValue("@sample_rate", sampleRate);
+            movement.Parameters.AddWithValue("@sample_count", _sampleCount);
+            movement.Parameters.AddWithValue("@dropped", droppedSamples);
+            movement.Parameters.AddWithValue("@calibration", string.IsNullOrWhiteSpace(calibrationJson) ? "{}" : calibrationJson);
+            movement.Parameters.AddWithValue("@captured_at", DateTimeOffset.Now.ToString("O"));
+            movement.ExecuteNonQuery();
+
+            cancellationToken.ThrowIfCancellationRequested();
+            using var input = con.CreateCommand();
+            input.Transaction = tx;
+            input.CommandText = """
+                INSERT INTO attempt_input_summary(attempt_id, key1_presses, key2_presses,
+                                                  alternations, same_key_repeats,
+                                                  simultaneous_presses, key1_hold_ms,
+                                                  key2_hold_ms, peak_kps, average_kps)
+                VALUES(@attempt_id, @key1, @key2, @alternations, @same,
+                       @simultaneous, @key1_hold, @key2_hold, @peak, @average)
+                ON CONFLICT(attempt_id) DO UPDATE SET
+                    key1_presses = excluded.key1_presses,
+                    key2_presses = excluded.key2_presses,
+                    alternations = excluded.alternations,
+                    same_key_repeats = excluded.same_key_repeats,
+                    simultaneous_presses = excluded.simultaneous_presses,
+                    key1_hold_ms = excluded.key1_hold_ms,
+                    key2_hold_ms = excluded.key2_hold_ms,
+                    peak_kps = excluded.peak_kps,
+                    average_kps = excluded.average_kps
+                """;
+            input.Parameters.AddWithValue("@attempt_id", attemptId);
+            input.Parameters.AddWithValue("@key1", _key1Presses);
+            input.Parameters.AddWithValue("@key2", _key2Presses);
+            input.Parameters.AddWithValue("@alternations", _alternations);
+            input.Parameters.AddWithValue("@same", _sameKeyRepeats);
+            input.Parameters.AddWithValue("@simultaneous", _simultaneousPresses);
+            input.Parameters.AddWithValue("@key1_hold", _key1HoldMs);
+            input.Parameters.AddWithValue("@key2_hold", _key2HoldMs);
+            input.Parameters.AddWithValue("@peak", peakKps);
+            input.Parameters.AddWithValue("@average", averageKps);
+            input.ExecuteNonQuery();
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Execute(con, tx,
+                "UPDATE attempts SET z_count = @z, x_count = @x WHERE id = @id",
+                cancellationToken,
+                ("@z", _key1Presses), ("@x", _key2Presses), ("@id", attemptId));
+            Execute(con, tx,
+                """
+                UPDATE sessions
+                SET z_count = z_count + @z, x_count = x_count + @x
+                WHERE id = (SELECT session_id FROM attempts WHERE id = @id)
+                """,
+                cancellationToken,
+                ("@z", _key1Presses), ("@x", _key2Presses), ("@id", attemptId));
+
+            // This is the final cancellation boundary. Once Commit returns, the
+            // replacement is durable and the token must not turn success into a
+            // retry that could duplicate session/input accounting.
+            cancellationToken.ThrowIfCancellationRequested();
+            tx.Commit();
         }
-
-        using var movement = con.CreateCommand();
-        movement.Transaction = tx;
-        movement.CommandText = """
-            INSERT INTO attempt_movement(attempt_id, source, sample_rate, sample_count,
-                                         dropped_samples, replay_status, calibration_json, captured_at)
-            VALUES(@attempt_id, @source, @sample_rate, @sample_count,
-                   @dropped, 'not_checked', @calibration, @captured_at)
-            ON CONFLICT(attempt_id) DO UPDATE SET
-                source = excluded.source,
-                sample_rate = excluded.sample_rate,
-                sample_count = excluded.sample_count,
-                dropped_samples = excluded.dropped_samples,
-                replay_status = excluded.replay_status,
-                calibration_json = excluded.calibration_json,
-                captured_at = excluded.captured_at
-            """;
-        movement.Parameters.AddWithValue("@attempt_id", attemptId);
-        movement.Parameters.AddWithValue("@source", string.IsNullOrWhiteSpace(source) ? "live" : source);
-        movement.Parameters.AddWithValue("@sample_rate", sampleRate);
-        movement.Parameters.AddWithValue("@sample_count", _sampleCount);
-        movement.Parameters.AddWithValue("@dropped", droppedSamples);
-        movement.Parameters.AddWithValue("@calibration", string.IsNullOrWhiteSpace(calibrationJson) ? "{}" : calibrationJson);
-        movement.Parameters.AddWithValue("@captured_at", DateTimeOffset.Now.ToString("O"));
-        movement.ExecuteNonQuery();
-
-        using var input = con.CreateCommand();
-        input.Transaction = tx;
-        input.CommandText = """
-            INSERT INTO attempt_input_summary(attempt_id, key1_presses, key2_presses,
-                                              alternations, same_key_repeats,
-                                              simultaneous_presses, key1_hold_ms,
-                                              key2_hold_ms, peak_kps, average_kps)
-            VALUES(@attempt_id, @key1, @key2, @alternations, @same,
-                   @simultaneous, @key1_hold, @key2_hold, @peak, @average)
-            ON CONFLICT(attempt_id) DO UPDATE SET
-                key1_presses = excluded.key1_presses,
-                key2_presses = excluded.key2_presses,
-                alternations = excluded.alternations,
-                same_key_repeats = excluded.same_key_repeats,
-                simultaneous_presses = excluded.simultaneous_presses,
-                key1_hold_ms = excluded.key1_hold_ms,
-                key2_hold_ms = excluded.key2_hold_ms,
-                peak_kps = excluded.peak_kps,
-                average_kps = excluded.average_kps
-            """;
-        input.Parameters.AddWithValue("@attempt_id", attemptId);
-        input.Parameters.AddWithValue("@key1", _key1Presses);
-        input.Parameters.AddWithValue("@key2", _key2Presses);
-        input.Parameters.AddWithValue("@alternations", _alternations);
-        input.Parameters.AddWithValue("@same", _sameKeyRepeats);
-        input.Parameters.AddWithValue("@simultaneous", _simultaneousPresses);
-        input.Parameters.AddWithValue("@key1_hold", _key1HoldMs);
-        input.Parameters.AddWithValue("@key2_hold", _key2HoldMs);
-        input.Parameters.AddWithValue("@peak", peakKps);
-        input.Parameters.AddWithValue("@average", averageKps);
-        input.ExecuteNonQuery();
-
-        Execute(con, tx,
-            "UPDATE attempts SET z_count = @z, x_count = @x WHERE id = @id",
-            ("@z", _key1Presses), ("@x", _key2Presses), ("@id", attemptId));
-        Execute(con, tx,
-            """
-            UPDATE sessions
-            SET z_count = z_count + @z, x_count = x_count + @x
-            WHERE id = (SELECT session_id FROM attempts WHERE id = @id)
-            """,
-            ("@z", _key1Presses), ("@x", _key2Presses), ("@id", attemptId));
-
-        tx.Commit();
+        catch (SqliteException exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Movement persistence was interrupted by gameplay.",
+                exception,
+                cancellationToken);
+        }
         Log.Debug("Stored movement capture for attempt {AttemptId}: {Samples} samples, Z {Z}, X {X}",
             attemptId, _sampleCount, _key1Presses, _key2Presses);
         _attemptId = null;
@@ -309,8 +359,10 @@ public sealed class MovementCaptureStore
         SqliteConnection con,
         SqliteTransaction tx,
         string sql,
+        CancellationToken cancellationToken,
         params (string Name, object Value)[] parameters)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var cmd = con.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = sql;

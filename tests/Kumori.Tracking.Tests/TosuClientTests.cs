@@ -52,6 +52,18 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_BoundsPackedModExpansion()
+    {
+        var client = new TosuClient();
+        var packed = string.Concat(Enumerable.Repeat("HD", TosuClient.MaximumParsedMods + 20));
+
+        var raw = System.Text.Json.JsonSerializer.Serialize(new { client = "lazer", play = new { mods = packed } });
+        client.Ingest(Packet(raw));
+
+        Assert.Equal(TosuClient.MaximumParsedMods, client.LastSnapshot!.Mods.Count);
+    }
+
+    [Fact]
     public void Ingest_StableDoesNotDuplicateClassic()
     {
         var client = new TosuClient();
@@ -117,6 +129,19 @@ public class TosuClientTests
         Assert.Equal(45120, received.LiveTimeMs);
         Assert.Equal("xi — FREEDOM DiVE [FOUR DIMENSIONS]", received.BeatmapDisplay);
         Assert.Equal(1, client.PacketCount);
+    }
+
+    [Fact]
+    public void Ingest_BoundsStateNormalizationWork()
+    {
+        var client = new TosuClient();
+        var state = new string('A', TosuClient.MaximumNormalizedStateCharacters + 500);
+
+        var raw = System.Text.Json.JsonSerializer.Serialize(new { state = new { name = state } });
+        client.Ingest(Packet(raw));
+
+        Assert.Equal(TosuClient.MaximumNormalizedStateCharacters, client.LastSnapshot!.State.Length);
+        Assert.All(client.LastSnapshot.State, value => Assert.Equal('a', value));
     }
 
     [Theory]
@@ -221,6 +246,105 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_ClearedReplayGenerationCannotSuppressTheNextRealPlay()
+    {
+        var detector = new ResetAwareReplayPlaybackDetector();
+        var client = new TosuClient(detector);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}"""));
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+
+        for (var index = 0; index < 10; index++)
+            client.Ingest(Packet("""{"client":"lazer","state":{"name":"songSelect"}}""", 101 + index));
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}""", 120));
+        Assert.False(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(1, detector.ResetCount);
+    }
+
+    [Fact]
+    public void Ingest_LateAsyncReplayResultCannotSuppressTheNextRealPlay()
+    {
+        var detector = new LateReplayResultDetector();
+        var client = new TosuClient(detector);
+
+        // An asynchronous detector returns its previous false value on the
+        // packet that starts gameplay, then publishes true in the background.
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}"""));
+        Assert.False(client.LastSnapshot!.IsWatchedReplay);
+
+        for (var index = 0; index < 10; index++)
+            client.Ingest(Packet("""{"client":"lazer","state":{"name":"songSelect"}}""", 101 + index));
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}""", 120));
+
+        Assert.False(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(1, detector.ResetCount);
+    }
+
+    [Fact]
+    public void Ingest_ReplayResultsThenDirectGenuinePlayClearsCompletedGeneration()
+    {
+        var detector = new ResetAwareReplayPlaybackDetector();
+        var client = new TosuClient(detector);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}"""));
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"results"}}""", 101));
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}""", 102));
+
+        Assert.False(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(1, detector.ResetCount);
+    }
+
+    [Fact]
+    public void Ingest_ReplayResultsThenSparseMenuThenGenuinePlayClearsCompletedGeneration()
+    {
+        var detector = new ResetAwareReplayPlaybackDetector();
+        var client = new TosuClient(detector);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}"""));
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"results"}}""", 101));
+        for (var index = 0; index < 5; index++)
+            client.Ingest(Packet("""{"client":"lazer","state":{"name":"songSelect"}}""", 102 + index));
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}""", 110));
+
+        Assert.False(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(1, detector.ResetCount);
+    }
+
+    [Fact]
+    public void Ingest_ReplayResultsThenDirectExplicitReplayRemainsSuppressed()
+    {
+        var detector = new ResetAwareReplayPlaybackDetector();
+        var client = new TosuClient(detector);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}"""));
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"results"}}""", 101));
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"},"play":{"isReplay":true}}""", 102));
+
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(1, detector.ResetCount);
+    }
+
+    [Fact]
+    public void Ingest_ReplayResultsThenDirectFreshNativeReplayRemainsSuppressed()
+    {
+        var detector = new CurrentReplaySignalDetector();
+        var client = new TosuClient(detector);
+
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}"""));
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"results"}}""", 101));
+        client.Ingest(Packet("""{"client":"lazer","state":{"name":"play"}}""", 102));
+
+        Assert.True(client.LastSnapshot!.IsWatchedReplay);
+        Assert.Equal(1, detector.ResetCount);
+        Assert.Equal(2, detector.CheckCount);
+    }
+
+    [Fact]
     public void Ingest_AutoMod_FlagsAutoplay()
     {
         var client = new TosuClient();
@@ -250,6 +374,59 @@ public class TosuClientTests
             CallCount++;
             return results[index];
         }
+    }
+
+    private sealed class ResetAwareReplayPlaybackDetector : IReplayPlaybackDetector
+    {
+        private bool replay = true;
+        public int ResetCount { get; private set; }
+
+        public bool IsWatchingReplay(OsuClientKind clientKind) => replay;
+
+        public void ResetAfterGameplay(OsuClientKind clientKind)
+        {
+            replay = false;
+            ResetCount++;
+        }
+    }
+
+    private sealed class LateReplayResultDetector : IReplayPlaybackDetector
+    {
+        private bool staleResult;
+        private bool firstCheck = true;
+        public int ResetCount { get; private set; }
+
+        public bool IsWatchingReplay(OsuClientKind clientKind)
+        {
+            if (firstCheck)
+            {
+                firstCheck = false;
+                staleResult = true;
+                return false;
+            }
+
+            return staleResult;
+        }
+
+        public void ResetAfterGameplay(OsuClientKind clientKind)
+        {
+            staleResult = false;
+            ResetCount++;
+        }
+    }
+
+    private sealed class CurrentReplaySignalDetector : IReplayPlaybackDetector
+    {
+        public int CheckCount { get; private set; }
+        public int ResetCount { get; private set; }
+
+        public bool IsWatchingReplay(OsuClientKind clientKind)
+        {
+            CheckCount++;
+            return true;
+        }
+
+        public void ResetAfterGameplay(OsuClientKind clientKind) => ResetCount++;
     }
 
     [Fact]
@@ -310,6 +487,82 @@ public class TosuClientTests
         Assert.Equal(6.16, snapshot.BeatmapStats.BaseStars);
         Assert.Equal(7.3, snapshot.BeatmapStats.Stars);
         Assert.Equal(1234, snapshot.BeatmapStats.MaxCombo);
+    }
+
+    [Fact]
+    public void Ingest_ReusesAndAppendsCumulativeHitErrorsUntilAttemptReset()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":100}},"play":{"hitErrorArray":[-4,2]}}"""));
+        var first = client.LastSnapshot!.Play.HitErrors;
+
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":200}},"play":{"hitErrorArray":[-4,2]}}"""));
+        Assert.Same(first, client.LastSnapshot!.Play.HitErrors);
+
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":300}},"play":{"hitErrorArray":[-4,2,7]}}"""));
+        Assert.Same(first, client.LastSnapshot!.Play.HitErrors);
+        Assert.Equal(new double[] { -4, 2, 7 }, first);
+
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":50}},"play":{"hitErrorArray":[1]}}"""));
+        Assert.NotSame(first, client.LastSnapshot!.Play.HitErrors);
+        Assert.Equal(new double[] { 1 }, client.LastSnapshot.Play.HitErrors);
+    }
+
+    [Fact]
+    public void Ingest_BoundsHitErrorCatchupPerPacketAndResumesFromCacheCursor()
+    {
+        var client = new TosuClient();
+        var values = string.Join(',', Enumerable.Range(0, TosuClient.MaximumHitErrorsPerPacket + 17));
+
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":100}},"play":{"hitErrorArray":[""" + values + "]}}"));
+        var cache = client.LastSnapshot!.Play.HitErrors;
+        Assert.Equal(TosuClient.MaximumHitErrorsPerPacket, cache.Count);
+
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":200}},"play":{"hitErrorArray":[""" + values + "]}}"));
+        Assert.Same(cache, client.LastSnapshot!.Play.HitErrors);
+        Assert.Equal(TosuClient.MaximumHitErrorsPerPacket + 17, cache.Count);
+        Assert.Equal(200_000, TosuClient.MaximumHitErrorsPerAttempt);
+    }
+
+    [Fact]
+    public void Ingest_MalformedHitError_DoesNotShiftCumulativeSourceCursor()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":100}},"play":{"hitErrorArray":[1,"invalid",2]}}"""));
+        var cache = client.LastSnapshot!.Play.HitErrors;
+
+        client.Ingest(Packet("""{"state":{"name":"Gameplay"},"beatmap":{"checksum":"map","time":{"live":200}},"play":{"hitErrorArray":[1,"invalid",2,3]}}"""));
+
+        Assert.Same(cache, client.LastSnapshot!.Play.HitErrors);
+        Assert.Equal(new double[] { 1, 2, 3 }, cache);
+    }
+
+    [Fact]
+    public void Ingest_ReusesStaticBeatmapContextOnlyDuringContinuousGameplay()
+    {
+        static string Payload(int live) => """
+            {
+              "client":"lazer","state":{"name":"Gameplay"},
+              "beatmap":{"checksum":"map","time":{"live":__LIVE__},"stats":{"maxCombo":123,"stars":{"total":5.4}}},
+              "folders":{"songs":"songs","game":"game"},
+              "directPath":{"beatmapFile":"map.osu","beatmapFolder":"set"},
+              "play":{"mods":[{"acronym":"HD"}]}
+            }
+            """.Replace("__LIVE__", live.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
+        var client = new TosuClient();
+        client.Ingest(Packet(Payload(100)));
+        var first = client.LastSnapshot!;
+
+        client.Ingest(Packet(Payload(200)));
+        var continuous = client.LastSnapshot!;
+        Assert.Same(first.BeatmapStats, continuous.BeatmapStats);
+        Assert.Same(first.Media, continuous.Media);
+
+        client.Ingest(Packet(Payload(50)));
+        var retry = client.LastSnapshot!;
+        Assert.NotSame(first.BeatmapStats, retry.BeatmapStats);
+        Assert.NotSame(first.Media, retry.Media);
     }
 
     [Fact]

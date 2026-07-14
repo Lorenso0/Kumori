@@ -96,7 +96,7 @@ public partial class BackupWindow : Window
     private sealed class Row(BackupInfo info)
     {
         public BackupInfo Info { get; } = info;
-        public string Display => $"{Info.CreatedAt.ToLocalTime():dd/MM/yyyy HH:mm}   {FormatSize(Info.SizeBytes)}   {Path.GetFileName(Info.Path)}";
+        public string Display => $"{DisplayDateTime.FormatLocalDateTime(Info.CreatedAt)}   {FormatSize(Info.SizeBytes)}   {Path.GetFileName(Info.Path)}";
 
         private static string FormatSize(long bytes) => bytes switch
         {

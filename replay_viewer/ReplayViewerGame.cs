@@ -513,7 +513,7 @@ public partial class ReplayViewerGame : OsuGameBase
         {
             try
             {
-                string importPath = prepareSkinImportPath(skinPath!);
+                string importPath = PrepareSkinImportPath(skinPath!);
 
                 try
                 {
@@ -533,16 +533,14 @@ public partial class ReplayViewerGame : OsuGameBase
                 }
                 finally
                 {
-                    if (!string.Equals(importPath, skinPath, StringComparison.OrdinalIgnoreCase))
+                    try
                     {
-                        try
-                        {
+                        if (File.Exists(importPath))
                             File.Delete(importPath);
-                        }
-                        catch (Exception e)
-                        {
-                            Logger.Error(e, $"Kumori: could not remove temporary skin archive \"{importPath}\".");
-                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.Error(e, $"Kumori: could not remove temporary skin archive \"{importPath}\".");
                     }
                 }
             }
@@ -576,12 +574,17 @@ public partial class ReplayViewerGame : OsuGameBase
             ? element.GetString()
             : null;
 
-    private static string prepareSkinImportPath(string skinPath)
+    internal static string PrepareSkinImportPath(string skinPath)
     {
-        if (File.Exists(skinPath))
-            return skinPath;
-
         string archivePath = Path.Combine(Path.GetTempPath(), $"kumori-skin-{Guid.NewGuid():N}.osk");
+        if (File.Exists(skinPath))
+        {
+            // SkinManager's importer may consume its input archive. Always give
+            // it a disposable copy so Kumori's library remains persistent.
+            File.Copy(skinPath, archivePath);
+            return archivePath;
+        }
+
         ZipFile.CreateFromDirectory(skinPath, archivePath);
         return archivePath;
     }

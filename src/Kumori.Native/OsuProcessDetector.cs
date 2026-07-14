@@ -5,7 +5,7 @@ namespace Kumori.Native;
 
 public static class OsuProcessDetector
 {
-    private static readonly string[] ProcessNames =
+    private static readonly HashSet<string> ProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "osu!",
         "osu",
@@ -15,164 +15,140 @@ public static class OsuProcessDetector
 
     public static bool IsRunning()
     {
-        foreach (var name in ProcessNames)
+        Process[] processes;
+        try
+        {
+            processes = Process.GetProcesses();
+        }
+        catch
+        {
+            return false;
+        }
+
+        var found = false;
+        foreach (var process in processes)
         {
             try
             {
-                var processes = Process.GetProcessesByName(name);
-                var running = processes.Length > 0;
-                foreach (var process in processes)
-                {
-                    process.Dispose();
-                }
-                if (running)
-                {
-                    return true;
-                }
+                if (!found && ProcessNames.Contains(process.ProcessName) && !process.HasExited)
+                    found = true;
             }
             catch
             {
+                // The process can exit or deny access while it is inspected.
+            }
+            finally
+            {
+                process.Dispose();
             }
         }
-        return false;
+        return found;
     }
 
     /// <summary>Returns identities for the currently running osu! client processes.</summary>
     public static IReadOnlySet<int> RunningProcessIds()
     {
         var result = new HashSet<int>();
-        foreach (var name in ProcessNames)
+        Process[] processes;
+        try
+        {
+            processes = Process.GetProcesses();
+        }
+        catch
+        {
+            return result;
+        }
+
+        foreach (var process in processes)
         {
             try
             {
-                foreach (var process in Process.GetProcessesByName(name))
+                if (ProcessNames.Contains(process.ProcessName) && !process.HasExited)
                 {
-                    try
-                    {
-                        if (!process.HasExited)
-                        {
-                            result.Add(process.Id);
-                        }
-                    }
-                    catch
-                    {
-                        // The process can exit while it is being inspected.
-                    }
-                    finally
-                    {
-                        process.Dispose();
-                    }
+                    result.Add(process.Id);
                 }
             }
             catch
             {
+                // The process can exit or deny access while it is inspected.
+            }
+            finally
+            {
+                process.Dispose();
             }
         }
         return result;
     }
 
     /// <summary>
-    /// Stops the current osu! process(es) and returns the executable paths needed
-    /// to launch the same client again. Nothing is stopped if the executable path
-    /// cannot be determined, so the caller never leaves the user unable to reopen osu!.
-    /// </summary>
-    public static IReadOnlyList<string> StopAndCaptureLaunchPaths()
-    {
-        var processes = ProcessNames
-            .SelectMany(Process.GetProcessesByName)
-            .GroupBy(process => process.Id)
-            .Select(group => group.First())
-            .ToArray();
-        var launchPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        try
-        {
-            foreach (var process in processes)
-            {
-                try
-                {
-                    var path = process.MainModule?.FileName;
-                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                    {
-                        launchPaths.Add(path);
-                    }
-                }
-                catch
-                {
-                    // Access to another user's process is denied; do not stop it.
-                }
-            }
-
-            if (launchPaths.Count == 0)
-            {
-                return [];
-            }
-
-            foreach (var process in processes)
-            {
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                        process.WaitForExit(5_000);
-                    }
-                }
-                catch
-                {
-                    // The process may have closed while the display was enumerated.
-                }
-            }
-
-            return launchPaths.ToArray();
-        }
-        finally
-        {
-            foreach (var process in processes)
-            {
-                process.Dispose();
-            }
-        }
-    }
-
-    public static void Launch(IEnumerable<string> executablePaths)
-    {
-        foreach (var executablePath in executablePaths.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = executablePath,
-                WorkingDirectory = Path.GetDirectoryName(executablePath)!,
-                UseShellExecute = true,
-            });
-        }
-    }
-
-    /// <summary>
-    /// Suspends the osu! processes currently owned by this user. The returned
-    /// lease always resumes every process it successfully suspended when disposed.
+    /// Suspends every running osu! client as one all-or-nothing lease. Disposing
+    /// the lease resumes every process, including when display switching fails.
     /// </summary>
     public static OsuProcessSuspension? TrySuspendRunning()
     {
-        var suspended = new List<Process>();
-        foreach (var process in ProcessNames.SelectMany(Process.GetProcessesByName).GroupBy(p => p.Id).Select(g => g.First()))
+        Process[] processes;
+        try
+        {
+            processes = Process.GetProcesses();
+        }
+        catch
+        {
+            return null;
+        }
+
+        var candidates = new List<Process>();
+        foreach (var process in processes)
         {
             try
             {
-                if (!process.HasExited && NativeMethods.NtSuspendProcess(process.Handle) == 0)
+                if (ProcessNames.Contains(process.ProcessName) && !process.HasExited)
                 {
-                    suspended.Add(process);
+                    candidates.Add(process);
                     continue;
                 }
             }
             catch
             {
+                // A process can exit while the snapshot is being filtered.
             }
             process.Dispose();
         }
 
-        if (suspended.Count == 0)
+        var suspended = new List<Process>();
+        var failed = false;
+        foreach (var process in candidates)
         {
+            try
+            {
+                if (process.HasExited)
+                {
+                    process.Dispose();
+                    continue;
+                }
+
+                if (NativeMethods.NtSuspendProcess(process.Handle) != 0)
+                {
+                    failed = true;
+                    process.Dispose();
+                    break;
+                }
+                suspended.Add(process);
+            }
+            catch
+            {
+                failed = true;
+                process.Dispose();
+                break;
+            }
+        }
+
+        if (failed || suspended.Count == 0)
+        {
+            foreach (var process in candidates.Where(process => !suspended.Contains(process)))
+            {
+                process.Dispose();
+            }
+            ResumeAndDispose(suspended);
             return null;
         }
 
@@ -181,21 +157,35 @@ public static class OsuProcessDetector
 
     public sealed class OsuProcessSuspension : IDisposable
     {
-        private List<Process>? _processes;
+        private List<Process>? processes;
 
-        internal OsuProcessSuspension(List<Process> processes) => _processes = processes;
+        internal OsuProcessSuspension(List<Process> processes) => this.processes = processes;
 
         public void Dispose()
         {
-            var processes = Interlocked.Exchange(ref _processes, null);
-            if (processes is null)
+            var suspended = Interlocked.Exchange(ref processes, null);
+            if (suspended is not null)
             {
-                return;
+                ResumeAndDispose(suspended);
             }
+        }
+    }
 
-            foreach (var process in processes)
+    private static void ResumeAndDispose(IEnumerable<Process> processes)
+    {
+        foreach (var process in processes)
+        {
+            try
             {
-                try { _ = NativeMethods.NtResumeProcess(process.Handle); } catch { }
+                if (!process.HasExited)
+                    _ = NativeMethods.NtResumeProcess(process.Handle);
+            }
+            catch
+            {
+                // The process may have closed while the monitor was switching.
+            }
+            finally
+            {
                 process.Dispose();
             }
         }

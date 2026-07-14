@@ -87,7 +87,7 @@ public partial class DeveloperSettingsWindow : Window
             ? entry.Reason
             : FriendlyReason(entry.Source);
 
-        public string Details => $"{entry.TimestampUtc.ToLocalTime():dd MMM yyyy HH:mm:ss} · {entry.Source} · {FormatBytes(entry.Bytes)}";
+        public string Details => $"{DisplayDateTime.FormatLocalDateTimeWithSeconds(entry.TimestampUtc)} · {entry.Source} · {FormatBytes(entry.Bytes)}";
 
         private static string FriendlyReason(string source) => source switch
         {

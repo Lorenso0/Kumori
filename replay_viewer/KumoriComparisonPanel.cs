@@ -1,4 +1,4 @@
-using System.Globalization;
+using Kumori.Core;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
 using osu.Framework.Extensions.Color4Extensions;
@@ -133,13 +133,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
         [BackgroundDependencyLoader]
         private void load()
         {
-            string date = DateTimeOffset.TryParse(
-                attempt.StartedAt,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal,
-                out var parsed)
-                ? parsed.ToLocalTime().ToString("dd MMM yyyy  HH:mm", CultureInfo.CurrentCulture)
-                : attempt.StartedAt;
+            string date = DisplayDateTime.FormatLocalDateTime(attempt.StartedAt);
             string heading = attempt.Ephemeral && !string.IsNullOrWhiteSpace(attempt.SourceName)
                 ? attempt.SourceName
                 : date;

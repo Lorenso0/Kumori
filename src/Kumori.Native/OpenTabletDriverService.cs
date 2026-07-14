@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Serilog;
 
@@ -13,14 +14,20 @@ public sealed record OpenTabletDriverInstallation(
 public static partial class OpenTabletDriverService
 {
     private const string OtdExe = "OpenTabletDriver.UX.Wpf.exe";
-    private const string OtdDaemonExe = "OpenTabletDriver.Daemon.exe";
     private const string SupportedVersion = "0.6.7";
-    private static readonly object OwnedGate = new();
-    private static readonly HashSet<int> OwnedProcessIds = new();
+    private static readonly object LaunchGate = new();
+    private static readonly object MappingGate = new();
+    private static readonly HashSet<int> OwnedProcessIds = [];
+    private static string? refreshExecutablePath;
+    private static IReadOnlyList<OtdMonitor>? appliedTopology;
+    private static IReadOnlyList<OtdMonitor>? pendingTopology;
+    private static DateTimeOffset pendingTopologySince;
 
     public static OpenTabletDriverInstallation? Detect(string configuredPath = "")
     {
-        var executable = CandidatePaths(configuredPath).FirstOrDefault(File.Exists);
+        var executable = CandidatePaths(configuredPath)
+            .Select(NormalizeUxExecutablePath)
+            .FirstOrDefault(File.Exists);
         return executable is null ? null : Inspect(executable);
     }
 
@@ -38,76 +45,355 @@ public static partial class OpenTabletDriverService
 
     public static bool Launch(string executablePath)
     {
-        if (IsUiRunning())
+        lock (LaunchGate)
         {
+            // A daemon may survive without the UX/tray process. Starting the UX
+            // in that state attaches to the existing daemon; OTD's watchdog
+            // checks for it and does not create a duplicate daemon.
+            if (IsUiRunning())
+                return false;
+            return LaunchCore(executablePath);
+        }
+    }
+
+    public static bool IsRunning() => AnyProcess(_ => true);
+
+    public static bool IsUiRunning() => AnyProcess(process =>
+        string.Equals(process.ProcessName, "OpenTabletDriver.UX.Wpf", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDaemonRunning() => AnyProcess(process =>
+        string.Equals(process.ProcessName, "OpenTabletDriver.Daemon", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Closes only the OTD process tree started by this Kumori process. An OTD
+    /// instance that was already running when Kumori opened is never claimed.
+    /// </summary>
+    public static void CloseOwned()
+    {
+        lock (LaunchGate)
+        {
+            var owned = OwnedProcessIds.ToArray();
+            OwnedProcessIds.Clear();
+            if (owned.Length == 0)
+                return;
+
+            var processes = new List<Process>();
+            foreach (var id in owned)
+            {
+                try { processes.Add(Process.GetProcessById(id)); }
+                catch { }
+            }
+
+            foreach (var process in processes)
+            {
+                try { process.CloseMainWindow(); } catch { }
+            }
+
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+            foreach (var process in processes)
+            {
+                try
+                {
+                    var remaining = deadline - DateTimeOffset.UtcNow;
+                    if (remaining > TimeSpan.Zero)
+                        process.WaitForExit((int)remaining.TotalMilliseconds);
+                    if (!process.HasExited)
+                        process.Kill(entireProcessTree: true);
+                }
+                catch { }
+                finally { process.Dispose(); }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Enables automatic OTD refresh after Windows display topology changes.
+    /// OTD 0.6.7 caches the monitor layout in both its daemon and UX process,
+    /// so updating the live profile alone cannot repair absolute cursor output.
+    /// </summary>
+    public static bool ConfigureDisplayMappingRefresh(string otdExecutablePath)
+    {
+        var executablePath = Path.GetFullPath(otdExecutablePath);
+        lock (MappingGate)
+        {
+            refreshExecutablePath = File.Exists(executablePath) ? executablePath : null;
+            appliedTopology = refreshExecutablePath is null ? null : CurrentTopology();
+            pendingTopology = null;
+            return refreshExecutablePath is not null;
+        }
+    }
+
+    public static void StopDisplayMappingRefresh()
+    {
+        lock (MappingGate)
+        {
+            refreshExecutablePath = null;
+            appliedTopology = null;
+            pendingTopology = null;
+        }
+    }
+
+    /// <summary>
+    /// Restarts OTD in the tray after a stable Windows topology change. This
+    /// refreshes OTD's cached virtual-desktop dimensions while reloading the
+    /// user's existing settings file without modifying it.
+    /// </summary>
+    public static bool RefreshDisplayMappingsIfChanged()
+    {
+        lock (MappingGate)
+        {
+            if (refreshExecutablePath is null || !IsRunning())
+                return false;
+
+            var current = CurrentTopology();
+            if (current.Count == 0)
+                return false;
+            if (appliedTopology is null)
+            {
+                appliedTopology = current;
+                return false;
+            }
+            if (TopologyEquals(appliedTopology, current))
+            {
+                pendingTopology = null;
+                return false;
+            }
+
+            // LG Dual Mode can report several short-lived layouts. Wait until
+            // one layout remains unchanged before updating the cursor mapping.
+            if (pendingTopology is null || !TopologyEquals(pendingTopology, current))
+            {
+                pendingTopology = current;
+                pendingTopologySince = DateTimeOffset.UtcNow;
+                return false;
+            }
+            if (DateTimeOffset.UtcNow - pendingTopologySince < TimeSpan.FromSeconds(1))
+                return false;
+
+            if (RestartForDisplayChange(refreshExecutablePath))
+            {
+                appliedTopology = current;
+                pendingTopology = null;
+                return true;
+            }
             return false;
         }
-        if (!File.Exists(executablePath))
-        {
-            throw new FileNotFoundException("OpenTabletDriver executable was not found.", executablePath);
-        }
+    }
 
-        var before = OpenTabletDriverProcesses().Select(p =>
+    /// <summary>
+    /// Immediately refreshes OTD after a display transition that has already
+    /// been confirmed by the caller, such as LG Dual Mode activation.
+    /// </summary>
+    public static bool RefreshAfterDisplayTransition()
+    {
+        lock (MappingGate)
         {
-            using (p) { return p.Id; }
-        }).ToHashSet();
-        var process = Process.Start(new ProcessStartInfo
+            if (refreshExecutablePath is null || !IsRunning())
+                return false;
+            var current = CurrentTopology();
+            if (current.Count == 0 || !RestartForDisplayChange(refreshExecutablePath))
+                return false;
+            appliedTopology = current;
+            pendingTopology = null;
+            return true;
+        }
+    }
+
+    private static IReadOnlyList<OtdMonitor> CurrentTopology()
+    {
+        var displays = new List<OtdMonitor>();
+        var index = 0;
+        while (true)
+        {
+            var device = new DisplayDevice { Size = Marshal.SizeOf<DisplayDevice>() };
+            if (!EnumDisplayDevices(null, index++, ref device, 0))
+                break;
+            const int AttachedToDesktop = 0x1;
+            if ((device.StateFlags & AttachedToDesktop) == 0)
+                continue;
+
+            var mode = new DevMode { Size = (short)Marshal.SizeOf<DevMode>() };
+            if (EnumDisplaySettings(device.DeviceName, -1, ref mode))
+            {
+                displays.Add(new OtdMonitor(
+                    device.DeviceName,
+                    mode.PositionX,
+                    mode.PositionY,
+                    mode.Width,
+                    mode.Height));
+            }
+        }
+        return displays.OrderBy(d => d.DeviceName, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    internal static bool TopologyEquals(IReadOnlyList<OtdMonitor> left, IReadOnlyList<OtdMonitor> right) =>
+        left.Count == right.Count && left.SequenceEqual(right);
+
+    private static bool LaunchCore(string executablePath)
+    {
+        if (!File.Exists(executablePath))
+            throw new FileNotFoundException("OpenTabletDriver executable was not found.", executablePath);
+
+        var daemonWasRunning = IsDaemonRunning();
+        var before = ProcessIds();
+        var startInfo = new ProcessStartInfo
         {
             FileName = executablePath,
             WorkingDirectory = Path.GetDirectoryName(executablePath)!,
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
-        });
+        };
+        // OTD 0.6.7 handles this itself by hiding the window/taskbar entry
+        // after initializing its notification-area icon.
+        startInfo.ArgumentList.Add("--minimized");
+        var process = Process.Start(startInfo);
+        var launched = process is not null;
+        Log.Information(
+            "OpenTabletDriver UX launch requested: Started={Started}, ExistingDaemon={ExistingDaemon}, Executable={Executable}",
+            launched,
+            daemonWasRunning,
+            executablePath);
         if (process is not null)
         {
-            TrackOwnedProcesses(before, process.Id);
+            OwnedProcessIds.Clear();
+            OwnedProcessIds.Add(process.Id);
             process.Dispose();
+            if (!daemonWasRunning)
+                TrackOwnedProcesses(before);
         }
-        return true;
+        return launched;
     }
 
-    public static void CloseOwned()
+    private static bool RestartForDisplayChange(string executablePath)
     {
-        int[] owned;
-        lock (OwnedGate)
+        lock (LaunchGate)
         {
-            owned = OwnedProcessIds.ToArray();
+            if (!File.Exists(executablePath))
+                return false;
+
+            var installationDirectory = Path.GetDirectoryName(Path.GetFullPath(executablePath));
+            if (installationDirectory is null)
+                return false;
+
+            var processes = OpenTabletDriverProcesses()
+                .Where(process => IsFromInstallation(process, installationDirectory))
+                .OrderBy(process => string.Equals(
+                    process.ProcessName,
+                    "OpenTabletDriver.Daemon",
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (processes.Length == 0)
+                return false;
+
+            Log.Information(
+                "Restarting OpenTabletDriver after display topology change without writing its settings file");
             OwnedProcessIds.Clear();
+            try
+            {
+                foreach (var process in processes)
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                            process.Kill(entireProcessTree: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Debug(ex, "Could not stop OpenTabletDriver process {ProcessId} for display refresh", process.Id);
+                    }
+                }
+
+                var deadline = DateTimeOffset.UtcNow.AddSeconds(3);
+                foreach (var process in processes)
+                {
+                    try
+                    {
+                        var remaining = deadline - DateTimeOffset.UtcNow;
+                        if (!process.HasExited && remaining > TimeSpan.Zero)
+                            process.WaitForExit((int)remaining.TotalMilliseconds);
+                        if (!process.HasExited)
+                        {
+                            Log.Warning(
+                                "OpenTabletDriver display refresh was aborted because process {ProcessId} did not exit",
+                                process.Id);
+                            return false;
+                        }
+                    }
+                    catch (InvalidOperationException) { }
+                }
+            }
+            finally
+            {
+                foreach (var process in processes)
+                    process.Dispose();
+            }
+
+            // Let Windows release OTD's single-instance handles before the
+            // minimized UX starts a daemon with a fresh display snapshot.
+            Thread.Sleep(150);
+            var launched = LaunchCore(executablePath);
+            if (launched)
+                Log.Information("OpenTabletDriver display cache refreshed and tray relaunched");
+            return launched;
         }
-        if (owned.Length == 0)
+    }
+
+    private static bool IsFromInstallation(Process process, string installationDirectory)
+    {
+        try
         {
-            return;
+            var processPath = process.MainModule?.FileName;
+            var processDirectory = processPath is null ? null : Path.GetDirectoryName(Path.GetFullPath(processPath));
+            return string.Equals(processDirectory, installationDirectory, StringComparison.OrdinalIgnoreCase);
         }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static HashSet<int> ProcessIds()
+    {
+        var ids = new HashSet<int>();
         foreach (var process in OpenTabletDriverProcesses())
         {
             using (process)
             {
-                if (!owned.Contains(process.Id))
-                {
-                    continue;
-                }
-                try { process.CloseMainWindow(); } catch { }
-                try
-                {
-                    if (!process.WaitForExit(3000))
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                }
-                catch { }
+                try { ids.Add(process.Id); } catch { }
             }
         }
+        return ids;
     }
 
-    public static bool IsUiRunning() =>
-        OpenTabletDriverProcesses().Any(p =>
+    private static void TrackOwnedProcesses(HashSet<int> before)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline)
         {
-            using (p)
+            var foundDaemon = false;
+            foreach (var process in OpenTabletDriverProcesses())
             {
-                return string.Equals(p.ProcessName, "OpenTabletDriver.UX.Wpf", StringComparison.OrdinalIgnoreCase);
+                using (process)
+                {
+                    try
+                    {
+                        if (!before.Contains(process.Id))
+                            OwnedProcessIds.Add(process.Id);
+                        if (OwnedProcessIds.Contains(process.Id)
+                            && string.Equals(process.ProcessName, "OpenTabletDriver.Daemon", StringComparison.OrdinalIgnoreCase))
+                        {
+                            foundDaemon = true;
+                        }
+                    }
+                    catch { }
+                }
             }
-        });
+            if (foundDaemon)
+                return;
+            Thread.Sleep(100);
+        }
+    }
 
     private static IEnumerable<string> CandidatePaths(string configuredPath)
     {
@@ -148,40 +434,39 @@ public static partial class OpenTabletDriverService
         }
     }
 
-    private static OpenTabletDriverInstallation Versionless(string executablePath) =>
-        new(Path.GetFullPath(executablePath), "", false,
-            Directory.Exists(Path.Combine(Path.GetDirectoryName(executablePath)!, "userdata")));
+    private static string NormalizeUxExecutablePath(string path)
+    {
+        if (string.Equals(
+                Path.GetFileName(path),
+                "OpenTabletDriver.Daemon.exe",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.Combine(Path.GetDirectoryName(path)!, OtdExe);
+        }
+        return path;
+    }
 
     private static string ReadVersion(string executablePath)
     {
-        var daemon = Path.Combine(Path.GetDirectoryName(executablePath)!, OtdDaemonExe);
-        if (File.Exists(daemon))
+        // Never execute the daemon as a version probe. Some OTD builds perform
+        // device/HID initialization before handling --version, which can disturb
+        // the cursor even though this is nominally only an inspection.
+        try
         {
-            try
+            var metadata = FileVersionInfo.GetVersionInfo(executablePath);
+            foreach (var text in new[] { metadata.ProductVersion, metadata.FileVersion })
             {
-                using var process = Process.Start(new ProcessStartInfo
+                if (!string.IsNullOrWhiteSpace(text))
                 {
-                    FileName = daemon,
-                    ArgumentList = { "--version" },
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                });
-                if (process is not null && process.WaitForExit(4000))
-                {
-                    var text = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
                     var match = VersionRegex().Match(text);
                     if (match.Success)
-                    {
                         return match.Value;
-                    }
                 }
             }
-            catch (Exception ex)
-            {
-                Log.Debug(ex, "OpenTabletDriver version probe failed");
-            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "OpenTabletDriver file-version inspection failed");
         }
 
         var folder = Path.GetFileName(Path.GetDirectoryName(executablePath)) ?? "";
@@ -189,40 +474,30 @@ public static partial class OpenTabletDriverService
         return folderMatch.Success ? folderMatch.Value : "";
     }
 
-    private static IEnumerable<Process> OpenTabletDriverProcesses() =>
-        Process.GetProcesses().Where(p =>
-            string.Equals(p.ProcessName, "OpenTabletDriver.UX.Wpf", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(p.ProcessName, "OpenTabletDriver.Daemon", StringComparison.OrdinalIgnoreCase));
-
-    private static void TrackOwnedProcesses(HashSet<int> before, int directProcessId)
+    private static IEnumerable<Process> OpenTabletDriverProcesses()
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
-        var found = new HashSet<int> { directProcessId };
-        while (DateTimeOffset.UtcNow < deadline)
+        foreach (var name in new[] { "OpenTabletDriver.UX.Wpf", "OpenTabletDriver.Daemon" })
         {
-            foreach (var process in OpenTabletDriverProcesses())
-            {
-                using (process)
-                {
-                    if (!before.Contains(process.Id))
-                    {
-                        found.Add(process.Id);
-                    }
-                }
-            }
-            if (found.Count > 1 || IsUiRunning())
-            {
-                break;
-            }
-            Thread.Sleep(200);
+            Process[] processes;
+            try { processes = Process.GetProcessesByName(name); }
+            catch { continue; }
+            foreach (var process in processes)
+                yield return process;
         }
-        lock (OwnedGate)
+    }
+
+    private static bool AnyProcess(Func<Process, bool> predicate)
+    {
+        var found = false;
+        foreach (var process in OpenTabletDriverProcesses())
         {
-            foreach (var id in found)
+            using (process)
             {
-                OwnedProcessIds.Add(id);
+                try { found |= predicate(process); }
+                catch { }
             }
         }
+        return found;
     }
 
     private static IEnumerable<string> SafeEnumerateDirectories(string root, string pattern)
@@ -230,6 +505,55 @@ public static partial class OpenTabletDriverService
         try { return Directory.EnumerateDirectories(root, pattern); }
         catch { return Array.Empty<string>(); }
     }
+
+    internal sealed record OtdMonitor(string DeviceName, int X, int Y, int Width, int Height);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DisplayDevice
+    {
+        public int Size;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+        public int StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceId;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DevMode
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        public short SpecVersion;
+        public short DriverVersion;
+        public short Size;
+        public short DriverExtra;
+        public int Fields;
+        public int PositionX;
+        public int PositionY;
+        public int DisplayOrientation;
+        public int DisplayFixedOutput;
+        public short Color;
+        public short Duplex;
+        public short YResolution;
+        public short TTOption;
+        public short Collate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string FormName;
+        public short LogPixels;
+        public int BitsPerPixel;
+        public int Width;
+        public int Height;
+        public int DisplayFlags;
+        public int DisplayFrequency;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "EnumDisplayDevicesW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumDisplayDevices(
+        string? device, int deviceNumber, ref DisplayDevice displayDevice, int flags);
+
+    [DllImport("user32.dll", EntryPoint = "EnumDisplaySettingsW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumDisplaySettings(string deviceName, int modeNumber, ref DevMode mode);
 
     [GeneratedRegex(@"\d+\.\d+\.\d+(?:\.\d+)?")]
     private static partial Regex VersionRegex();

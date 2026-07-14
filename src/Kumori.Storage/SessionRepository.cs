@@ -12,8 +12,29 @@ public sealed class SessionRepository
     }
 
     public List<SessionSummary> GetRecentSessions(int limit = 50)
+        => GetSessionsCore(limit, sessionIds: null);
+
+    /// <summary>
+    /// Loads only the sessions represented by the visible attempt page. This
+    /// avoids aggregating the complete session history whenever the dashboard
+    /// refreshes after a play.
+    /// </summary>
+    public List<SessionSummary> GetSessions(IReadOnlyCollection<long> sessionIds)
     {
-        var results = new List<SessionSummary>(limit);
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        if (sessionIds.Count == 0)
+        {
+            return [];
+        }
+
+        return GetSessionsCore(limit: null, sessionIds);
+    }
+
+    private List<SessionSummary> GetSessionsCore(
+        int? limit,
+        IReadOnlyCollection<long>? sessionIds)
+    {
+        var results = new List<SessionSummary>(limit ?? sessionIds?.Count ?? 0);
         if (!_factory.DatabaseExists)
         {
             return results;
@@ -25,6 +46,21 @@ public sealed class SessionRepository
         var hasDuration = HasColumn(con, "attempts", "duration_seconds");
         var hasChanges = HasTable(con, "attempt_profile_changes");
         using var cmd = con.CreateCommand();
+        var sessionFilter = "";
+        if (sessionIds is not null)
+        {
+            var parameterNames = new List<string>(sessionIds.Count);
+            var parameterIndex = 0;
+            foreach (var sessionId in sessionIds.Distinct())
+            {
+                var name = $"@session{parameterIndex++}";
+                parameterNames.Add(name);
+                cmd.Parameters.AddWithValue(name, sessionId);
+            }
+            sessionFilter = $"WHERE s.id IN ({string.Join(",", parameterNames)})";
+        }
+
+        var limitClause = limit is null ? "" : "LIMIT @limit";
         cmd.CommandText = $"""
             SELECT s.id, s.started_at, s.ended_at, s.active_seconds,
                    {(hasDuration ? "COALESCE(SUM(a.duration_seconds), 0)" : "0")},
@@ -41,11 +77,15 @@ public sealed class SessionRepository
                         : "0")}
             FROM sessions s
             LEFT JOIN attempts a ON a.session_id = s.id
+            {sessionFilter}
             GROUP BY s.id
             ORDER BY s.id DESC
-            LIMIT @limit
+            {limitClause}
             """;
-        cmd.Parameters.AddWithValue("@limit", limit);
+        if (limit is { } requestedLimit)
+        {
+            cmd.Parameters.AddWithValue("@limit", requestedLimit);
+        }
         using var r = cmd.ExecuteReader();
         while (r.Read())
         {

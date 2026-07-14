@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
+using Kumori.Core.Models;
 using Kumori.Storage;
 using Kumori.Tracking;
 using Serilog;
@@ -13,6 +14,7 @@ namespace Kumori.App;
 /// </summary>
 internal sealed class PersistedReplayReconciliationService
 {
+    private const int PersistenceChunkSize = 4096;
     private readonly SqliteConnectionFactory factory;
     private readonly MovementCaptureStore movement;
     private readonly MovementRepository movementRepository;
@@ -35,7 +37,7 @@ internal sealed class PersistedReplayReconciliationService
 
     public void Run(CancellationToken cancellationToken = default)
     {
-        foreach (Candidate candidate in LoadCandidates())
+        foreach (Candidate candidate in LoadCandidates(cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -68,33 +70,71 @@ internal sealed class PersistedReplayReconciliationService
         DateTimeOffset earliest = candidate.StartedAt.AddSeconds(-10);
         DateTimeOffset latest = candidate.EndedAt.AddMinutes(5);
         foreach (string replay in ReplayFiles(gameFolder)
-                     .Select(path => (Path: path, Time: ReplayFileTime(path)))
+                     .Select(path =>
+                     {
+                         cancellationToken.ThrowIfCancellationRequested();
+                         return (Path: path, Time: ReplayFileTime(path));
+                     })
                      .Where(file => file.Time >= earliest && file.Time <= latest)
                      .OrderBy(file => Math.Abs((file.Time - candidate.EndedAt).TotalMilliseconds))
                      .Select(file => file.Path))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!StableReplayFrameRecoverySink.TryRead(
-                    replay, beatmapPath, candidate.Checksum, out var samples, out var replayResult))
+                    replay,
+                    beatmapPath,
+                    candidate.Checksum,
+                    out var samples,
+                    out var replayResult,
+                    cancellationToken))
                 continue;
-            var existing = movementRepository.GetMetadata(candidate.AttemptId);
+            cancellationToken.ThrowIfCancellationRequested();
+            var existing = movementRepository.GetMetadata(candidate.AttemptId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (existing is { SampleCount: > 0 } && existing.Source is "stable_memory" or "stable_live")
             {
-                var memorySamples = movementRepository.GetSamples(candidate.AttemptId);
+                var memorySamples = movementRepository.GetSamples(candidate.AttemptId, cancellationToken);
                 StableReplayComparisonResult comparison = StableReplayComparisonArchive.Save(
-                    candidate.AttemptId, memorySamples, samples, replay, candidate.Checksum);
+                    candidate.AttemptId,
+                    memorySamples,
+                    samples,
+                    replay,
+                    candidate.Checksum,
+                    cancellationToken: cancellationToken);
                 StableReplayFrameDiagnostics.Update(status =>
                 {
                     status.ComparisonReportPath = comparison.ReportPath;
                     status.ComparisonSummary = comparison.Summary;
                 });
             }
-            ReplayResultRecoveryOutcome recovery = resultRecovery.Apply(candidate.AttemptId, replayResult, "stable_replay_reconciliation");
-            if (!candidate.MovementSource.Equals("stable_replay", StringComparison.OrdinalIgnoreCase))
-                Store(candidate.AttemptId, samples, "stable_replay", replay, "Data/r reconciliation");
-            if (recovery.Applied || candidate.NeedsResultResimulation)
+            ReplayResultRecoveryOutcome recovery = resultRecovery.Apply(
+                candidate.AttemptId,
+                replayResult,
+                "stable_replay_reconciliation",
+                cancellationToken);
+            var requiresSimulation = candidate.NeedsResultResimulation || !candidate.NeedsAccuracyAuthorityRepair;
+            var resultNotified = false;
+            if (recovery.Applied)
             {
-                bool requiresSimulation = candidate.NeedsResultResimulation || !candidate.NeedsAccuracyAuthorityRepair;
+                // Apply is already committed and intentionally does not observe
+                // cancellation afterward. Notify immediately so the mandatory
+                // tosu restart cannot be lost if gameplay interrupts optional
+                // comparison/movement work next.
+                resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+                    candidate.AttemptId,
+                    recovery,
+                    replay,
+                    beatmapPath,
+                    Path.GetDirectoryName(beatmapPath),
+                    null,
+                    samples,
+                    requiresSimulation));
+                resultNotified = true;
+            }
+            if (!candidate.MovementSource.Equals("stable_replay", StringComparison.OrdinalIgnoreCase))
+                Store(candidate.AttemptId, samples, "stable_replay", replay, "Data/r reconciliation", cancellationToken);
+            if (!resultNotified && candidate.NeedsResultResimulation)
+            {
                 resultRecovered?.Invoke(new ReplayResultRecoveryContext(
                     candidate.AttemptId,
                     recovery,
@@ -117,15 +157,39 @@ internal sealed class PersistedReplayReconciliationService
             return;
         foreach (string replay in LazerStorage.ResolveReplayFiles(candidate.Checksum, candidate.StartedAt, candidate.GameFolder, candidate.EndedAt))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!StableReplayFrameRecoverySink.TryRead(
-                    replay, beatmap.BeatmapPath, candidate.Checksum, out var samples, out var replayResult))
+                    replay,
+                    beatmap.BeatmapPath,
+                    candidate.Checksum,
+                    out var samples,
+                    out var replayResult,
+                    cancellationToken))
                 continue;
-            ReplayResultRecoveryOutcome recovery = resultRecovery.Apply(candidate.AttemptId, replayResult, "lazer_replay_reconciliation");
-            if (!candidate.MovementSource.Equals("lazer_replay", StringComparison.OrdinalIgnoreCase))
-                Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation");
-            if (recovery.Applied || candidate.NeedsResultResimulation)
+            ReplayResultRecoveryOutcome recovery = resultRecovery.Apply(
+                candidate.AttemptId,
+                replayResult,
+                "lazer_replay_reconciliation",
+                cancellationToken);
+            var requiresSimulation = candidate.NeedsResultResimulation || !candidate.NeedsAccuracyAuthorityRepair;
+            var resultNotified = false;
+            if (recovery.Applied)
             {
-                bool requiresSimulation = candidate.NeedsResultResimulation || !candidate.NeedsAccuracyAuthorityRepair;
+                resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+                    candidate.AttemptId,
+                    recovery,
+                    replay,
+                    beatmap.BeatmapPath,
+                    null,
+                    beatmap.Files,
+                    samples,
+                    requiresSimulation));
+                resultNotified = true;
+            }
+            if (!candidate.MovementSource.Equals("lazer_replay", StringComparison.OrdinalIgnoreCase))
+                Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation", cancellationToken);
+            if (!resultNotified && candidate.NeedsResultResimulation)
+            {
                 resultRecovered?.Invoke(new ReplayResultRecoveryContext(
                     candidate.AttemptId,
                     recovery,
@@ -140,32 +204,71 @@ internal sealed class PersistedReplayReconciliationService
         }
     }
 
-    private void Store(long attemptId, IReadOnlyList<Kumori.Core.Models.MovementSample> samples, string source, string replayPath, string origin)
+    private void Store(
+        long attemptId,
+        IReadOnlyList<MovementSample> samples,
+        string source,
+        string replayPath,
+        string origin,
+        CancellationToken cancellationToken)
     {
         movement.Start(attemptId);
-        movement.AddSamples(samples);
+        MovementSample[] sampleArray;
+        if (samples is MovementSample[] array)
+        {
+            sampleArray = array;
+        }
+        else
+        {
+            sampleArray = new MovementSample[samples.Count];
+            for (var index = 0; index < samples.Count; index++)
+            {
+                if ((index & (PersistenceChunkSize - 1)) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+                sampleArray[index] = samples[index];
+            }
+        }
+        for (var offset = 0; offset < sampleArray.Length; offset += PersistenceChunkSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = Math.Min(PersistenceChunkSize, sampleArray.Length - offset);
+            movement.AddSamples(new ArraySegment<MovementSample>(
+                sampleArray,
+                offset,
+                count));
+        }
         movement.Complete(0, source, JsonSerializer.Serialize(new
         {
             source,
             replay_exact = true,
             replay_path = replayPath,
             origin,
-        }));
+        }), cancellationToken);
         movementReplaced?.Invoke(attemptId);
         Log.Information("Reconciled {Count} persisted replay frames for attempt {AttemptId} from {Origin}", samples.Count, attemptId, origin);
     }
 
-    private IReadOnlyList<Candidate> LoadCandidates()
+    private IReadOnlyList<Candidate> LoadCandidates(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!factory.DatabaseExists)
             return [];
-        using var connection = factory.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = """
+        try
+        {
+            using var connection = factory.Open();
+            if (cancellationToken.CanBeCanceled)
+                connection.DefaultTimeout = 1;
+            cancellationToken.ThrowIfCancellationRequested();
+            using var interruptRegistration = cancellationToken.Register(
+                static state => SQLitePCL.raw.sqlite3_interrupt(((Microsoft.Data.Sqlite.SqliteConnection)state!).Handle),
+                connection);
+            using var command = connection.CreateCommand();
+            command.CommandText = """
             SELECT a.id, a.started_at, COALESCE(a.ended_at, a.started_at),
                    COALESCE(b.checksum, ''), COALESCE(b.beatmap_id, 0),
                    COALESCE(b.set_id, 0), COALESCE(b.difficulty, ''),
-                   c.source_json, COALESCE(m.source, '')
+                   c.source_json, COALESCE(m.source, ''),
+                   a.accuracy, a.n100, a.n50, a.misses
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
             JOIN attempt_context c ON c.attempt_id = a.id
@@ -175,35 +278,54 @@ internal sealed class PersistedReplayReconciliationService
             ORDER BY a.id DESC
             LIMIT 1000
             """;
-        command.Parameters.AddWithValue("@cutoff", DateTimeOffset.UtcNow.AddDays(-14).ToString("O", CultureInfo.InvariantCulture));
-        using var reader = command.ExecuteReader();
-        var result = new List<Candidate>();
-        while (reader.Read())
-        {
-            if (!DateTimeOffset.TryParse(reader.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var started)
-                || !DateTimeOffset.TryParse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var ended))
-                continue;
-            try
+            command.Parameters.AddWithValue("@cutoff", DateTimeOffset.UtcNow.AddDays(-14).ToString("O", CultureInfo.InvariantCulture));
+            cancellationToken.ThrowIfCancellationRequested();
+            using var reader = command.ExecuteReader();
+            var result = new List<Candidate>();
+            while (true)
             {
-                using var source = JsonDocument.Parse(reader.GetString(7));
-                string client = Property(source.RootElement, "client_kind") ?? "unknown";
-                string? beatmapPath = Property(source.RootElement, "beatmap_path");
-                string? gameFolder = Property(source.RootElement, "game_folder");
-                string movementSource = reader.GetString(8);
-                bool needsResultResimulation = NeedsCurrentResultSimulation(source.RootElement);
-                bool needsAccuracyAuthorityRepair = ReplayResultRecoveryStore.NeedsAccuracyAuthorityRepair(source.RootElement);
-                bool needsMovementRecovery = movementSource is "" or "stable_memory" or "stable_live" or "lazer_memory" or "lazer_replay_frame";
-                if (!needsMovementRecovery && !needsResultResimulation && !needsAccuracyAuthorityRepair)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!reader.Read())
+                    break;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!DateTimeOffset.TryParse(reader.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var started)
+                || !DateTimeOffset.TryParse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var ended))
                     continue;
-                string checksum = reader.GetString(3);
-                if (string.IsNullOrWhiteSpace(checksum)) continue;
-                result.Add(new Candidate(reader.GetInt64(0), started, ended, checksum,
-                    reader.GetInt64(4), reader.GetInt64(5), reader.GetString(6), client,
-                    beatmapPath, gameFolder, movementSource, needsResultResimulation, needsAccuracyAuthorityRepair));
+                try
+                {
+                    using var source = JsonDocument.Parse(reader.GetString(7));
+                    string client = Property(source.RootElement, "client_kind") ?? "unknown";
+                    string? beatmapPath = Property(source.RootElement, "beatmap_path");
+                    string? gameFolder = Property(source.RootElement, "game_folder");
+                    string movementSource = reader.GetString(8);
+                    bool needsResultResimulation = NeedsCurrentResultSimulation(source.RootElement);
+                    bool needsAccuracyAuthorityRepair = ReplayResultRecoveryStore.NeedsAccuracyAuthorityRepair(
+                        source.RootElement,
+                        reader.GetDouble(9),
+                        reader.GetInt32(10),
+                        reader.GetInt32(11),
+                        reader.GetInt32(12));
+                    bool needsMovementRecovery = movementSource is "" or "stable_memory" or "stable_live" or "lazer_memory" or "lazer_replay_frame";
+                    if (!needsMovementRecovery && !needsResultResimulation && !needsAccuracyAuthorityRepair)
+                        continue;
+                    string checksum = reader.GetString(3);
+                    if (string.IsNullOrWhiteSpace(checksum)) continue;
+                    result.Add(new Candidate(reader.GetInt64(0), started, ended, checksum,
+                        reader.GetInt64(4), reader.GetInt64(5), reader.GetString(6), client,
+                        beatmapPath, gameFolder, movementSource, needsResultResimulation, needsAccuracyAuthorityRepair));
+                }
+                catch (JsonException) { }
             }
-            catch (JsonException) { }
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
         }
-        return result;
+        catch (Microsoft.Data.Sqlite.SqliteException exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Persisted replay candidate loading was interrupted by gameplay.",
+                exception,
+                cancellationToken);
+        }
     }
 
     internal static IEnumerable<string> ReplayFiles(string gameFolder)

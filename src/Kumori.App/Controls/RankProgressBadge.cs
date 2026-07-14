@@ -182,31 +182,6 @@ public sealed class RankProgressBadge : FrameworkElement
         return geometry;
     }
 
-    private static Geometry createPieGeometry(WpfPoint center, double radius, double progress)
-    {
-        if (progress >= 0.999)
-        {
-            return new EllipseGeometry(center, radius, radius);
-        }
-
-        var endAngle = -90d + progress * 360d;
-        var start = pointOnCircle(center, radius, -90d);
-        var end = pointOnCircle(center, radius, endAngle);
-        var largeArc = progress > 0.5;
-
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
-        {
-            context.BeginFigure(center, true, true);
-            context.LineTo(start, true, false);
-            context.ArcTo(end, new WpfSize(radius, radius), 0d, largeArc, SweepDirection.Clockwise, true, false);
-            context.LineTo(center, true, false);
-        }
-
-        geometry.Freeze();
-        return geometry;
-    }
-
     private static Geometry createArcGeometry(WpfPoint center, double radius, double progress)
     {
         if (progress >= 0.999)

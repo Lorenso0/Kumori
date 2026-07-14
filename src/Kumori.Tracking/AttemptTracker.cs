@@ -121,8 +121,10 @@ public sealed class AttemptTracker
         _judgements = judgements ?? new JudgementCapture();
     }
 
-    public sealed record Frame
+    public readonly record struct Frame
     {
+        public Frame() { }
+
         public AttemptStateMachine.PacketView Packet { get; init; } = new();
         public JudgementCapture.PlayValues Play { get; init; } = new();
         public double WallTime { get; init; }
@@ -170,13 +172,13 @@ public sealed class AttemptTracker
             return;
         }
 
-        var decisions = _machine.Ingest(frame.Packet);
-        if (decisions.Any(d => d.Kind == AttemptStateMachine.Kind.StaleResultsIgnored))
+        if (_machine.TryIngest(frame.Packet, out var decision)
+            && decision!.Kind == AttemptStateMachine.Kind.StaleResultsIgnored)
         {
             return;
         }
 
-        foreach (var decision in decisions)
+        if (decision is not null)
         {
             switch (decision.Kind)
             {
@@ -269,6 +271,7 @@ public sealed class AttemptTracker
             return result;
         }
 
+        var prior = previous.Value;
         var play = result.Play;
         return result with
         {
@@ -276,36 +279,36 @@ public sealed class AttemptTracker
             {
                 LiveTimeMs = result.Packet.LiveTimeMs > 0
                     ? result.Packet.LiveTimeMs
-                    : previous.Packet.LiveTimeMs,
+                    : prior.Packet.LiveTimeMs,
             },
             Play = play with
             {
-                Hit300 = play.Hit300 > 0 ? play.Hit300 : previous.Play.Hit300,
-                Hit100 = play.Hit100 > 0 ? play.Hit100 : previous.Play.Hit100,
-                Hit50 = play.Hit50 > 0 ? play.Hit50 : previous.Play.Hit50,
-                Miss = play.Miss > 0 ? play.Miss : previous.Play.Miss,
-                Geki = play.Geki > 0 ? play.Geki : previous.Play.Geki,
-                Katu = play.Katu > 0 ? play.Katu : previous.Play.Katu,
-                SliderBreak = play.SliderBreak > 0 ? play.SliderBreak : previous.Play.SliderBreak,
-                LargeTickHit = play.LargeTickHit > 0 ? play.LargeTickHit : previous.Play.LargeTickHit,
-                LargeTickMiss = play.LargeTickMiss > 0 ? play.LargeTickMiss : previous.Play.LargeTickMiss,
-                SmallTickHit = play.SmallTickHit > 0 ? play.SmallTickHit : previous.Play.SmallTickHit,
-                SmallTickMiss = play.SmallTickMiss > 0 ? play.SmallTickMiss : previous.Play.SmallTickMiss,
-                SliderTailHit = play.SliderTailHit > 0 ? play.SliderTailHit : previous.Play.SliderTailHit,
-                SliderTailMiss = play.SliderTailMiss > 0 ? play.SliderTailMiss : previous.Play.SliderTailMiss,
-                Combo = play.Combo > 0 ? play.Combo : previous.Play.Combo,
-                PpPeak = play.PpPeak > 0 ? play.PpPeak : previous.Play.PpPeak,
-                PpCurrent = play.PpCurrent > 0 ? play.PpCurrent : previous.Play.PpCurrent,
-                Accuracy = play.Accuracy > 0 ? play.Accuracy : previous.Play.Accuracy,
-                Health = play.Health > 0 ? play.Health : previous.Play.Health,
-                UnstableRate = play.UnstableRate > 0 ? play.UnstableRate : previous.Play.UnstableRate,
-                Progress = play.Progress ?? previous.Play.Progress,
+                Hit300 = play.Hit300 > 0 ? play.Hit300 : prior.Play.Hit300,
+                Hit100 = play.Hit100 > 0 ? play.Hit100 : prior.Play.Hit100,
+                Hit50 = play.Hit50 > 0 ? play.Hit50 : prior.Play.Hit50,
+                Miss = play.Miss > 0 ? play.Miss : prior.Play.Miss,
+                Geki = play.Geki > 0 ? play.Geki : prior.Play.Geki,
+                Katu = play.Katu > 0 ? play.Katu : prior.Play.Katu,
+                SliderBreak = play.SliderBreak > 0 ? play.SliderBreak : prior.Play.SliderBreak,
+                LargeTickHit = play.LargeTickHit > 0 ? play.LargeTickHit : prior.Play.LargeTickHit,
+                LargeTickMiss = play.LargeTickMiss > 0 ? play.LargeTickMiss : prior.Play.LargeTickMiss,
+                SmallTickHit = play.SmallTickHit > 0 ? play.SmallTickHit : prior.Play.SmallTickHit,
+                SmallTickMiss = play.SmallTickMiss > 0 ? play.SmallTickMiss : prior.Play.SmallTickMiss,
+                SliderTailHit = play.SliderTailHit > 0 ? play.SliderTailHit : prior.Play.SliderTailHit,
+                SliderTailMiss = play.SliderTailMiss > 0 ? play.SliderTailMiss : prior.Play.SliderTailMiss,
+                Combo = play.Combo > 0 ? play.Combo : prior.Play.Combo,
+                PpPeak = play.PpPeak > 0 ? play.PpPeak : prior.Play.PpPeak,
+                PpCurrent = play.PpCurrent > 0 ? play.PpCurrent : prior.Play.PpCurrent,
+                Accuracy = play.Accuracy > 0 ? play.Accuracy : prior.Play.Accuracy,
+                Health = play.Health > 0 ? play.Health : prior.Play.Health,
+                UnstableRate = play.UnstableRate > 0 ? play.UnstableRate : prior.Play.UnstableRate,
+                Progress = play.Progress ?? prior.Play.Progress,
             },
-            Score = result.Score > 0 ? result.Score : previous.Score,
-            Grade = !string.IsNullOrWhiteSpace(result.Grade) ? result.Grade : previous.Grade,
-            Pp = result.Pp > 0 ? result.Pp : previous.Pp,
-            FcPp = result.FcPp > 0 ? result.FcPp : previous.FcPp,
-            MaxPp = result.MaxPp > 0 ? result.MaxPp : previous.MaxPp,
+            Score = result.Score > 0 ? result.Score : prior.Score,
+            Grade = !string.IsNullOrWhiteSpace(result.Grade) ? result.Grade : prior.Grade,
+            Pp = result.Pp > 0 ? result.Pp : prior.Pp,
+            FcPp = result.FcPp > 0 ? result.FcPp : prior.FcPp,
+            MaxPp = result.MaxPp > 0 ? result.MaxPp : prior.MaxPp,
         };
     }
 

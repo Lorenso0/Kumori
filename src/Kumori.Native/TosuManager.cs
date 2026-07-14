@@ -23,9 +23,11 @@ public static class TosuManager
         Timeout = TimeSpan.FromMinutes(3),
     };
     private static readonly object ProcessGate = new();
+    private static readonly object RestartTaskGate = new();
     private static readonly SemaphoreSlim InstallGate = new(1, 1);
     private static readonly SemaphoreSlim RestartGate = new(1, 1);
     private static Process? _ownedProcess;
+    private static Task<Process>? _restartTask;
 
     static TosuManager()
     {
@@ -59,7 +61,7 @@ public static class TosuManager
     {
         Directory.CreateDirectory(AppPaths.TosuDir);
         var local = ReadLocalVersion();
-        if (File.Exists(AppPaths.TosuExecutable) && !forceCheck && RecentUpdateCheck() && InstalledDigestIsValid())
+        if (File.Exists(AppPaths.TosuExecutable) && !forceCheck && RecentUpdateCheck() && InstalledDigestIsValid(cancellationToken))
         {
             EnsureEnvironment();
             return new TosuInstallResult(local, AppPaths.TosuExecutable, false);
@@ -68,7 +70,7 @@ public static class TosuManager
         var release = await GetLatestReleaseAsync(cancellationToken).ConfigureAwait(false);
         if (File.Exists(AppPaths.TosuExecutable) &&
             string.Equals(local, release.Version, StringComparison.OrdinalIgnoreCase) &&
-            InstalledDigestIsValid())
+            InstalledDigestIsValid(cancellationToken))
         {
             MarkUpdateChecked(release.Version);
             EnsureEnvironment();
@@ -77,7 +79,7 @@ public static class TosuManager
 
         var downloadPath = Path.Combine(AppPaths.TosuDir, "tosu.download");
         await DownloadAsync(release.Url, downloadPath, cancellationToken).ConfigureAwait(false);
-        if (!VerifyDigest(downloadPath, release.Digest))
+        if (!VerifyDigest(downloadPath, release.Digest, cancellationToken))
         {
             throw new InvalidDataException("Downloaded tosu asset did not match GitHub's SHA-256 digest.");
         }
@@ -87,7 +89,7 @@ public static class TosuManager
         if (release.Url.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
             candidatePath = Path.Combine(AppPaths.TosuDir, "tosu.archive.exe");
-            ExtractExecutable(downloadPath, candidatePath);
+            ExtractExecutable(downloadPath, candidatePath, cancellationToken);
         }
 
         ValidateExecutable(candidatePath);
@@ -98,7 +100,7 @@ public static class TosuManager
         StripZoneIdentifier(tempExe);
         File.Move(tempExe, AppPaths.TosuExecutable, overwrite: true);
         File.WriteAllText(AppPaths.TosuVersionFile, release.Version);
-        File.WriteAllText(AppPaths.TosuDigestFile, ComputeDigest(AppPaths.TosuExecutable));
+        File.WriteAllText(AppPaths.TosuDigestFile, ComputeDigest(AppPaths.TosuExecutable, cancellationToken));
         SafeDelete(downloadPath);
         SafeDelete(Path.Combine(AppPaths.TosuDir, "tosu.archive.exe"));
         SafeDelete(Path.Combine(AppPaths.TosuDir, "tosu-kumori.exe"));
@@ -116,8 +118,11 @@ public static class TosuManager
         CancellationToken cancellationToken = default)
     {
         var install = await EnsureInstalledAsync(forceCheck, cancellationToken).ConfigureAwait(false);
-        EnsureEnvironment();
+        return LaunchInstalledProcess(install.ExecutablePath);
+    }
 
+    private static Process LaunchInstalledProcess(string executablePath)
+    {
         lock (ProcessGate)
         {
             if (_ownedProcess is { HasExited: false })
@@ -136,7 +141,7 @@ public static class TosuManager
 
             _ownedProcess = Process.Start(new ProcessStartInfo
             {
-                FileName = install.ExecutablePath,
+                FileName = executablePath,
                 WorkingDirectory = AppPaths.TosuDir,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -144,6 +149,13 @@ public static class TosuManager
             }) ?? throw new InvalidOperationException("tosu did not start.");
             return _ownedProcess;
         }
+    }
+
+    public static Process LaunchInstalled()
+    {
+        if (!File.Exists(AppPaths.TosuExecutable))
+            throw new FileNotFoundException("Managed tosu is not installed.", AppPaths.TosuExecutable);
+        return LaunchInstalledProcess(AppPaths.TosuExecutable);
     }
 
     public static void CloseOwned()
@@ -180,10 +192,52 @@ public static class TosuManager
         {
             process.Dispose();
         }
+        MoveToolLocalLogs();
     }
 
-    /// <summary>Restarts Kumori's managed tosu process and returns the replacement process.</summary>
-    public static async Task<Process> RestartAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Restarts Kumori's managed tosu process and returns the replacement process.
+    /// Concurrent recovery notifications join the same mandatory restart instead
+    /// of repeatedly tearing down an already-recovering tracker.
+    /// </summary>
+    public static Task<Process> RestartAsync(
+        CancellationToken cancellationToken = default,
+        Func<Func<Process>, Process>? processTransition = null)
+    {
+        Task<Process> restart;
+        lock (RestartTaskGate)
+        {
+            if (_restartTask is { IsCompleted: false } active)
+            {
+                restart = active;
+            }
+            else
+            {
+                restart = RestartCoreAsync(cancellationToken, processTransition);
+                _restartTask = restart;
+                _ = restart.ContinueWith(
+                    completed =>
+                    {
+                        lock (RestartTaskGate)
+                        {
+                            if (ReferenceEquals(_restartTask, completed))
+                                _restartTask = null;
+                        }
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+        }
+
+        return cancellationToken.CanBeCanceled
+            ? restart.WaitAsync(cancellationToken)
+            : restart;
+    }
+
+    private static async Task<Process> RestartCoreAsync(
+        CancellationToken cancellationToken,
+        Func<Func<Process>, Process>? processTransition)
     {
         await RestartGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -192,9 +246,23 @@ public static class TosuManager
             Exception? firstFailure = null;
             for (var attempt = 1; attempt <= 2; attempt++)
             {
-                CloseOwned();
-                await Task.Delay(250, cancellationToken).ConfigureAwait(false);
-                var process = await EnsureInstalledAndLaunchAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                Process ReplaceProcess()
+                {
+                    CloseOwnedForRestart();
+                    // Once close begins, always finish relaunch. This brief
+                    // transition is intentionally synchronous so the app can
+                    // exclude attempt start without holding that boundary over
+                    // the websocket readiness wait.
+                    Thread.Sleep(100);
+                    return File.Exists(AppPaths.TosuExecutable)
+                        ? LaunchInstalledProcess(AppPaths.TosuExecutable)
+                        : throw new FileNotFoundException("Managed tosu is not installed.", AppPaths.TosuExecutable);
+                }
+
+                var process = processTransition is null
+                    ? ReplaceProcess()
+                    : processTransition(ReplaceProcess);
                 try
                 {
                     await WaitForWebSocketAsync(process, cancellationToken).ConfigureAwait(false);
@@ -212,6 +280,35 @@ public static class TosuManager
         finally
         {
             RestartGate.Release();
+        }
+    }
+
+    private static void CloseOwnedForRestart()
+    {
+        Process? process;
+        lock (ProcessGate)
+        {
+            process = _ownedProcess;
+            _ownedProcess = null;
+        }
+        if (process is null)
+            return;
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(1_000);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to stop broken tosu process for mandatory restart");
+        }
+        finally
+        {
+            process.Dispose();
         }
     }
 
@@ -250,17 +347,19 @@ public static class TosuManager
     {
         Directory.CreateDirectory(AppPaths.TosuDir);
         Directory.CreateDirectory(AppPaths.TosuLogDir);
-        MoveToolLocalLogs();
-        AppDataOrganizer.PruneLogs(retentionDays: LogRetentionPolicy.ReadConfiguredDays());
         var lines = File.Exists(AppPaths.TosuEnvFile)
             ? File.ReadAllLines(AppPaths.TosuEnvFile).ToList()
             : new List<string>();
+        var original = lines.ToArray();
         Upsert("OPEN_DASHBOARD_ON_STARTUP", "false");
         Upsert("ENABLE_INGAME_OVERLAY", "false");
+        Upsert("ENABLE_KEY_OVERLAY", "false");
+        Upsert("ENABLE_AUTOUPDATE", "false");
         Upsert("INGAME_OVERLAY_KEYBIND", "");
         Upsert("SERVER_IP", "127.0.0.1");
         Upsert("SERVER_PORT", "24051");
-        File.WriteAllLines(AppPaths.TosuEnvFile, lines);
+        if (!original.SequenceEqual(lines, StringComparer.Ordinal))
+            File.WriteAllLines(AppPaths.TosuEnvFile, lines);
 
         void Upsert(string key, string value)
         {
@@ -398,7 +497,10 @@ public static class TosuManager
         }
     }
 
-    private static void ExtractExecutable(string archivePath, string destination)
+    private static void ExtractExecutable(
+        string archivePath,
+        string destination,
+        CancellationToken cancellationToken)
     {
         using var archive = ZipFile.OpenRead(archivePath);
         var entry = archive.Entries.FirstOrDefault(e =>
@@ -411,7 +513,35 @@ public static class TosuManager
         {
             throw new InvalidDataException("Downloaded tosu executable exceeds the extraction size limit.");
         }
-        entry.ExtractToFile(destination, overwrite: true);
+
+        var temporary = $"{destination}.{Environment.ProcessId}.extracting";
+        try
+        {
+            using var input = entry.Open();
+            using (var output = new FileStream(
+                       temporary,
+                       FileMode.Create,
+                       FileAccess.Write,
+                       FileShare.None,
+                       64 * 1024,
+                       FileOptions.SequentialScan))
+            {
+                var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
+                int read;
+                while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    output.Write(buffer, 0, read);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                output.Flush(flushToDisk: false);
+            }
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+        }
     }
 
     private static void ValidateExecutable(string path)
@@ -424,12 +554,12 @@ public static class TosuManager
         }
     }
 
-    private static bool InstalledDigestIsValid()
+    private static bool InstalledDigestIsValid(CancellationToken cancellationToken)
     {
         try
         {
             return File.Exists(AppPaths.TosuDigestFile) &&
-                   VerifyDigest(AppPaths.TosuExecutable, File.ReadAllText(AppPaths.TosuDigestFile));
+                   VerifyDigest(AppPaths.TosuExecutable, File.ReadAllText(AppPaths.TosuDigestFile), cancellationToken);
         }
         catch (IOException)
         {
@@ -441,20 +571,31 @@ public static class TosuManager
         }
     }
 
-    private static bool VerifyDigest(string path, string expectedDigest)
+    private static bool VerifyDigest(
+        string path,
+        string expectedDigest,
+        CancellationToken cancellationToken = default)
     {
         if (!expectedDigest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)) return false;
         var expected = expectedDigest["sha256:".Length..].Trim();
         if (expected.Length != 64) return false;
-        using var stream = File.OpenRead(path);
-        var actual = Convert.ToHexString(SHA256.HashData(stream));
+        var actual = ComputeDigest(path, cancellationToken)["sha256:".Length..];
         return actual.Equals(expected, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string ComputeDigest(string path)
+    private static string ComputeDigest(string path, CancellationToken cancellationToken = default)
     {
         using var stream = File.OpenRead(path);
-        return "sha256:" + Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
+        int read;
+        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            hash.AppendData(buffer, 0, read);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return "sha256:" + Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
     private static void ValidateWindowsSignaturePolicy(string path)
@@ -529,13 +670,18 @@ public static class TosuManager
     private static Process? FindManagedProcess()
     {
         var target = Path.GetFullPath(AppPaths.TosuExecutable);
+        Process? match = null;
         foreach (var process in Process.GetProcessesByName("tosu"))
         {
             try
             {
-                if (string.Equals(process.MainModule?.FileName, target, StringComparison.OrdinalIgnoreCase))
+                if (match is null && string.Equals(process.MainModule?.FileName, target, StringComparison.OrdinalIgnoreCase))
                 {
-                    return process;
+                    match = process;
+                }
+                else
+                {
+                    process.Dispose();
                 }
             }
             catch
@@ -543,7 +689,7 @@ public static class TosuManager
                 process.Dispose();
             }
         }
-        return null;
+        return match;
     }
 
     private static string ReadLocalVersion()

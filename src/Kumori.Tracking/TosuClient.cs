@@ -12,6 +12,10 @@ namespace Kumori.Tracking;
 public sealed class TosuClient
 {
     private const int ReplayLatchClearPacketCount = 10;
+    internal const int MaximumHitErrorsPerPacket = 4_096;
+    internal const int MaximumHitErrorsPerAttempt = 200_000;
+    internal const int MaximumNormalizedStateCharacters = 128;
+    internal const int MaximumParsedMods = 64;
     private static readonly HashSet<string> PlayingStates = new() { "play", "playing", "gameplay" };
     private static readonly HashSet<string> ResultStates = new()
     {
@@ -19,7 +23,15 @@ public sealed class TosuClient
     };
     private readonly IReplayPlaybackDetector? replayPlaybackDetector;
     private bool watchedReplayLatched;
+    private bool replayGameplayGenerationActive;
+    private bool completedResultsAwaitingNewGameplay;
     private int consecutiveNonGameplayPackets;
+    private List<double> hitErrorsCache = [];
+    private int hitErrorsSourceCursor;
+    private string? hitErrorsIdentity;
+    private long? hitErrorsLastLiveTimeMs;
+    private bool hitErrorsWasPlaying;
+    private bool hitErrorsWasResults;
 
     public TosuClient(IReplayPlaybackDetector? replayPlaybackDetector = null)
     {
@@ -66,6 +78,19 @@ public sealed class TosuClient
                 LastSnapshot?.IsStandardMode ?? false,
                 LastSnapshot?.ClientKind ?? OsuClientKind.Unknown,
                 LastSnapshot?.Mods ?? []);
+
+            // Results belongs to the completed attempt, so its replay latch is
+            // retained for result handling. A following gameplay packet is a
+            // confirmed new attempt, however. Retire the completed detector
+            // generation before asking for a fresh native result; otherwise a
+            // cached replay=true can suppress an immediate genuine retry.
+            if (snapshot.IsPlaying
+                && (LastSnapshot?.IsResults == true || completedResultsAwaitingNewGameplay))
+            {
+                ResetReplayPlaybackGeneration(snapshot.ClientKind);
+                Log.Debug("Replay playback detector generation cleared at results-to-gameplay boundary");
+            }
+
             var nativeReplayDetected = false;
             if (snapshot.IsPlaying && !snapshot.IsWatchedReplay && replayPlaybackDetector is not null)
             {
@@ -79,6 +104,19 @@ public sealed class TosuClient
                     // Replay detection is a defensive guard. A stale native
                     // offset must never stop ordinary tracking packets.
                     Log.Debug(ex, "Native replay-playback detection was unavailable");
+                }
+            }
+            else if (!snapshot.IsPlaying && !snapshot.IsResults && replayPlaybackDetector is not null)
+            {
+                try
+                {
+                    // Keep asynchronous native state warm in stable menu
+                    // telemetry; the result is intentionally ignored here.
+                    _ = replayPlaybackDetector.IsWatchingReplay(snapshot.ClientKind);
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug(ex, "Native replay-playback prewarm was unavailable");
                 }
             }
 
@@ -110,8 +148,25 @@ public sealed class TosuClient
     /// </summary>
     public void ResetReplayPlaybackState()
     {
+        ResetReplayPlaybackGeneration(LastSnapshot?.ClientKind ?? OsuClientKind.Unknown);
+    }
+
+    private void ResetReplayPlaybackGeneration(OsuClientKind clientKind)
+    {
         watchedReplayLatched = false;
+        replayGameplayGenerationActive = false;
+        completedResultsAwaitingNewGameplay = false;
         consecutiveNonGameplayPackets = 0;
+        try
+        {
+            replayPlaybackDetector?.ResetAfterGameplay(clientKind);
+        }
+        catch (Exception ex)
+        {
+            // Reset is defensive native bookkeeping. A detector failure must
+            // never prevent the new gameplay packet from reaching tracking.
+            Log.Debug(ex, "Native replay-playback generation reset was unavailable");
+        }
     }
 
     private TosuSnapshot ApplyReplayPlaybackLatch(TosuSnapshot snapshot, bool nativeReplayDetected)
@@ -119,6 +174,7 @@ public sealed class TosuClient
         var replayDetected = snapshot.IsWatchedReplay || nativeReplayDetected;
         if (snapshot.IsPlaying)
         {
+            replayGameplayGenerationActive = true;
             consecutiveNonGameplayPackets = 0;
             if (replayDetected && !watchedReplayLatched)
             {
@@ -141,6 +197,10 @@ public sealed class TosuClient
 
         if (snapshot.IsResults)
         {
+            // Results conclusively closes the gameplay generation. Remember
+            // that boundary through a short/sparse run of menu telemetry so an
+            // immediate new play cannot inherit the completed replay latch.
+            completedResultsAwaitingNewGameplay = true;
             consecutiveNonGameplayPackets = 0;
             return watchedReplayLatched && !snapshot.IsWatchedReplay
                 ? snapshot with { IsWatchedReplay = true }
@@ -149,15 +209,17 @@ public sealed class TosuClient
 
         // Do not clear on a single non-gameplay packet. During lazer screen
         // transitions tosu can briefly publish an incomplete/unknown state.
-        // Ten consecutive packets still clears quickly in song select while
-        // preventing a replay from becoming recordable halfway through.
-        if (watchedReplayLatched && ++consecutiveNonGameplayPackets >= ReplayLatchClearPacketCount)
+        // Always close the detector generation after ten stable menu packets,
+        // even when its asynchronous positive result arrived too late to latch
+        // on a gameplay packet. Otherwise that stale result can suppress the
+        // next genuine play as replay playback.
+        if (replayGameplayGenerationActive
+            && ++consecutiveNonGameplayPackets >= ReplayLatchClearPacketCount)
         {
-            watchedReplayLatched = false;
-            consecutiveNonGameplayPackets = 0;
-            Log.Debug("Replay playback latch cleared after a stable non-gameplay state");
+            ResetReplayPlaybackGeneration(snapshot.ClientKind);
+            Log.Debug("Replay playback detector generation cleared after a stable non-gameplay state");
         }
-        else if (!watchedReplayLatched)
+        else if (!replayGameplayGenerationActive)
         {
             consecutiveNonGameplayPackets = 0;
         }
@@ -165,7 +227,7 @@ public sealed class TosuClient
         return snapshot;
     }
 
-    private static TosuSnapshot ParseSnapshot(
+    private TosuSnapshot ParseSnapshot(
         JsonElement root,
         TosuPacket packet,
         bool fallbackStandardMode,
@@ -173,6 +235,8 @@ public sealed class TosuClient
         IReadOnlyList<AttemptMod> fallbackMods)
     {
         var state = NormalizedState(root);
+        var isPlaying = PlayingStates.Contains(state);
+        var isResults = ResultStates.Contains(state);
         var parsedClientKind = ParseClientKind(root);
         var clientKind = parsedClientKind == OsuClientKind.Unknown ? fallbackClientKind : parsedClientKind;
         var beatmap = root.TryGetProperty("beatmap", out var bm) && bm.ValueKind == JsonValueKind.Object
@@ -181,7 +245,6 @@ public sealed class TosuClient
 
         string? artist = null, title = null, difficulty = null, checksum = null, mapper = null;
         long? beatmapId = null, beatmapSetId = null, liveTimeMs = null, firstObjectMs = null, lastObjectMs = null;
-        BeatmapStats stats = new();
         if (beatmap.ValueKind == JsonValueKind.Object)
         {
             artist = GetString(beatmap, "artist");
@@ -198,8 +261,22 @@ public sealed class TosuClient
                 firstObjectMs = GetLong(time, "firstObject");
                 lastObjectMs = GetLong(time, "lastObject");
             }
-            stats = ParseBeatmapStats(beatmap);
         }
+
+        var beatmapIdentity = BeatmapIdentity(checksum, beatmapId, artist, title, difficulty, mapper);
+        TosuSnapshot? previousSnapshot = LastSnapshot;
+        var continuousGameplay = isPlaying
+            && previousSnapshot?.IsPlaying == true
+            && previousSnapshot.ClientKind == clientKind
+            && string.Equals(previousSnapshot.BeatmapIdentity, beatmapIdentity, StringComparison.Ordinal)
+            && (liveTimeMs is not { } currentLiveTime
+                || previousSnapshot.LiveTimeMs is not { } priorLiveTime
+                || currentLiveTime >= priorLiveTime);
+        var stats = continuousGameplay && previousSnapshot!.BeatmapStats.RawJson != "{}"
+            ? previousSnapshot.BeatmapStats
+            : beatmap.ValueKind == JsonValueKind.Object
+                ? ParseBeatmapStats(beatmap)
+                : new BeatmapStats();
 
         var play = root.TryGetProperty("play", out var p) && p.ValueKind == JsonValueKind.Object
             ? p
@@ -222,7 +299,7 @@ public sealed class TosuClient
                      hb.ValueKind == JsonValueKind.Object
             ? hb
             : default;
-        var performance = ParsePerformance(play, root, ResultStates.Contains(state));
+        var performance = ParsePerformance(play, root, isResults);
 
         var score = GetLong(play, "score") ?? GetLong(root, "score") ?? GetNestedLong(root, "resultsScreen", "score") ?? 0;
         var grade = GetString(play, "grade")
@@ -240,7 +317,7 @@ public sealed class TosuClient
         {
             progress = Math.Clamp(live / (double)lastObjectMs.Value, 0, 1);
         }
-        if (ResultStates.Contains(state))
+        if (isResults)
         {
             progress = 1;
         }
@@ -248,7 +325,8 @@ public sealed class TosuClient
         if (parsedMods.Count == 0 && !HasExplicitMods(play) && fallbackMods.Count > 0)
             parsedMods = fallbackMods;
         var mods = NormalizeMods(parsedMods, clientKind);
-        var hitErrors = ParseHitErrors(play);
+        var modsKey = mods.Count == 0 ? "NM" : string.Concat(mods.Select(mod => mod.Acronym));
+        var hitErrors = ParseHitErrors(play, beatmapIdentity, liveTimeMs, isPlaying, isResults);
         var richHits = ParseRichHits(play, root);
         var explicitReplay = GetBool(play, "isReplay")
             || GetBool(play, "isWatchingReplay")
@@ -259,15 +337,15 @@ public sealed class TosuClient
         {
             State = state,
             ClientKind = clientKind,
-            IsPlaying = PlayingStates.Contains(state),
-            IsResults = ResultStates.Contains(state),
+            IsPlaying = isPlaying,
+            IsResults = isResults,
             IsStandardMode = TryGetStandardMode(root, out var isStandardMode)
                 ? isStandardMode
                 : fallbackStandardMode,
             Artist = artist,
             Title = title,
             Difficulty = difficulty,
-            BeatmapIdentity = BeatmapIdentity(checksum, beatmapId, artist, title, difficulty, mapper),
+            BeatmapIdentity = beatmapIdentity,
             LiveTimeMs = liveTimeMs,
             WallTime = packet.WallTime,
             MonoTime = packet.MonoTime,
@@ -278,7 +356,10 @@ public sealed class TosuClient
             FirstObjectMs = firstObjectMs,
             LastObjectMs = lastObjectMs,
             BeatmapStats = stats,
-            Media = ParseMedia(root, checksum, beatmapId, beatmapSetId),
+            Media = continuousGameplay
+                    && !string.IsNullOrWhiteSpace(previousSnapshot!.Media?.BeatmapFile)
+                ? previousSnapshot.Media
+                : ParseMedia(root, checksum, beatmapId, beatmapSetId),
             Score = score,
             Grade = grade,
             ProfileName = profileName,
@@ -289,7 +370,7 @@ public sealed class TosuClient
             Pp = performance.Current ?? 0,
             FcPp = performance.Fc ?? 0,
             MaxPp = performance.Max ?? 0,
-            ModsKey = mods.Count == 0 ? "NM" : string.Concat(mods.Select(m => m.Acronym)),
+            ModsKey = modsKey,
             Mods = mods,
             Play = new JudgementCapture.PlayValues
             {
@@ -390,8 +471,19 @@ public sealed class TosuClient
                 _ => "",
             };
         }
-        var lowered = raw.ToLowerInvariant();
-        return string.Concat(lowered.Where(char.IsLetterOrDigit));
+        if (raw.Length == 0)
+            return "";
+
+        int inputLength = Math.Min(raw.Length, MaximumNormalizedStateCharacters);
+        Span<char> normalized = stackalloc char[inputLength];
+        var written = 0;
+        foreach (char value in raw.AsSpan(0, inputLength))
+        {
+            char lowered = char.ToLowerInvariant(value);
+            if (char.IsLetterOrDigit(lowered))
+                normalized[written++] = lowered;
+        }
+        return new string(normalized[..written]);
     }
 
     /// <summary>Port of _mode_is_standard: play.mode ?? profile.mode; object → number==0; scalar → osu/standard/0.</summary>
@@ -527,31 +619,22 @@ public sealed class TosuClient
         // that case its PP is the last in-game estimate, while the result
         // payload contains the finalized value. Prefer result containers only
         // for result packets; during gameplay play.pp remains authoritative.
-        var sources = new List<JsonElement>();
+        double? current = null, fc = null, max = null;
         if (!isResults)
         {
-            sources.Add(play);
+            AccumulatePerformance(play, ref current, ref fc, ref max);
         }
-        foreach (var name in new[] { "resultsScreen", "result", "score", "performance" })
-        {
-            if (TryGetObject(root, name, out var source))
-            {
-                sources.Add(source);
-            }
-        }
+        if (TryGetObject(root, "resultsScreen", out var resultsScreen))
+            AccumulatePerformance(resultsScreen, ref current, ref fc, ref max);
+        if (TryGetObject(root, "result", out var result))
+            AccumulatePerformance(result, ref current, ref fc, ref max);
+        if (TryGetObject(root, "score", out var score))
+            AccumulatePerformance(score, ref current, ref fc, ref max);
+        if (TryGetObject(root, "performance", out var performance))
+            AccumulatePerformance(performance, ref current, ref fc, ref max);
         if (isResults)
         {
-            sources.Add(play);
-        }
-
-        double? current = null, fc = null, max = null;
-        foreach (var source in sources)
-        {
-            var pp = TryGetPpObject(source, out var nested) ? nested : source;
-            current ??= GetDouble(pp, "current") ?? GetDouble(pp, "value") ?? GetDouble(pp, "pp");
-            fc ??= GetDouble(pp, "fc") ?? GetDouble(pp, "fcPp") ?? GetDouble(pp, "fc_pp");
-            max ??= GetDouble(pp, "maxThisPlay") ?? GetDouble(pp, "maxAchievedThisPlay")
-                ?? GetDouble(pp, "max_pp");
+            AccumulatePerformance(play, ref current, ref fc, ref max);
         }
 
         // Older tosu payloads use a scalar root pp value.
@@ -561,6 +644,19 @@ public sealed class TosuClient
         }
         fc ??= GetNestedDouble(root, "performance", "fcPp");
         return new PerformanceValues(current, fc, max);
+    }
+
+    private static void AccumulatePerformance(
+        JsonElement source,
+        ref double? current,
+        ref double? fc,
+        ref double? max)
+    {
+        var pp = TryGetPpObject(source, out var nested) ? nested : source;
+        current ??= GetDouble(pp, "current") ?? GetDouble(pp, "value") ?? GetDouble(pp, "pp");
+        fc ??= GetDouble(pp, "fc") ?? GetDouble(pp, "fcPp") ?? GetDouble(pp, "fc_pp");
+        max ??= GetDouble(pp, "maxThisPlay") ?? GetDouble(pp, "maxAchievedThisPlay")
+            ?? GetDouble(pp, "max_pp");
     }
 
     private static bool TryGetPpObject(JsonElement source, out JsonElement pp)
@@ -576,7 +672,7 @@ public sealed class TosuClient
         return false;
     }
 
-    private sealed record PerformanceValues(double? Current, double? Fc, double? Max);
+    private readonly record struct PerformanceValues(double? Current, double? Fc, double? Max);
 
     private static bool TryGetObject(JsonElement root, string name, out JsonElement obj)
     {
@@ -648,8 +744,11 @@ public sealed class TosuClient
     private static IReadOnlyList<AttemptMod> ParseModArray(JsonElement mods)
     {
         var result = new List<AttemptMod>();
+        var elementsSeen = 0;
         foreach (var mod in mods.EnumerateArray())
         {
+            if (elementsSeen++ >= MaximumParsedMods)
+                break;
             if (mod.ValueKind == JsonValueKind.String)
             {
                 var acronym = mod.GetString();
@@ -678,16 +777,29 @@ public sealed class TosuClient
     {
         if (string.IsNullOrWhiteSpace(packed) || packed.Equals("NM", StringComparison.OrdinalIgnoreCase))
             return [];
-        var value = packed.Trim().ToUpperInvariant().Replace(" ", "");
-        var result = new List<AttemptMod>();
-        for (var index = 0; index + 1 < value.Length; index += 2)
-            result.Add(new AttemptMod(value.Substring(index, 2)));
+        ReadOnlySpan<char> value = packed.AsSpan().Trim();
+        var result = new List<AttemptMod>(Math.Min(MaximumParsedMods, value.Length / 2));
+        Span<char> acronym = stackalloc char[2];
+        var acronymLength = 0;
+        foreach (char input in value)
+        {
+            if (input == ' ')
+                continue;
+            acronym[acronymLength++] = char.ToUpperInvariant(input);
+            if (acronymLength < 2)
+                continue;
+
+            result.Add(new AttemptMod(new string(acronym)));
+            acronymLength = 0;
+            if (result.Count >= MaximumParsedMods)
+                break;
+        }
         return result;
     }
 
     private static RichHitCounts ParseRichHits(JsonElement play, JsonElement root)
     {
-        var hits = CandidateHitObjects(play, root).ToArray();
+        var hits = CandidateHitObjects(play, root);
         return new RichHitCounts
         {
             Geki = FirstNumber(hits, "geki") ?? 0,
@@ -701,69 +813,158 @@ public sealed class TosuClient
         };
     }
 
-    private static IEnumerable<JsonElement> CandidateHitObjects(JsonElement play, JsonElement root)
+    private static HitObjectSources CandidateHitObjects(JsonElement play, JsonElement root)
     {
+        var result = new HitObjectSources();
         if (TryGetObject(play, "hits", out var playHits))
-        {
-            yield return playHits;
-        }
+            result.Add(playHits);
 
         if (TryGetNestedObject(root, "resultsScreen", "hits", out var resultsHits))
-        {
-            yield return resultsHits;
-        }
+            result.Add(resultsHits);
 
         if (TryGetNestedObject(root, "result", "hits", out var resultHits))
-        {
-            yield return resultHits;
-        }
+            result.Add(resultHits);
 
         if (TryGetNestedObject(root, "score", "hits", out var scoreHits))
-        {
-            yield return scoreHits;
-        }
+            result.Add(scoreHits);
 
         if (TryGetNestedObject(root, "score", "result", out var scoreResult)
             && TryGetObject(scoreResult, "hits", out var scoreResultHits))
-        {
-            yield return scoreResultHits;
-        }
+            result.Add(scoreResultHits);
+        return result;
     }
 
-    private static double? FirstNumber(IEnumerable<JsonElement> objects, params string[] names)
+    private static double? FirstNumber(
+        HitObjectSources objects,
+        string first,
+        string? second = null,
+        string? third = null,
+        string? fourth = null)
     {
-        foreach (var obj in objects)
+        for (var index = 0; index < objects.Count; index++)
         {
-            foreach (var name in names)
-            {
-                if (GetDouble(obj, name) is { } value)
-                {
-                    return value;
-                }
-            }
+            JsonElement obj = objects[index];
+            if (GetDouble(obj, first) is { } firstValue)
+                return firstValue;
+            if (second is not null && GetDouble(obj, second) is { } secondValue)
+                return secondValue;
+            if (third is not null && GetDouble(obj, third) is { } thirdValue)
+                return thirdValue;
+            if (fourth is not null && GetDouble(obj, fourth) is { } fourthValue)
+                return fourthValue;
         }
 
         return null;
     }
 
-    private static IReadOnlyList<double> ParseHitErrors(JsonElement play)
+    private struct HitObjectSources
+    {
+        private JsonElement first;
+        private JsonElement second;
+        private JsonElement third;
+        private JsonElement fourth;
+        private JsonElement fifth;
+
+        public int Count { get; private set; }
+
+        public JsonElement this[int index] => index switch
+        {
+            0 => first,
+            1 => second,
+            2 => third,
+            3 => fourth,
+            4 => fifth,
+            _ => throw new ArgumentOutOfRangeException(nameof(index)),
+        };
+
+        public void Add(JsonElement value)
+        {
+            switch (Count++)
+            {
+                case 0: first = value; break;
+                case 1: second = value; break;
+                case 2: third = value; break;
+                case 3: fourth = value; break;
+                case 4: fifth = value; break;
+                default: throw new InvalidOperationException("Too many rich-hit sources.");
+            }
+        }
+    }
+
+    private IReadOnlyList<double> ParseHitErrors(
+        JsonElement play,
+        string beatmapIdentity,
+        long? liveTimeMs,
+        bool isPlaying,
+        bool isResults)
     {
         if (play.ValueKind != JsonValueKind.Object
             || !play.TryGetProperty("hitErrorArray", out var array)
             || array.ValueKind != JsonValueKind.Array)
         {
+            if (isPlaying && (!hitErrorsWasPlaying || hitErrorsIdentity != beatmapIdentity))
+                ResetHitErrors(beatmapIdentity);
+            UpdateHitErrorContinuity(liveTimeMs, isPlaying, isResults);
             return Array.Empty<double>();
         }
 
-        var result = new List<double>();
-        foreach (var item in array.EnumerateArray())
+        // A malformed/local-plugin payload must not turn one websocket callback
+        // into an unbounded loop or a single large List allocation. Ordinary
+        // packets append only a handful of errors; reconnect catch-up advances
+        // over later packets using the same cache cursor.
+        var count = Math.Min(array.GetArrayLength(), MaximumHitErrorsPerAttempt);
+        var continuousAttempt = string.Equals(hitErrorsIdentity, beatmapIdentity, StringComparison.Ordinal)
+            && ((isPlaying && hitErrorsWasPlaying
+                 && liveTimeMs is { } live
+                 && hitErrorsLastLiveTimeMs is { } previousLive
+                 && live >= previousLive)
+                || (isResults && (hitErrorsWasPlaying || hitErrorsWasResults)));
+
+        if (!continuousAttempt || count < hitErrorsSourceCursor)
+            ResetHitErrors(beatmapIdentity, Math.Min(count, MaximumHitErrorsPerPacket));
+
+        if (count == hitErrorsSourceCursor && hitErrorsCache.Count > 0
+            && TryReadHitError(array[count - 1], out var last)
+            && hitErrorsCache[^1] == last)
         {
-            if (item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out var value))
-            {
-                result.Add(value);
-            }
+            UpdateHitErrorContinuity(liveTimeMs, isPlaying, isResults);
+            return hitErrorsCache;
         }
-        return result;
+
+        if (count == hitErrorsSourceCursor && count > 0)
+            ResetHitErrors(beatmapIdentity, count);
+
+        var appendEnd = Math.Min(count, hitErrorsSourceCursor + MaximumHitErrorsPerPacket);
+        for (var index = hitErrorsSourceCursor; index < appendEnd; index++)
+        {
+            if (TryReadHitError(array[index], out var value))
+                hitErrorsCache.Add(value);
+        }
+        hitErrorsSourceCursor = appendEnd;
+
+        hitErrorsIdentity = beatmapIdentity;
+        UpdateHitErrorContinuity(liveTimeMs, isPlaying, isResults);
+        return hitErrorsCache;
+    }
+
+    private void ResetHitErrors(string identity, int capacity = 0)
+    {
+        hitErrorsCache = capacity > 0 ? new List<double>(capacity) : [];
+        hitErrorsSourceCursor = 0;
+        hitErrorsIdentity = identity;
+    }
+
+    private void UpdateHitErrorContinuity(long? liveTimeMs, bool isPlaying, bool isResults)
+    {
+        hitErrorsLastLiveTimeMs = liveTimeMs;
+        hitErrorsWasPlaying = isPlaying;
+        hitErrorsWasResults = isResults;
+    }
+
+    private static bool TryReadHitError(JsonElement item, out double value)
+    {
+        value = 0;
+        return item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out value);
     }
 
     private static BeatmapStats ParseBeatmapStats(JsonElement beatmap)
@@ -937,7 +1138,7 @@ public sealed record TosuMediaInfo
     public string? SkinFolder { get; init; }
 }
 
-internal sealed record RichHitCounts
+internal readonly record struct RichHitCounts
 {
     public double Geki { get; init; }
     public double Katu { get; init; }

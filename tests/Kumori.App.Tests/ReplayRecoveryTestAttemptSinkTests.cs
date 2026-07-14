@@ -15,7 +15,7 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
     {
         SettingsService settings = CreateArmedSettings();
         var capture = new CaptureSink();
-        var sink = new ReplayRecoveryTestAttemptSink(capture, settings);
+        var sink = new ReplayRecoveryTestAttemptSink(capture, settings, action => action());
         AttemptSnapshot snapshot = PopulatedSnapshot();
 
         sink.StartAttempt(new AttemptStart
@@ -49,7 +49,7 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
     {
         SettingsService settings = CreateArmedSettings();
         var capture = new CaptureSink();
-        var sink = new ReplayRecoveryTestAttemptSink(capture, settings);
+        var sink = new ReplayRecoveryTestAttemptSink(capture, settings, action => action());
         AttemptSnapshot snapshot = PopulatedSnapshot();
 
         sink.StartAttempt(new AttemptStart { Identity = "checksum:test" });
@@ -57,6 +57,38 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
 
         Assert.Equal(snapshot.Score, capture.LastFinalization!.Snapshot.Score);
         Assert.True(settings.Current.Developer.ForceReplayRecoveryNextPlay);
+    }
+
+    [Fact]
+    public void CompletedPlay_DefersSettingsWriteAndCannotRearmBeforeItRuns()
+    {
+        SettingsService settings = CreateArmedSettings();
+        var capture = new CaptureSink();
+        Action? deferredWrite = null;
+        var sink = new ReplayRecoveryTestAttemptSink(
+            capture,
+            settings,
+            action => deferredWrite = action);
+        AttemptSnapshot snapshot = PopulatedSnapshot();
+
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "checksum:first",
+            BeatmapStats = new BeatmapStats { Stars = 6 },
+        });
+        sink.Finalize(new AttemptFinalization("completed", "results", snapshot, 1));
+
+        Assert.NotNull(deferredWrite);
+        Assert.True(settings.Current.Developer.ForceReplayRecoveryNextPlay);
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "checksum:second",
+            BeatmapStats = new BeatmapStats { Stars = 7 },
+        });
+        Assert.Equal(7, capture.LastStart!.BeatmapStats.Stars);
+
+        deferredWrite();
+        Assert.False(settings.Current.Developer.ForceReplayRecoveryNextPlay);
     }
 
     private SettingsService CreateArmedSettings()

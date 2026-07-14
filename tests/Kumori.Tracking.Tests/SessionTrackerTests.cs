@@ -14,6 +14,10 @@ public class SessionTrackerTests
     }
 
     [Fact]
+    public void PacketRateFrameIsAValueType()
+        => Assert.True(typeof(SessionTracker.Frame).IsValueType);
+
+    [Fact]
     public void StartsOnFirstStandardGameplay()
     {
         _tracker.Ingest(Frame(0, playing: false));

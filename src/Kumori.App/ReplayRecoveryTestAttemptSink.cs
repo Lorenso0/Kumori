@@ -12,13 +12,16 @@ namespace Kumori.App;
 /// </summary>
 internal sealed class ReplayRecoveryTestAttemptSink(
     IAttemptSink inner,
-    SettingsService settings) : IAttemptSink
+    SettingsService settings,
+    Action<Action> deferSettingsWrite) : IAttemptSink
 {
     private bool forceCurrentAttempt;
+    private bool consumedSwitchPendingPersistence;
 
     public void StartAttempt(AttemptStart start)
     {
-        forceCurrentAttempt = settings.Current.Developer.ForceReplayRecoveryNextPlay;
+        forceCurrentAttempt = !Volatile.Read(ref consumedSwitchPendingPersistence)
+            && settings.Current.Developer.ForceReplayRecoveryNextPlay;
         if (forceCurrentAttempt)
             Log.Warning("Developer replay recovery test armed for the current attempt");
         inner.StartAttempt(forceCurrentAttempt
@@ -60,16 +63,33 @@ internal sealed class ReplayRecoveryTestAttemptSink(
         }
         finally
         {
+            // The one-shot is consumed in memory immediately so another attempt
+            // cannot re-arm it while the settings write waits for gameplay to end.
+            Volatile.Write(ref consumedSwitchPendingPersistence, true);
+            void PersistConsumedSwitch()
+            {
+                try
+                {
+                    settings.Update(value => value.Developer.ForceReplayRecoveryNextPlay = false);
+                    Volatile.Write(ref consumedSwitchPendingPersistence, false);
+                    Log.Information("Developer replay recovery test switch consumed and automatically disabled");
+                }
+                catch (Exception ex)
+                {
+                    // Never fail attempt finalization after the test result was
+                    // already stored. A settings write failure is logged clearly.
+                    Log.Error(ex, "Could not persist the disabled developer replay recovery switch");
+                }
+            }
+
             try
             {
-                settings.Update(value => value.Developer.ForceReplayRecoveryNextPlay = false);
-                Log.Information("Developer replay recovery test switch consumed and automatically disabled");
+                deferSettingsWrite(PersistConsumedSwitch);
             }
             catch (Exception ex)
             {
-                // Never fail attempt finalization after the test result was
-                // already stored. A settings write failure is logged clearly.
-                Log.Error(ex, "Could not persist the disabled developer replay recovery switch");
+                Log.Error(ex, "Could not schedule persistence of the disabled developer replay recovery switch");
+                _ = Task.Run(PersistConsumedSwitch);
             }
         }
     }

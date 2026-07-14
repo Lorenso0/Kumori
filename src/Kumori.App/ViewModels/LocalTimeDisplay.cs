@@ -1,17 +1,12 @@
 using System.Globalization;
+using Kumori.Core;
 
 namespace Kumori.App.ViewModels;
 
 internal static class LocalTimeDisplay
 {
     public static DateTimeOffset? Parse(string? value)
-        => DateTimeOffset.TryParse(
-            value,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-            out var parsed)
-            ? parsed.ToLocalTime()
-            : null;
+        => DisplayDateTime.ParseLocal(value);
 
     public static string Time(string? value, string fallback = "")
         => Parse(value)?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? fallback;
@@ -20,10 +15,16 @@ internal static class LocalTimeDisplay
         => Parse(value)?.ToString("HH:mm:ss", CultureInfo.InvariantCulture) ?? fallback;
 
     public static string DateTime(string? value, string fallback = "")
-        => Parse(value)?.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture) ?? fallback;
+        => DisplayDateTime.FormatLocalDateTime(value, fallback);
 
     public static string DateTimeWithSeconds(string? value, string fallback = "")
-        => Parse(value)?.ToString("dd/MM/yyyy HH:mm:ss", CultureInfo.InvariantCulture) ?? fallback;
+        => DisplayDateTime.FormatLocalDateTimeWithSeconds(value, fallback);
+
+    public static string Date(string? value, string fallback = "")
+        => DisplayDateTime.FormatLocalDate(value, fallback);
+
+    public static string CalendarDate(string? value, string fallback = DisplayDateTime.UnknownDate)
+        => DisplayDateTime.FormatCalendarDate(value, fallback);
 
     public static string Relative(string? value, DateTimeOffset? now = null, string fallback = "")
     {

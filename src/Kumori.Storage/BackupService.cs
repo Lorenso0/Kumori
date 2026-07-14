@@ -47,8 +47,11 @@ public sealed class BackupService
         return backups.OrderByDescending(backup => backup.CreatedAt).ToArray();
     }
 
-    public string Create(KumoriSettings.BackupSettings settings)
+    public string Create(
+        KumoriSettings.BackupSettings settings,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var directory = ResolveDirectory(settings);
         Directory.CreateDirectory(directory);
         if (!File.Exists(trackingDatabase))
@@ -78,26 +81,54 @@ public sealed class BackupService
             using (var source = new SqliteConnection(sourceBuilder.ConnectionString))
             using (var target = new SqliteConnection(targetBuilder.ConnectionString))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 source.Open();
+                cancellationToken.ThrowIfCancellationRequested();
                 target.Open();
-                source.BackupDatabase(target);
+                cancellationToken.ThrowIfCancellationRequested();
+                BackupDatabaseInChunks(source, target, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
                 using var check = target.CreateCommand();
                 check.CommandText = "PRAGMA quick_check";
-                if (!string.Equals(check.ExecuteScalar() as string, "ok", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("The database snapshot failed its integrity check.");
+                using (cancellationToken.Register(
+                           static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle),
+                           target))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        if (!string.Equals(check.ExecuteScalar() as string, "ok", StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException("The database snapshot failed its integrity check.");
+                    }
+                    catch (SqliteException ex) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException(
+                            "The database snapshot integrity check was cancelled.",
+                            ex,
+                            cancellationToken);
+                    }
+                }
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
-            if (File.Exists(settingsFile)) File.Copy(settingsFile, Path.Combine(temporary, "settings.v2.json"));
+            if (File.Exists(settingsFile))
+            {
+                CopyFile(settingsFile, Path.Combine(temporary, "settings.v2.json"), cancellationToken);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
             File.WriteAllText(Path.Combine(temporary, "manifest.json"), JsonSerializer.Serialize(new
             {
                 format = 1,
                 created_at = DateTimeOffset.UtcNow,
                 app_version = typeof(BackupService).Assembly.GetName().Version?.ToString(),
             }));
-            ZipFile.CreateFromDirectory(temporary, pendingArchive, CompressionLevel.Optimal, false);
+            cancellationToken.ThrowIfCancellationRequested();
+            CreateArchive(temporary, pendingArchive, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             ValidateArchive(pendingArchive);
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(pendingArchive, destination);
-            Prune(settings);
+            Prune(settings, cancellationToken);
             return destination;
         }
         finally
@@ -107,12 +138,16 @@ public sealed class BackupService
         }
     }
 
-    public string? CreateAutomaticIfDue(KumoriSettings.BackupSettings settings)
+    public string? CreateAutomaticIfDue(
+        KumoriSettings.BackupSettings settings,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!settings.AutomaticEnabled || !File.Exists(trackingDatabase)) return null;
         var newest = List(settings).FirstOrDefault();
+        cancellationToken.ThrowIfCancellationRequested();
         return newest is null || DateTimeOffset.UtcNow - newest.CreatedAt >= TimeSpan.FromHours(Math.Clamp(settings.IntervalHours, 1, 24 * 30))
-            ? Create(settings)
+            ? Create(settings, cancellationToken)
             : null;
     }
 
@@ -276,10 +311,135 @@ public sealed class BackupService
         }
     }
 
-    private void Prune(KumoriSettings.BackupSettings settings)
+    private static void CopyFile(string source, string destination, CancellationToken cancellationToken)
+    {
+        using var input = new FileStream(
+            source,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 64 * 1024,
+            FileOptions.SequentialScan);
+        using var output = new FileStream(
+            destination,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 64 * 1024,
+            FileOptions.SequentialScan);
+        CopyStream(input, output, cancellationToken);
+    }
+
+    private static void BackupDatabaseInChunks(
+        SqliteConnection source,
+        SqliteConnection target,
+        CancellationToken cancellationToken)
+    {
+        const int pagesPerStep = 64;
+        var backup = SQLitePCL.raw.sqlite3_backup_init(
+            target.Handle,
+            "main",
+            source.Handle,
+            "main");
+        if (backup is null)
+        {
+            throw new SqliteException("Could not initialize the SQLite backup.", SQLitePCL.raw.SQLITE_ERROR);
+        }
+
+        var completed = false;
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = SQLitePCL.raw.sqlite3_backup_step(backup, pagesPerStep);
+                if (result == SQLitePCL.raw.SQLITE_DONE)
+                {
+                    completed = true;
+                    return;
+                }
+                if (result == SQLitePCL.raw.SQLITE_OK)
+                {
+                    continue;
+                }
+                if (result is SQLitePCL.raw.SQLITE_BUSY or SQLitePCL.raw.SQLITE_LOCKED)
+                {
+                    if (cancellationToken.WaitHandle.WaitOne(millisecondsTimeout: 10))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    continue;
+                }
+
+                throw new SqliteException("The SQLite snapshot could not be completed.", result);
+            }
+        }
+        finally
+        {
+            var finishResult = SQLitePCL.raw.sqlite3_backup_finish(backup);
+            if (completed && finishResult != SQLitePCL.raw.SQLITE_OK)
+            {
+                throw new SqliteException("The SQLite snapshot could not be finalized.", finishResult);
+            }
+        }
+    }
+
+    private static void CreateArchive(
+        string sourceDirectory,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        using var output = new FileStream(
+            destination,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 64 * 1024,
+            FileOptions.SequentialScan);
+        using var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false);
+        foreach (var source in Directory.EnumerateFiles(sourceDirectory).OrderBy(Path.GetFileName, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var entry = archive.CreateEntry(Path.GetFileName(source), CompressionLevel.Optimal);
+            using var input = new FileStream(
+                source,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 64 * 1024,
+                FileOptions.SequentialScan);
+            using var entryStream = entry.Open();
+            CopyStream(input, entryStream, cancellationToken);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    internal static void CopyStream(
+        Stream source,
+        Stream destination,
+        CancellationToken cancellationToken)
+    {
+        var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = source.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                return;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            destination.Write(buffer, 0, read);
+        }
+    }
+
+    private void Prune(KumoriSettings.BackupSettings settings, CancellationToken cancellationToken)
     {
         foreach (var backup in List(settings).Skip(Math.Clamp(settings.RetentionCount, 1, 365)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             try { File.Delete(backup.Path); } catch { }
+        }
     }
 
     private static string ResolveDirectory(KumoriSettings.BackupSettings settings) =>

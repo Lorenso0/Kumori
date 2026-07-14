@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
+using Kumori.Core;
 using Kumori.Native;
 
 namespace Kumori.App;
@@ -32,12 +33,15 @@ public partial class UpdateCheckWindow : Window
             var availability = result.IsUpdateAvailable
                 ? "An update is available."
                 : "You are running the latest release.";
+            var published = result.PublishedAt is { } publishedAt
+                ? DisplayDateTime.FormatLocalDateTime(publishedAt)
+                : "not queried (API-free check)";
             StatusText.Text =
                 $"""
                 Current version: {result.CurrentVersion}
                 Latest release: {result.LatestName}
                 Tag: {result.LatestTag}
-                Published: {result.PublishedAt?.ToString("O") ?? "not queried (API-free check)"}
+                Published: {published}
 
                 {availability}
 

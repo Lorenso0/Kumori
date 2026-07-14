@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using Kumori.Core;
 using Kumori.Native;
 
 namespace Kumori.App;
@@ -65,7 +66,7 @@ public partial class StableFrameDebugWindow : Window
             Current summary
               Enabled: {status.Enabled}
               Status file: {path}
-              Updated: {status.UpdatedAt:O}
+              Updated: {DisplayDateTime.FormatLocalDateTimeWithSeconds(status.UpdatedAt)}
               State: {status.State}
               Detail: {status.Detail ?? "none"}
               Active attempt: {status.ActiveAttemptId?.ToString() ?? "none"}
@@ -88,6 +89,10 @@ public partial class StableFrameDebugWindow : Window
               Frames received: {status.LiveFramesReceived}
               Frames buffered: {status.LiveFramesBuffered}
               Frames stored: {status.LiveFramesStored}
+
+            Memory snapshot diagnostics
+              Arm before starting a play. The request now waits for an active
+              stable attempt and captures during that attempt, not in the menu.
 
             Raw status
             {ReadPretty(path)}

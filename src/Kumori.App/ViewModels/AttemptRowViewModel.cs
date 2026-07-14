@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Kumori.Core;
 using Kumori.Core.Models;
 using static System.FormattableString;
 
@@ -53,9 +54,9 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
     }
     public string WhenShort => LocalTimeDisplay.Time(Model.StartedAt);
     public string WhenLong => LocalTimeDisplay.TimeWithSeconds(Model.StartedAt, WhenShort);
-    public string WhenText => LocalTimeDisplay.DateTime(Model.StartedAt, Model.StartedAt);
+    public string WhenText => LocalTimeDisplay.DateTime(Model.StartedAt, DisplayDateTime.UnknownDate);
     public string WhenRelative => LocalTimeDisplay.Relative(Model.StartedAt, fallback: WhenText);
-    public string WhenExact => LocalTimeDisplay.DateTimeWithSeconds(Model.StartedAt, Model.StartedAt);
+    public string WhenExact => LocalTimeDisplay.DateTimeWithSeconds(Model.StartedAt, DisplayDateTime.UnknownDate);
     public string ImprovementLine => Model.IsPersonalBest ? "NEW BEST" : "";
     public string RowStatusLine
     {

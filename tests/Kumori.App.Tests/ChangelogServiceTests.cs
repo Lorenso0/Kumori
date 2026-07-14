@@ -13,6 +13,7 @@ public sealed class ChangelogServiceTests
             """);
 
         var release = Assert.Single(releases);
+        Assert.Equal("13/07/2026", release.DisplayDate);
         Assert.Equal("Big change", Assert.Single(release.Major));
         Assert.Equal("Feature", Assert.Single(release.Features));
         Assert.Equal("Better", Assert.Single(release.Improvements));
@@ -23,5 +24,13 @@ public sealed class ChangelogServiceTests
     public void Parse_RejectsEntriesWithoutVersion()
     {
         Assert.Throws<InvalidDataException>(() => ChangelogService.Parse("[{\"features\":[\"x\"]}]"));
+    }
+
+    [Fact]
+    public void DisplayDate_DoesNotLeakInvalidStoredDate()
+    {
+        var release = Assert.Single(ChangelogService.Parse("[{\"version\":\"1.2.3\",\"date\":\"2026/07/13\"}]"));
+
+        Assert.Equal("Unknown date", release.DisplayDate);
     }
 }

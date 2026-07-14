@@ -9,46 +9,53 @@ public static class DualModeService
     private const int DualWidth = 1920;
     private const int DualHeight = 1080;
     private const int DualRefresh = 330;
+    private const int TransitionAttemptCount = 4;
+    private const int PollsPerAttempt = 13;
+    private const int FinalPollCount = 8;
+    private static readonly TimeSpan TransitionPollInterval = TimeSpan.FromMilliseconds(500);
     public static bool IsDualModeActive() =>
         CurrentDisplayModes().Any(m =>
             m.Width == DualWidth &&
             m.Height == DualHeight &&
             m.Frequency >= DualRefresh - 1);
 
-    public static bool Activate(KumoriSettings settings)
+    public static bool Activate(
+        KumoriSettings settings,
+        CancellationToken cancellationToken = default,
+        Func<Func<bool>, bool>? executeTransition = null)
     {
         if (!settings.Display.AutoSwitchDualMode || IsDualModeActive())
         {
             return true;
         }
-        return ToggleAndWait(settings, active: true);
+        bool Transition() => ToggleAndWait(settings, active: true, cancellationToken);
+        return executeTransition is null ? Transition() : executeTransition(Transition);
     }
 
-    public static bool Deactivate(KumoriSettings settings)
+    public static bool Deactivate(KumoriSettings settings, CancellationToken cancellationToken = default)
     {
         if (!settings.Display.AutoSwitchDualMode || !IsDualModeActive())
         {
             return true;
         }
-        return ToggleAndWait(settings, active: false);
+        return ToggleAndWait(settings, active: false, cancellationToken);
     }
 
     public static bool Toggle(KumoriSettings settings) => Trigger(settings);
 
-    private static bool ToggleAndWait(KumoriSettings settings, bool active)
+    private static bool ToggleAndWait(
+        KumoriSettings settings,
+        bool active,
+        CancellationToken cancellationToken)
     {
-        for (var attempt = 0; attempt < 4; attempt++)
-        {
-            if (!Trigger(settings))
-            {
-                return false;
-            }
-            if (WaitFor(active, TimeSpan.FromSeconds(6)))
-            {
-                return true;
-            }
-        }
-        return WaitFor(active, TimeSpan.FromSeconds(4));
+        return SendWithRetriesAndPoll(
+            () => Trigger(settings),
+            () => IsDualModeActive() == active,
+            TransitionAttemptCount,
+            PollsPerAttempt,
+            FinalPollCount,
+            () => WaitForNextPoll(cancellationToken),
+            cancellationToken);
     }
 
     private static bool Trigger(KumoriSettings settings)
@@ -56,25 +63,108 @@ public static class DualModeService
         return SendDdcDualModeToggle();
     }
 
-    private static bool WaitFor(bool active, TimeSpan timeout)
+    internal static bool SendOnceAndPoll(
+        Func<bool> send,
+        Func<bool> targetReached,
+        int pollCount,
+        Action waitForNextPoll,
+        CancellationToken cancellationToken = default)
     {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (DateTimeOffset.UtcNow < deadline)
+        ArgumentNullException.ThrowIfNull(send);
+        ArgumentNullException.ThrowIfNull(targetReached);
+        ArgumentNullException.ThrowIfNull(waitForNextPoll);
+        if (pollCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pollCount));
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!send())
+            return false;
+
+        return PollForTarget(targetReached, pollCount, waitForNextPoll, cancellationToken);
+    }
+
+    internal static bool SendWithRetriesAndPoll(
+        Func<bool> send,
+        Func<bool> targetReached,
+        int attemptCount,
+        int pollsPerAttempt,
+        int finalPollCount,
+        Action waitForNextPoll,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(send);
+        ArgumentNullException.ThrowIfNull(targetReached);
+        ArgumentNullException.ThrowIfNull(waitForNextPoll);
+        if (attemptCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(attemptCount));
+        if (pollsPerAttempt <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pollsPerAttempt));
+        if (finalPollCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(finalPollCount));
+
+        for (var attempt = 0; attempt < attemptCount; attempt++)
         {
-            try
+            cancellationToken.ThrowIfCancellationRequested();
+            if (TargetReached(targetReached))
+                return true;
+            if (SendOnceAndPoll(
+                    send,
+                    targetReached,
+                    pollsPerAttempt,
+                    waitForNextPoll,
+                    cancellationToken))
             {
-                if (IsDualModeActive() == active)
-                {
-                    return true;
-                }
+                return true;
             }
-            catch (Exception ex)
+        }
+
+        return PollForTarget(targetReached, finalPollCount, waitForNextPoll, cancellationToken);
+    }
+
+    private static bool PollForTarget(
+        Func<bool> targetReached,
+        int pollCount,
+        Action waitForNextPoll,
+        CancellationToken cancellationToken)
+    {
+        for (var poll = 0; poll < pollCount; poll++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (TargetReached(targetReached))
+                return true;
+
+            if (poll + 1 < pollCount)
             {
-                Log.Warning(ex, "Display mode probe failed");
+                waitForNextPoll();
+                cancellationToken.ThrowIfCancellationRequested();
             }
-            Thread.Sleep(500);
         }
         return false;
+    }
+
+    private static bool TargetReached(Func<bool> targetReached)
+    {
+        try
+        {
+            return targetReached();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Display mode probe failed");
+            return false;
+        }
+    }
+
+    private static void WaitForNextPoll(CancellationToken cancellationToken)
+    {
+        if (!cancellationToken.CanBeCanceled)
+        {
+            Thread.Sleep(TransitionPollInterval);
+            return;
+        }
+
+        if (cancellationToken.WaitHandle.WaitOne(TransitionPollInterval))
+            cancellationToken.ThrowIfCancellationRequested();
     }
 
     private static bool SendDdcDualModeToggle()
@@ -82,29 +172,48 @@ public static class DualModeService
         try
         {
             var monitors = EnumeratePhysicalMonitors();
-            var targets = monitors.Where(m =>
-                    m.Description.Contains("lg", StringComparison.OrdinalIgnoreCase) ||
-                    m.Description.Contains("ultragear", StringComparison.OrdinalIgnoreCase) ||
-                    m.Description.Contains("5k2k", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            if (targets.Length == 0)
+            try
             {
-                targets = monitors.ToArray();
+                var targets = monitors.Where(m =>
+                        m.Description.Contains("lg", StringComparison.OrdinalIgnoreCase) ||
+                        m.Description.Contains("ultragear", StringComparison.OrdinalIgnoreCase) ||
+                        m.Description.Contains("5k2k", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (targets.Length == 0)
+                {
+                    targets = monitors.ToArray();
+                }
+
+                Log.Information(
+                    "Sending LG dual-mode DDC command to {MonitorCount} physical monitor(s): {MonitorDescriptions}",
+                    targets.Length,
+                    targets.Select(target => target.Description).ToArray());
+                var success = false;
+                foreach (var monitor in targets)
+                {
+                    if (monitor.Handle == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+                    if (NativeMethods.SetVCPFeature(monitor.Handle, 0xB1, 0x2F00))
+                    {
+                        success = true;
+                    }
+                    else
+                    {
+                        Log.Warning(
+                            "LG dual-mode DDC write failed for {MonitorDescription} with Win32 error {Win32Error}",
+                            monitor.Description,
+                            Marshal.GetLastWin32Error());
+                    }
+                }
+                Log.Information("LG dual-mode DDC command accepted: {Accepted}", success);
+                return success;
             }
-            var success = false;
-            foreach (var monitor in targets)
+            finally
             {
-                if (monitor.Handle == IntPtr.Zero)
-                {
-                    continue;
-                }
-                if (NativeMethods.SetVCPFeature(monitor.Handle, 0xB1, 0x2F00))
-                {
-                    success = true;
-                }
+                DestroyPhysicalMonitors(monitors);
             }
-            DestroyPhysicalMonitors(monitors);
-            return success;
         }
         catch (Exception ex)
         {

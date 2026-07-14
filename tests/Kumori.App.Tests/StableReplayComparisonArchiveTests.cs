@@ -32,6 +32,60 @@ public sealed class StableReplayComparisonArchiveTests : IDisposable
         Assert.Equal(2, report.RootElement.GetProperty("InputTransitions").GetProperty("Matched").GetInt32());
     }
 
+    [Fact]
+    public void CancellationRemovesPendingArchiveWithoutPublishingIt()
+    {
+        Directory.CreateDirectory(root);
+        string osr = Path.Combine(root, "matching.osr");
+        File.WriteAllBytes(osr, [1, 2, 3, 4]);
+        using var cancellation = new CancellationTokenSource();
+        var frames = new CancellingFrames(5_000, cancellation, cancelAt: 100);
+        string comparisons = Path.Combine(root, "comparisons");
+
+        Assert.Throws<OperationCanceledException>(() => StableReplayComparisonArchive.Save(
+            42,
+            frames,
+            Enumerable.Range(0, 5_000).Select(index => Frame(index, 0)).ToArray(),
+            osr,
+            "checksum",
+            comparisons,
+            cancellation.Token));
+
+        Assert.Empty(Directory.EnumerateDirectories(comparisons));
+    }
+
+    [Fact]
+    public void ReplayDecoderRejectsOversizedCandidateBeforeParsing()
+    {
+        Directory.CreateDirectory(root);
+        string replay = Path.Combine(root, "oversized.osr");
+        using (var stream = File.Create(replay))
+            stream.SetLength(StableReplayFrameRecoverySink.MaximumReplayFileBytes + 1);
+
+        bool decoded = StableReplayFrameRecoverySink.TryRead(
+            replay,
+            Path.Combine(root, "missing.osu"),
+            checksum: null,
+            out _);
+
+        Assert.False(decoded);
+    }
+
+    [Fact]
+    public void ReplayDecoderPropagatesCancellationBeforeOpeningCandidate()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() => StableReplayFrameRecoverySink.TryRead(
+            Path.Combine(root, "missing.osr"),
+            Path.Combine(root, "missing.osu"),
+            checksum: null,
+            out _,
+            out _,
+            cancellation.Token));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
@@ -46,4 +100,30 @@ public sealed class StableReplayComparisonArchiveTests : IDisposable
         Buttons = buttons,
         Flags = 1,
     };
+
+    private sealed class CancellingFrames(
+        int count,
+        CancellationTokenSource cancellation,
+        int cancelAt) : IReadOnlyList<MovementSample>
+    {
+        public int Count => count;
+
+        public MovementSample this[int index]
+        {
+            get
+            {
+                if (index == cancelAt)
+                    cancellation.Cancel();
+                return Frame(index, 0);
+            }
+        }
+
+        public IEnumerator<MovementSample> GetEnumerator()
+        {
+            for (var index = 0; index < count; index++)
+                yield return this[index];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 }

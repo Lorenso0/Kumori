@@ -29,10 +29,12 @@ internal static class TosuMediaCache
     public static CachedMedia? Cache(
         TosuMediaInfo media,
         string primaryMirror = "https://api.rai.moe",
-        IReadOnlyList<string>? fallbackMirrors = null)
+        IReadOnlyList<string>? fallbackMirrors = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var beatmapId = media.BeatmapId ?? 0;
             var beatmapSource = ResolvePath(media.BeatmapFile, media.SongsFolder, media.GameFolder);
 
@@ -46,7 +48,8 @@ internal static class TosuMediaCache
             // Realm is the index for lazer's authoritative content store. Read
             // those files in place; the replay viewer accepts a filename-to-path
             // map and no longer needs a linked compatibility directory.
-            var directLazerMedia = ReadDirectLazerMedia(media, key);
+            var directLazerMedia = ReadDirectLazerMedia(media, key, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (directLazerMedia is not null)
             {
                 Log.Debug("Using osu!lazer media directly for beatmap {BeatmapId}", beatmapId);
@@ -60,16 +63,20 @@ internal static class TosuMediaCache
             if (beatmapSource is null || !File.Exists(beatmapSource))
             {
                 Log.Debug("tosu media local beatmap missing; trying mirrors for beatmap {BeatmapId}", beatmapId);
-                return DownloadMedia(media, key, primaryMirror, fallbackMirrors);
+                return DownloadMedia(media, key, primaryMirror, fallbackMirrors, cancellationToken);
             }
 
             var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
             Directory.CreateDirectory(target);
 
-            var parsed = ParseBeatmapMedia(beatmapSource, key, beatmapId, media.BeatmapSetId ?? 0)
+            var parsed = ParseBeatmapMedia(beatmapSource, key, beatmapId, media.BeatmapSetId ?? 0, cancellationToken)
                 with
             { BeatmapFile = $"{(beatmapId > 0 ? beatmapId : "map")}.osu" };
-            LinkOrCopyIntoCache(beatmapSource, Path.Combine(target, parsed.BeatmapFile), "local-beatmap");
+            LinkOrCopyIntoCache(
+                beatmapSource,
+                Path.Combine(target, parsed.BeatmapFile),
+                "local-beatmap",
+                cancellationToken);
 
             var copied = new FileInfo(Path.Combine(target, parsed.BeatmapFile)).Length;
             var names = parsed.SampleEvents.Select(e => e.Filename)
@@ -90,6 +97,7 @@ internal static class TosuMediaCache
 
             foreach (var name in names)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var safe = SafeName(name);
                 var source = CandidateSources(directSources.GetValueOrDefault(name), beatmapFolder, skinFolder, safe)
                     .FirstOrDefault(File.Exists);
@@ -105,7 +113,11 @@ internal static class TosuMediaCache
                     continue;
                 }
 
-                LinkOrCopyIntoCache(source, Path.Combine(target, safe), "local-beatmap-media");
+                LinkOrCopyIntoCache(
+                    source,
+                    Path.Combine(target, safe),
+                    "local-beatmap-media",
+                    cancellationToken);
                 copied += size;
             }
 
@@ -118,10 +130,14 @@ internal static class TosuMediaCache
                 !File.Exists(Path.Combine(target, parsed.AudioFile)))
             {
                 Log.Debug("tosu media audio missing after local cache; trying osu!lazer store for beatmap {BeatmapId}", beatmapId);
-                return DownloadMedia(media, key, primaryMirror, fallbackMirrors) ?? parsed;
+                return DownloadMedia(media, key, primaryMirror, fallbackMirrors, cancellationToken) ?? parsed;
             }
             Log.Debug("tosu media cached for beatmap {BeatmapId} at {Path}", beatmapId, target);
             return parsed;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -160,7 +176,10 @@ internal static class TosuMediaCache
         }
     }
 
-    private static CachedMedia? ReadDirectLazerMedia(TosuMediaInfo media, string key)
+    private static CachedMedia? ReadDirectLazerMedia(
+        TosuMediaInfo media,
+        string key,
+        CancellationToken cancellationToken)
     {
         var beatmapId = media.BeatmapId ?? 0;
         var setId = media.BeatmapSetId ?? 0;
@@ -174,7 +193,7 @@ internal static class TosuMediaCache
         {
             return null;
         }
-        return ParseBeatmapMedia(assets.BeatmapPath, key, beatmapId, setId);
+        return ParseBeatmapMedia(assets.BeatmapPath, key, beatmapId, setId, cancellationToken);
     }
 
     private static string? ResolvePath(string? path, string? songsFolder, string? gameFolder)
@@ -205,7 +224,12 @@ internal static class TosuMediaCache
         return normalized;
     }
 
-    internal static CachedMedia ParseBeatmapMedia(string path, string cacheKey, long beatmapId, long setId)
+    internal static CachedMedia ParseBeatmapMedia(
+        string path,
+        string cacheKey,
+        long beatmapId,
+        long setId,
+        CancellationToken cancellationToken = default)
     {
         var section = "";
         var audio = "";
@@ -217,6 +241,7 @@ internal static class TosuMediaCache
 
         foreach (var raw in File.ReadLines(path))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var line = raw.Trim();
             if (line.StartsWith('['))
             {
@@ -398,7 +423,8 @@ internal static class TosuMediaCache
         TosuMediaInfo media,
         string key,
         string primaryMirror,
-        IReadOnlyList<string>? fallbackMirrors)
+        IReadOnlyList<string>? fallbackMirrors,
+        CancellationToken cancellationToken)
     {
         var beatmapId = media.BeatmapId ?? 0;
         var setId = media.BeatmapSetId ?? 0;
@@ -410,9 +436,10 @@ internal static class TosuMediaCache
         var errors = new List<string>();
         foreach (var mirror in MirrorSequence(primaryMirror, fallbackMirrors))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                return DownloadFromMirror(beatmapId, setId, media.Checksum ?? "", key, mirror);
+                return DownloadFromMirror(beatmapId, setId, media.Checksum ?? "", key, mirror, cancellationToken);
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or HttpRequestException or JsonException or InvalidOperationException)
             {
@@ -431,12 +458,14 @@ internal static class TosuMediaCache
         long setId,
         string checksum,
         string key,
-        string mirror)
+        string mirror,
+        CancellationToken cancellationToken)
     {
         var temp = Path.Combine(Path.GetTempPath(), $"kumori-osz-{Guid.NewGuid():N}.osz");
         try
         {
-            DownloadArchive(MirrorDownloadUrl(mirror, setId), temp);
+            cancellationToken.ThrowIfCancellationRequested();
+            DownloadArchive(MirrorDownloadUrl(mirror, setId), temp, cancellationToken);
             using var archive = ZipFile.OpenRead(temp);
             if (archive.Entries.Count > max_archive_entries)
                 throw new InvalidDataException("beatmap archive contains too many entries");
@@ -444,17 +473,7 @@ internal static class TosuMediaCache
                 .Where(IsSafeMember)
                 .ToArray();
             var osuEntry = members.FirstOrDefault(entry =>
-            {
-                if (!entry.FullName.EndsWith(".osu", StringComparison.OrdinalIgnoreCase)
-                    || entry.Length > max_file_bytes)
-                {
-                    return false;
-                }
-                using var stream = entry.Open();
-                using var reader = new StreamReader(stream);
-                var text = reader.ReadToEnd().Replace(" ", "", StringComparison.Ordinal);
-                return text.Contains($"BeatmapID:{beatmapId}", StringComparison.OrdinalIgnoreCase);
-            });
+                EntryMatchesBeatmapId(entry, beatmapId, cancellationToken));
             if (osuEntry is null)
             {
                 return null;
@@ -463,8 +482,8 @@ internal static class TosuMediaCache
             var target = Path.Combine(AppPaths.BeatmapMediaDir, key);
             Directory.CreateDirectory(target);
             var osuPath = Path.Combine(target, $"{beatmapId}.osu");
-            ExtractIntoCache(osuEntry, osuPath, $"mirror:{mirror}");
-            var parsed = ParseBeatmapMedia(osuPath, key, beatmapId, setId)
+            ExtractIntoCache(osuEntry, osuPath, $"mirror:{mirror}", cancellationToken);
+            var parsed = ParseBeatmapMedia(osuPath, key, beatmapId, setId, cancellationToken)
                 with
             { BeatmapFile = $"{beatmapId}.osu" };
             var wanted = parsed.SampleEvents.Select(e => e.Filename)
@@ -479,6 +498,7 @@ internal static class TosuMediaCache
             var copied = new FileInfo(osuPath).Length;
             foreach (var name in wanted)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!byName.TryGetValue(name, out var entry))
                 {
                     continue;
@@ -487,7 +507,11 @@ internal static class TosuMediaCache
                 {
                     continue;
                 }
-                ExtractIntoCache(entry, Path.Combine(target, name), $"mirror:{mirror}");
+                ExtractIntoCache(
+                    entry,
+                    Path.Combine(target, name),
+                    $"mirror:{mirror}",
+                    cancellationToken);
                 copied += entry.Length;
             }
             WriteManifest(
@@ -504,17 +528,18 @@ internal static class TosuMediaCache
         }
     }
 
-    private static void DownloadArchive(string url, string destination)
+    private static void DownloadArchive(string url, string destination, CancellationToken cancellationToken)
     {
         var currentUrl = url;
         for (var hop = 0; hop <= max_signed_url_hops; hop++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
             {
                 throw new InvalidOperationException("beatmap mirror returned a non-HTTPS download URL");
             }
 
-            using var response = Http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+            using var response = Http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken).GetAwaiter().GetResult();
             response.EnsureSuccessStatusCode();
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
             if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
@@ -524,7 +549,7 @@ internal static class TosuMediaCache
                 if (response.Content.Headers.ContentLength is > max_mirror_metadata_bytes)
                     throw new InvalidDataException("mirror metadata exceeds size limit");
 
-                using var metadata = response.Content.ReadAsStream();
+                using var metadata = response.Content.ReadAsStream(cancellationToken);
                 using var limited = new LimitedReadStream(metadata, max_mirror_metadata_bytes);
                 using var doc = JsonDocument.Parse(limited);
                 if (!doc.RootElement.TryGetProperty("url", out var signedUrlElement) ||
@@ -536,23 +561,27 @@ internal static class TosuMediaCache
                 continue;
             }
 
-            CopyArchiveResponse(response, destination);
+            CopyArchiveResponse(response, destination, cancellationToken);
             return;
         }
         throw new InvalidOperationException("mirror download could not be resolved");
     }
 
-    private static void CopyArchiveResponse(HttpResponseMessage response, string destination)
+    private static void CopyArchiveResponse(
+        HttpResponseMessage response,
+        string destination,
+        CancellationToken cancellationToken)
     {
         if (response.Content.Headers.ContentLength is > max_archive_bytes)
             throw new InvalidDataException("beatmap archive exceeds size limit");
         using var input = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
         using var output = File.Create(destination);
-        var buffer = new byte[1024 * 1024];
+        var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
         long total = 0;
         while (true)
         {
-            var read = input.Read(buffer, 0, buffer.Length);
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = input.ReadAsync(buffer, cancellationToken).AsTask().GetAwaiter().GetResult();
             if (read == 0)
             {
                 break;
@@ -562,6 +591,7 @@ internal static class TosuMediaCache
             {
                 throw new InvalidOperationException("beatmap archive exceeds size limit");
             }
+            cancellationToken.ThrowIfCancellationRequested();
             output.Write(buffer, 0, read);
         }
     }
@@ -599,8 +629,13 @@ internal static class TosuMediaCache
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
-    private static void LinkOrCopyIntoCache(string source, string destination, string origin)
+    private static void LinkOrCopyIntoCache(
+        string source,
+        string destination,
+        string origin,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (LazerMediaStore.TryLink(
                 source,
                 destination,
@@ -612,7 +647,16 @@ internal static class TosuMediaCache
         }
 
         var isNew = !File.Exists(destination);
-        File.Copy(source, destination, overwrite: true);
+        using (var input = new FileStream(
+                   source,
+                   FileMode.Open,
+                   FileAccess.Read,
+                   FileShare.ReadWrite | FileShare.Delete,
+                   bufferSize: 64 * 1024,
+                   FileOptions.SequentialScan))
+        {
+            CopyStreamIntoCache(input, destination, cancellationToken);
+        }
         if (isNew)
         {
             CacheActivityLog.RecordAddition(
@@ -622,11 +666,91 @@ internal static class TosuMediaCache
         }
     }
 
-    private static void ExtractIntoCache(ZipArchiveEntry entry, string destination, string origin)
+    private static void ExtractIntoCache(
+        ZipArchiveEntry entry,
+        string destination,
+        string origin,
+        CancellationToken cancellationToken)
     {
         var isNew = !File.Exists(destination);
-        entry.ExtractToFile(destination, overwrite: true);
+        using (var input = entry.Open())
+        {
+            CopyStreamIntoCache(input, destination, cancellationToken);
+        }
         if (isNew) CacheActivityLog.RecordAddition(destination, origin);
+    }
+
+    internal static void CopyStreamIntoCache(
+        Stream input,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var directory = Path.GetDirectoryName(destination)
+            ?? throw new InvalidOperationException("Cache destination does not have a parent directory.");
+        Directory.CreateDirectory(directory);
+        var pending = Path.Combine(
+            directory,
+            $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var output = new FileStream(
+                       pending,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 64 * 1024,
+                       FileOptions.SequentialScan))
+            {
+                var buffer = GC.AllocateUninitializedArray<byte>(64 * 1024);
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var read = input.Read(buffer, 0, buffer.Length);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    output.Write(buffer, 0, read);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                output.Flush();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(pending, destination, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(pending); } catch { }
+        }
+    }
+
+    private static bool EntryMatchesBeatmapId(
+        ZipArchiveEntry entry,
+        long beatmapId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!entry.FullName.EndsWith(".osu", StringComparison.OrdinalIgnoreCase)
+            || entry.Length > max_file_bytes)
+        {
+            return false;
+        }
+
+        using var stream = entry.Open();
+        using var reader = new StreamReader(stream);
+        while (reader.ReadLine() is { } line)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (line.Replace(" ", "", StringComparison.Ordinal)
+                .Contains($"BeatmapID:{beatmapId}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static string MirrorDownloadUrl(string mirrorBase, long setId)

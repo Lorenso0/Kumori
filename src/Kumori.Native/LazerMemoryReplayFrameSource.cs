@@ -1,6 +1,9 @@
 using System.ComponentModel;
+using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using Kumori.Core;
 using Kumori.Tracking;
@@ -10,17 +13,33 @@ namespace Kumori.Native;
 public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILazerReplayFrameSnapshotSource, IAttemptAwareReplayFrameSource
 {
     private static readonly string[] ProcessNames = ["osu!", "osu"];
+    private static readonly TimeSpan ProcessSearchInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan TosuGameBaseHintInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan FinalTailDrainBudget = TimeSpan.FromMilliseconds(25);
+    private const int MaximumFinalTailPasses = 16;
     private readonly TimeSpan _pollInterval;
     private readonly IReplayFrameStatusSink _status;
     private readonly string? _offsetsPath;
+    private readonly object _readerGate = new();
+    private readonly List<LazerReplayFrame> _attemptFrames = new();
     private long _lastSequence;
     private nint _lastFramesList;
     private nint _lastGameBase;
     private int? _lastProcessId;
     private int? _lastReplayFrameTimeOffset;
     private LazerMemoryOffsets? _replayDetectionOffsets;
-    private int _replayDetectionOffsetsLoadStarted;
+    private int _replayDetectionOffsetsNetworkLoadStarted;
     private int _attemptActive;
+    private long _attemptGeneration;
+    private TaskCompletionSource _attemptStarted = NewAttemptSignal();
+    private Process? _cachedProcess;
+    private ProcessMemory? _cachedMemory;
+    private LazerReplayFrameMemoryReader? _cachedReader;
+    private LazerMemoryOffsets? _cachedReaderOffsets;
+    private DateTimeOffset _nextProcessSearchAt;
+    private DateTimeOffset _nextTosuGameBaseHintAt;
+    private string? _cachedProcessName;
+    private string? _cachedProcessPath;
 
     public LazerMemoryReplayFrameSource(
         TimeSpan? pollInterval = null,
@@ -30,6 +49,7 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         _pollInterval = pollInterval ?? TimeSpan.FromMilliseconds(16);
         _status = status ?? new DelegatingReplayFrameStatusSink();
         _offsetsPath = offsetsPath;
+        WarmReplayDetectionOffsets();
     }
 
     public async IAsyncEnumerable<LazerReplayFrame> ReadFramesAsync(
@@ -39,19 +59,48 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            // No memory handles, process scans, or high-frequency polling are
-            // needed outside an actual lazer attempt.
+            // Keep the reader alive before tosu announces the attempt. osu!lazer
+            // can enter Player before the first usable telemetry packet arrives;
+            // pausing here used to make GameBase discovery start too late and an
+            // entire short map could finish without a single captured frame.
+            // Idle work is still one bounded, below-normal-priority slice per
+            // interval. Once Player appears, frames are emitted into the capture
+            // service's small rolling pre-attempt buffer.
             if (Volatile.Read(ref _attemptActive) == 0)
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-                continue;
+                Task attemptStarted;
+                lock (_readerGate)
+                    attemptStarted = _attemptStarted.Task;
+                await Task.WhenAny(
+                        Task.Delay(LazerMemoryReadPolicy.DiscoveryStepInterval, cancellationToken),
+                        attemptStarted)
+                    .WaitAsync(cancellationToken);
             }
+            else
+            {
+                await Task.Delay(_pollInterval, cancellationToken);
+            }
+
+            var attemptGeneration = Volatile.Read(ref _attemptGeneration);
 
             if (offsets is null)
             {
-                // Refresh once per service, but only when replay capture is
-                // genuinely needed. Finalisation reuses this cache.
-                offsets = LazerMemoryOffsets.Load(_offsetsPath, refreshOfficialCache: _offsetsPath is null);
+                // Offset download/parse is prewarmed off the capture loop. A
+                // song that starts before it completes must not perform file or
+                // network I/O on the gameplay polling path.
+                offsets = Volatile.Read(ref _replayDetectionOffsets);
+                if (offsets is null)
+                {
+                    _status.Update(s =>
+                    {
+                        s.Enabled = true;
+                        s.State = "lazer_memory_offsets_warming";
+                        s.Detail = "Waiting for osu!lazer memory offsets; persisted replay recovery remains available.";
+                        s.LastError = null;
+                    });
+                    await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+                    continue;
+                }
                 var loadedOffsets = offsets;
                 _status.Update(s =>
                 {
@@ -62,13 +111,91 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
                 });
             }
 
-            await Task.Delay(_pollInterval, cancellationToken);
-            IReadOnlyList<LazerReplayFrame> frames = Array.Empty<LazerReplayFrame>();
-
-            using var process = FindProcess();
-            if (process is null)
+            // Vanilla tosu has already resolved GameBase by the time its normal
+            // data loop becomes usable. Reuse that diagnostic as an untrusted
+            // hint so we do not have to walk several gigabytes of managed heap.
+            // The bounded file read is deliberately outside _readerGate and is
+            // never reachable from StartAttempt/the telemetry callback.
+            TosuGameBaseLogHint? tosuGameBaseHint = null;
+            var now = DateTimeOffset.UtcNow;
+            bool gameBaseMissing;
+            lock (_readerGate)
+                gameBaseMissing = _lastGameBase == 0 && (_cachedReader?.LastGameBase ?? 0) == 0;
+            if (gameBaseMissing && now >= _nextTosuGameBaseHintAt)
             {
-                ResetCachedPointers();
+                _nextTosuGameBaseHintAt = now + TosuGameBaseHintInterval;
+                tosuGameBaseHint = await TosuGameBaseLogHintReader.TryReadCurrentAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            IReadOnlyList<LazerReplayFrame> frames = Array.Empty<LazerReplayFrame>();
+            string? waitingStatus = null;
+            bool processChanged = false;
+            bool processAvailable = false;
+
+            // Cross-process memory polling can consume up to the strict 2 ms
+            // budget each tick. Run that CPU/RPM slice below normal priority
+            // and restore the shared worker thread before any await/yield.
+            try
+            {
+                using (new BackgroundThreadPriorityScope())
+                {
+                    lock (_readerGate)
+                    {
+                        if (Volatile.Read(ref _attemptGeneration) != attemptGeneration)
+                        {
+                            continue;
+                        }
+
+                        var reader = GetReaderLocked(
+                            offsets,
+                            out processChanged,
+                            tosuGameBaseHint?.ProcessId);
+                        if (reader is not null)
+                        {
+                            processAvailable = true;
+                            if (tosuGameBaseHint is { } hint && _lastProcessId == hint.ProcessId)
+                                reader.TryAdoptValidatedGameBase(hint.GameBase);
+                            frames = reader.ReadFramesAfter(_lastSequence, _lastFramesList);
+                            CaptureReaderStateLocked(reader, frames);
+                            waitingStatus = reader.LastStatus;
+                        }
+                    }
+                }
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 5)
+            {
+                lock (_readerGate)
+                {
+                    ResetCachedPointersLocked(closeProcess: true);
+                    _nextProcessSearchAt = DateTimeOffset.UtcNow + ProcessSearchInterval;
+                }
+                _status.Update(s =>
+                {
+                    s.State = "lazer_memory_access_denied";
+                    s.Detail = "Could not read osu!lazer memory. Run the tool with matching elevation if osu!lazer is elevated.";
+                    s.LastError = ex.Message;
+                });
+                continue;
+            }
+            catch (Exception ex)
+            {
+                lock (_readerGate)
+                {
+                    ResetCachedPointersLocked(closeProcess: true);
+                    _nextProcessSearchAt = DateTimeOffset.UtcNow + ProcessSearchInterval;
+                }
+                _status.Update(s =>
+                {
+                    s.State = "lazer_memory_error";
+                    s.Detail = "osu!lazer memory reader failed; waiting for the next poll.";
+                    s.LastError = ex.Message;
+                });
+                continue;
+            }
+
+            if (!processAvailable)
+            {
                 _status.Update(s =>
                 {
                     s.State = "osu_lazer_not_running";
@@ -81,78 +208,29 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
                 continue;
             }
 
-            try
+            if (processChanged)
             {
-                var processId = process.Id;
-                if (_lastProcessId != processId)
-                {
-                    ResetCachedPointers();
-                    _lastProcessId = processId;
-                }
-                var processName = process.ProcessName;
-                var processPath = SafeProcessPath(process);
+                var processId = _lastProcessId;
+                var processName = _cachedProcessName;
+                var processPath = _cachedProcessPath;
                 _status.Update(s =>
                 {
                     s.ProcessId = processId;
                     s.ProcessName = processName;
                     s.ProcessPath = processPath;
                 });
-                using var memory = ProcessMemory.Open(process);
-                var reader = new LazerReplayFrameMemoryReader(
-                    memory,
-                    offsets,
-                    _lastReplayFrameTimeOffset,
-                    _lastGameBase);
-                frames = reader.ReadFramesAfter(_lastSequence, _lastFramesList);
-                if (reader.LastGameBase != 0)
-                {
-                    _lastGameBase = reader.LastGameBase;
-                }
-                if (reader.LastReplayFrameTimeOffset is { } timeOffset)
-                {
-                    _lastReplayFrameTimeOffset = timeOffset;
-                }
-                if (reader.FramesListChanged)
-                {
-                    _lastSequence = 0;
-                }
-                if (reader.LastFramesList != 0)
-                {
-                    _lastFramesList = reader.LastFramesList;
-                }
-                if (frames.Count == 0)
-                {
-                    _status.Update(s =>
-                    {
-                        s.State = "lazer_memory_waiting";
-                        s.Detail = reader.LastStatus ?? "osu!lazer is running; replay frames are not available yet.";
-                        s.LastError = null;
-                    });
-                    continue;
-                }
-
             }
-            catch (Win32Exception ex) when (ex.NativeErrorCode == 5)
+
+            if (frames.Count == 0)
             {
                 _status.Update(s =>
                 {
-                    s.State = "lazer_memory_access_denied";
-                    s.Detail = "Could not read osu!lazer memory. Run the tool with matching elevation if osu!lazer is elevated.";
-                    s.LastError = ex.Message;
+                    s.State = "lazer_memory_waiting";
+                    s.Detail = waitingStatus ?? "osu!lazer is running; replay frames are not available yet.";
+                    s.LastError = null;
                 });
                 continue;
             }
-            catch (Exception ex)
-            {
-                _status.Update(s =>
-                {
-                    s.State = "lazer_memory_error";
-                    s.Detail = "osu!lazer memory reader failed; waiting for the next poll.";
-                    s.LastError = ex.Message;
-                });
-                continue;
-            }
-
             var lastFrame = frames[^1];
             _status.Update(s =>
             {
@@ -169,62 +247,93 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
 
             foreach (var frame in frames)
             {
-                _lastSequence = Math.Max(_lastSequence, frame.Sequence ?? _lastSequence);
                 yield return frame;
             }
         }
     }
 
+    /// <summary>
+    /// Keeps native replay detection warm when movement capture is disabled.
+    /// Every scan remains byte/time bounded and runs below normal priority.
+    /// </summary>
+    public async Task PrewarmGameBaseAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            await Task.Delay(LazerMemoryReadPolicy.DiscoveryStepInterval, cancellationToken)
+                .ConfigureAwait(false);
+            if (Volatile.Read(ref _attemptActive) == 0)
+                TryWarmGameBase();
+        }
+    }
+
     public IReadOnlyList<LazerReplayFrame> ReadCurrentFramesSnapshot()
     {
-        var offsets = LazerMemoryOffsets.Load(_offsetsPath);
-        using var process = FindProcess();
-        if (process is null)
-        {
-            return Array.Empty<LazerReplayFrame>();
-        }
-
-        using var memory = ProcessMemory.Open(process);
-        if (_lastProcessId != process.Id)
-        {
-            ResetCachedPointers();
-            _lastProcessId = process.Id;
-        }
-        var reader = new LazerReplayFrameMemoryReader(
-            memory,
-            offsets,
-            _lastReplayFrameTimeOffset,
-            _lastGameBase);
-        var frames = reader.ReadAllFrames();
-        if (reader.LastGameBase != 0)
-        {
-            _lastGameBase = reader.LastGameBase;
-        }
-        if (reader.LastReplayFrameTimeOffset is { } timeOffset)
-        {
-            _lastReplayFrameTimeOffset = timeOffset;
-        }
-        if (reader.LastFramesList != 0)
-        {
-            _lastFramesList = reader.LastFramesList;
-        }
-        return frames;
+        lock (_readerGate)
+            return _attemptFrames.ToArray();
     }
 
     internal void WarmReplayDetectionOffsets()
     {
-        if (Interlocked.Exchange(ref _replayDetectionOffsetsLoadStarted, 1) != 0)
+        if (Volatile.Read(ref _replayDetectionOffsets) is not null)
             return;
 
-        _ = Task.Run(() =>
+        // Constructors and packet-side replay detection may only touch the
+        // small existing cache. A missing cache must never trigger network or
+        // file replacement work outside the gameplay-idle coordinator.
+        var offsets = LazerMemoryOffsets.LoadCached(_offsetsPath);
+        if (offsets is not null)
+            Volatile.Write(ref _replayDetectionOffsets, offsets);
+    }
+
+    public async Task EnsureReplayDetectionOffsetsAsync(CancellationToken cancellationToken = default)
+    {
+        WarmReplayDetectionOffsets();
+        if (Volatile.Read(ref _replayDetectionOffsets) is not null)
+            return;
+        if (Interlocked.Exchange(ref _replayDetectionOffsetsNetworkLoadStarted, 1) != 0)
+            return;
+
+        try
         {
-            try
-            {
-                var offsets = LazerMemoryOffsets.Load(_offsetsPath);
-                Volatile.Write(ref _replayDetectionOffsets, offsets);
-            }
-            catch { }
-        });
+            var offsets = await LazerMemoryOffsets.LoadAsync(_offsetsPath, cancellationToken)
+                .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            Volatile.Write(ref _replayDetectionOffsets, offsets);
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _replayDetectionOffsetsNetworkLoadStarted, 0);
+            throw;
+        }
+    }
+
+    private void TryWarmGameBase()
+    {
+        try
+        {
+            var offsets = Volatile.Read(ref _replayDetectionOffsets)
+                          ?? LazerMemoryOffsets.LoadCached(_offsetsPath);
+            if (offsets is null)
+                return;
+            Volatile.Write(ref _replayDetectionOffsets, offsets);
+
+            using (new BackgroundThreadPriorityScope())
+                lock (_readerGate)
+                {
+                    var reader = GetReaderLocked(offsets, out _);
+                    if (reader is null)
+                        return;
+                    reader.WarmGameBase();
+                    if (reader.LastGameBase != 0)
+                        _lastGameBase = reader.LastGameBase;
+                }
+        }
+        catch
+        {
+            // Prewarming is opportunistic. Live capture reports actionable
+            // access and offset errors through the normal status path.
+        }
     }
 
     internal bool IsWatchingReplay()
@@ -238,44 +347,237 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         }
         if (offsets is null)
             return false;
-        using var process = FindProcess();
-        if (process is null)
+        if (offsets.PlayerDrawableRuleset < 0 || offsets.DrawableRulesetReplayScore < 0)
             return false;
 
-        using var memory = ProcessMemory.Open(process);
-        if (_lastProcessId != process.Id)
+        lock (_readerGate)
         {
-            ResetCachedPointers();
-            _lastProcessId = process.Id;
+            try
+            {
+                var reader = GetReaderLocked(offsets, out _);
+                if (reader is null)
+                    return false;
+                var replay = reader.IsWatchingReplay();
+                if (reader.LastGameBase != 0)
+                    _lastGameBase = reader.LastGameBase;
+                return replay;
+            }
+            catch
+            {
+                ResetCachedPointersLocked(closeProcess: true);
+                _nextProcessSearchAt = DateTimeOffset.UtcNow + ProcessSearchInterval;
+                return false;
+            }
         }
-        var reader = new LazerReplayFrameMemoryReader(
-            memory,
-            offsets,
-            _lastReplayFrameTimeOffset,
-            _lastGameBase);
-        var replay = reader.IsWatchingReplay();
-        if (reader.LastGameBase != 0)
-            _lastGameBase = reader.LastGameBase;
-        return replay;
     }
 
-    public void StartAttempt(AttemptStart start) => Volatile.Write(ref _attemptActive, 1);
+    public void StartAttempt(AttemptStart start)
+    {
+        lock (_readerGate)
+        {
+            Interlocked.Increment(ref _attemptGeneration);
+            _cachedReader?.ResetAttemptSearch();
+            // The always-on reader may already be inside the current replay
+            // list. Rewind the cursor so all frames that existed before tosu's
+            // StartAttempt packet are emitted again into this attempt.
+            _lastSequence = 0;
+            _lastFramesList = 0;
+            _attemptFrames.Clear();
+            Volatile.Write(ref _attemptActive, 1);
+            _attemptStarted.TrySetResult();
+        }
+    }
 
     public void UpdateAttempt(AttemptSnapshot snapshot) { }
 
     public void EndAttempt()
     {
-        Volatile.Write(ref _attemptActive, 0);
-        ResetCachedPointers();
+        lock (_readerGate)
+        {
+            Interlocked.Increment(ref _attemptGeneration);
+            // Drain only the frames appended since the previous 16 ms poll.
+            // Retain the in-process attempt snapshot so finalization never has
+            // to reread and recreate the entire replay list at the song boundary.
+            if (_cachedReader is not null)
+            {
+                try
+                {
+                    var drain = Stopwatch.StartNew();
+                    for (var pass = 0;
+                         pass < MaximumFinalTailPasses && drain.Elapsed < FinalTailDrainBudget;
+                         pass++)
+                    {
+                        var tail = _cachedReader.ReadFramesAfter(_lastSequence, _lastFramesList);
+                        CaptureReaderStateLocked(_cachedReader, tail);
+                        if (tail.Count == 0)
+                            break;
+                    }
+                }
+                catch
+                {
+                    // The normal capture buffer remains authoritative if the
+                    // final incremental tail read races a screen transition.
+                }
+            }
+            Volatile.Write(ref _attemptActive, 0);
+            _attemptStarted = NewAttemptSignal();
+        }
     }
 
-    private void ResetCachedPointers()
+    private static TaskCompletionSource NewAttemptSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private void CaptureReaderStateLocked(
+        LazerReplayFrameMemoryReader reader,
+        IReadOnlyList<LazerReplayFrame> frames)
+    {
+        var previousSequence = _lastSequence;
+        var beginsNewGeneration = LazerAttemptFrameBufferPolicy.BeginsNewGeneration(
+            reader.FramesListChanged,
+            previousSequence,
+            frames);
+        if (reader.LastGameBase != 0)
+            _lastGameBase = reader.LastGameBase;
+        if (reader.LastReplayFrameTimeOffset is { } timeOffset)
+            _lastReplayFrameTimeOffset = timeOffset;
+        if (beginsNewGeneration)
+            _lastSequence = 0;
+        if (reader.LastFramesList != 0)
+            _lastFramesList = reader.LastFramesList;
+        foreach (var frame in frames)
+            _lastSequence = Math.Max(_lastSequence, frame.Sequence ?? _lastSequence);
+        LazerAttemptFrameBufferPolicy.Append(
+            _attemptFrames,
+            frames,
+            Volatile.Read(ref _attemptActive) != 0,
+            beginsNewGeneration);
+    }
+
+    private void ResetCachedPointersLocked(bool closeProcess)
     {
         _lastSequence = 0;
         _lastFramesList = 0;
         _lastGameBase = 0;
         _lastReplayFrameTimeOffset = null;
         _lastProcessId = null;
+        _cachedReader = null;
+        _cachedReaderOffsets = null;
+        if (!closeProcess)
+            return;
+
+        _cachedMemory?.Dispose();
+        _cachedMemory = null;
+        _cachedProcess?.Dispose();
+        _cachedProcess = null;
+        _cachedProcessName = null;
+        _cachedProcessPath = null;
+    }
+
+    private LazerReplayFrameMemoryReader? GetReaderLocked(
+        LazerMemoryOffsets offsets,
+        out bool processChanged,
+        int? preferredProcessId = null)
+    {
+        processChanged = false;
+        if (_cachedProcess is not null)
+        {
+            try
+            {
+                if (_cachedProcess.HasExited)
+                    ResetCachedPointersLocked(closeProcess: true);
+            }
+            catch
+            {
+                ResetCachedPointersLocked(closeProcess: true);
+            }
+        }
+
+        // A current managed-tosu log identifies the exact osu! process for
+        // which its GameBase was resolved. Prefer it over a newer unrelated
+        // process, but only after normal likely-lazer filtering succeeds.
+        if (_cachedProcess is not null
+            && preferredProcessId is { } preferred
+            && _cachedProcess.Id != preferred)
+        {
+            var hintedProcess = FindProcess(preferred);
+            if (hintedProcess?.Id == preferred)
+            {
+                ResetCachedPointersLocked(closeProcess: true);
+                try
+                {
+                    AttachProcessLocked(hintedProcess);
+                }
+                catch
+                {
+                    hintedProcess.Dispose();
+                    throw;
+                }
+                processChanged = true;
+            }
+            else
+            {
+                hintedProcess?.Dispose();
+            }
+        }
+
+        if (_cachedProcess is null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (now < _nextProcessSearchAt)
+                return null;
+            _nextProcessSearchAt = now + ProcessSearchInterval;
+
+            var process = FindProcess(preferredProcessId);
+            if (process is null)
+                return null;
+
+            try
+            {
+                AttachProcessLocked(process);
+                processChanged = true;
+            }
+            catch
+            {
+                process.Dispose();
+                throw;
+            }
+        }
+
+        if (_cachedReader is null || _cachedReaderOffsets != offsets)
+        {
+            _cachedReaderOffsets = offsets;
+            _cachedReader = new LazerReplayFrameMemoryReader(
+                _cachedMemory!,
+                offsets,
+                _lastReplayFrameTimeOffset,
+                _lastGameBase);
+        }
+
+        return _cachedReader;
+    }
+
+    private void AttachProcessLocked(Process process)
+    {
+        var processId = process.Id;
+        var memory = ProcessMemory.Open(process);
+        string processName;
+        string? processPath;
+        try
+        {
+            processName = process.ProcessName;
+            processPath = SafeProcessPath(process);
+        }
+        catch
+        {
+            memory.Dispose();
+            throw;
+        }
+
+        _cachedMemory = memory;
+        _cachedProcess = process;
+        _lastProcessId = processId;
+        _cachedProcessName = processName;
+        _cachedProcessPath = processPath;
     }
 
     private static string? SafeProcessPath(Process process)
@@ -284,25 +586,46 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         catch { return null; }
     }
 
-    private static Process? FindProcess()
+    private static Process? FindProcess(int? preferredProcessId = null)
     {
+        var processes = new Dictionary<int, Process>();
         foreach (var name in ProcessNames)
         {
-            var process = Process.GetProcessesByName(name)
-                .Where(IsLikelyLazer)
-                .OrderByDescending(p =>
-                {
-                    try { return p.StartTime; }
-                    catch { return DateTime.MinValue; }
-                })
-                .FirstOrDefault();
-            if (process is not null)
+            foreach (var process in Process.GetProcessesByName(name))
             {
-                return process;
+                if (!IsLikelyLazer(process))
+                {
+                    process.Dispose();
+                    continue;
+                }
+                if (!processes.TryAdd(process.Id, process))
+                {
+                    process.Dispose();
+                }
             }
         }
 
-        return null;
+        var candidates = processes.Values
+            .Select(process => new LazerProcessCandidate(
+                process.Id,
+                SafeStartTime(process)))
+            .ToArray();
+        var selectedId = LazerProcessSelectionPolicy.Select(candidates, preferredProcessId);
+        Process? selected = null;
+        foreach (var process in processes.Values)
+        {
+            if (process.Id == selectedId)
+                selected = process;
+            else
+                process.Dispose();
+        }
+        return selected;
+    }
+
+    private static DateTime SafeStartTime(Process process)
+    {
+        try { return process.StartTime; }
+        catch { return DateTime.MinValue; }
     }
 
     private static bool IsLikelyLazer(Process process)
@@ -319,11 +642,316 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         }
         catch { return false; }
     }
+
+}
+
+internal readonly record struct TosuGameBaseLogHint(int ProcessId, nint GameBase);
+
+internal static class TosuGameBaseLogHintReader
+{
+    internal const int MaximumHeadBytes = 32 * 1024;
+    internal const int MaximumTailBytes = 64 * 1024;
+
+    internal static async Task<TosuGameBaseLogHint?> TryReadCurrentAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var path = CurrentLogPaths()
+                .Select(candidate => new FileInfo(candidate))
+                .Where(file => file.Exists)
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .Select(file => file.FullName)
+                .FirstOrDefault();
+            if (path is null)
+                return null;
+
+            await using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 4096,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var length = stream.Length;
+            if (length <= 0)
+                return null;
+
+            var headLength = checked((int)Math.Min(length, MaximumHeadBytes));
+            var headBytes = new byte[headLength];
+            var headRead = await ReadAtMostAsync(stream, headBytes, cancellationToken)
+                .ConfigureAwait(false);
+
+            byte[] tailBytes = [];
+            var tailStart = Math.Max(headRead, length - MaximumTailBytes);
+            if (tailStart < length)
+            {
+                stream.Seek(tailStart, SeekOrigin.Begin);
+                tailBytes = new byte[checked((int)(length - tailStart))];
+                var tailRead = await ReadAtMostAsync(stream, tailBytes, cancellationToken)
+                    .ConfigureAwait(false);
+                if (tailRead != tailBytes.Length)
+                    Array.Resize(ref tailBytes, tailRead);
+            }
+
+            var head = Encoding.UTF8.GetString(headBytes, 0, headRead);
+            var tail = tailBytes.Length == 0 ? string.Empty : Encoding.UTF8.GetString(tailBytes);
+            var segmentsContiguous = tailStart <= headRead;
+            if (segmentsContiguous && tail.Length > 0)
+            {
+                head += tail;
+                tail = string.Empty;
+            }
+            return TosuGameBaseLogHintParser.TryParse(
+                    head,
+                    tail,
+                    out var hint,
+                    segmentsContiguous)
+                ? hint
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<string> CurrentLogPaths()
+    {
+        // Vanilla tosu writes beside its executable. Kumori moves closed logs
+        // to the canonical log directory at startup, so retain that as a
+        // fallback for installations which configured the canonical path.
+        yield return Path.Combine(AppPaths.TosuDir, "logs", "latest.log");
+        yield return Path.Combine(AppPaths.TosuLogDir, "latest.log");
+    }
+
+    private static async Task<int> ReadAtMostAsync(
+        Stream stream,
+        byte[] buffer,
+        CancellationToken cancellationToken)
+    {
+        var read = 0;
+        while (read < buffer.Length)
+        {
+            var count = await stream.ReadAsync(buffer.AsMemory(read), cancellationToken)
+                .ConfigureAwait(false);
+            if (count == 0)
+                break;
+            read += count;
+        }
+        return read;
+    }
+}
+
+internal static class TosuGameBaseLogHintParser
+{
+    private const string ClientMarker = "Starting regular data loop for client ";
+    private const string GameBaseMarker = "GameBase address updated:";
+
+    internal static bool TryParse(
+        string head,
+        string tail,
+        out TosuGameBaseLogHint hint,
+        bool segmentsContiguous = false)
+    {
+        int? currentProcessId = null;
+        nint currentGameBase = 0;
+        ParseSegment(head, ref currentProcessId, ref currentGameBase);
+        if (!string.IsNullOrEmpty(tail))
+        {
+            if (segmentsContiguous)
+            {
+                ParseSegment(tail, ref currentProcessId, ref currentGameBase);
+            }
+            else
+            {
+                // A bounded head/tail read can omit the middle of a large log.
+                // Never associate an orphan address update in the tail with a
+                // process marker from the head across that unknown gap.
+                int? tailProcessId = null;
+                nint tailGameBase = 0;
+                ParseSegment(tail, ref tailProcessId, ref tailGameBase);
+                if (tailProcessId is not null)
+                {
+                    currentProcessId = tailProcessId;
+                    currentGameBase = tailGameBase;
+                }
+                else
+                {
+                    // The skipped range may contain a newer client marker even
+                    // when the visible tail has no GameBase line. Across any
+                    // unknown gap, only a self-contained tail marker/address
+                    // pair is safe to adopt.
+                    currentProcessId = null;
+                    currentGameBase = 0;
+                }
+            }
+        }
+
+        if (currentProcessId is not { } processId || currentGameBase == 0)
+        {
+            hint = default;
+            return false;
+        }
+
+        hint = new TosuGameBaseLogHint(processId, currentGameBase);
+        return true;
+    }
+
+    private static void ParseSegment(
+        string segment,
+        ref int? currentProcessId,
+        ref nint currentGameBase)
+    {
+        using var lines = new StringReader(segment);
+        while (lines.ReadLine() is { } line)
+        {
+            var clientMarker = line.IndexOf(ClientMarker, StringComparison.Ordinal);
+            if (clientMarker >= 0)
+            {
+                var pidText = line.AsSpan(clientMarker + ClientMarker.Length).Trim();
+                var digitCount = 0;
+                while (digitCount < pidText.Length && char.IsAsciiDigit(pidText[digitCount]))
+                    digitCount++;
+                currentProcessId = int.TryParse(
+                    pidText[..digitCount],
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var processId)
+                        ? processId
+                        : null;
+                currentGameBase = 0;
+                continue;
+            }
+
+            if (currentProcessId is null ||
+                line.IndexOf(GameBaseMarker, StringComparison.Ordinal) < 0)
+                continue;
+
+            // Any update supersedes the older address, including an explicit
+            // transition to undefined.
+            currentGameBase = 0;
+            var arrow = line.LastIndexOf("=>", StringComparison.Ordinal);
+            if (arrow < 0)
+                continue;
+            var addressText = line.AsSpan(arrow + 2).Trim();
+            var tokenLength = 0;
+            if (addressText.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                tokenLength = 2;
+            while (tokenLength < addressText.Length && IsHex(addressText[tokenLength]))
+                tokenLength++;
+            var token = addressText[..tokenLength];
+            if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                token = token[2..];
+            if (token.Length == 0 ||
+                !ulong.TryParse(token, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var address) ||
+                address > long.MaxValue)
+                continue;
+            currentGameBase = (nint)(long)address;
+        }
+    }
+
+    private static bool IsHex(char value) =>
+        char.IsAsciiDigit(value) || value is >= 'a' and <= 'f' or >= 'A' and <= 'F';
+}
+
+internal readonly record struct LazerProcessCandidate(int ProcessId, DateTime StartTime);
+
+internal static class LazerProcessSelectionPolicy
+{
+    internal static int? Select(
+        IReadOnlyList<LazerProcessCandidate> candidates,
+        int? preferredProcessId)
+    {
+        if (preferredProcessId is { } preferred &&
+            candidates.Any(candidate => candidate.ProcessId == preferred))
+            return preferred;
+
+        return candidates
+            .OrderByDescending(candidate => candidate.StartTime)
+            .Select(candidate => (int?)candidate.ProcessId)
+            .FirstOrDefault();
+    }
+}
+
+internal static class LazerAttemptFrameBufferPolicy
+{
+    internal static bool BeginsNewGeneration(
+        bool framesListChanged,
+        long previousSequence,
+        IReadOnlyList<LazerReplayFrame> frames) =>
+        framesListChanged ||
+        (previousSequence > 0 &&
+         frames.Count > 0 &&
+         frames[0].Sequence is { } firstSequence &&
+         firstSequence <= previousSequence);
+
+    internal static void Append(
+        List<LazerReplayFrame> attemptFrames,
+        IReadOnlyList<LazerReplayFrame> frames,
+        bool attemptActive,
+        bool beginsNewGeneration)
+    {
+        if (!attemptActive)
+            return;
+        if (beginsNewGeneration)
+            attemptFrames.Clear();
+        if (frames.Count > 0)
+            attemptFrames.AddRange(frames);
+    }
+}
+
+internal static class TosuGameBaseAdoptionPolicy
+{
+    internal static bool ShouldAdopt(
+        nint candidate,
+        bool vtableMatches,
+        bool screenStackUsable) =>
+        candidate.ToInt64() > 0x10000 && vtableMatches && screenStackUsable;
+}
+
+internal static class LazerMemoryReadPolicy
+{
+    internal static readonly TimeSpan CachedReadBudget = TimeSpan.FromMilliseconds(2);
+    internal static readonly TimeSpan DiscoveryReadBudget = TimeSpan.FromMilliseconds(4);
+    // 1 MiB every 16 ms is about 62.5 MiB/s at most. That is fast enough to
+    // finish discovery during lazer startup/menu time while remaining a small,
+    // time-bounded, below-normal-priority memory-read workload. The previous
+    // 250 ms cadence could require several minutes for a multi-gigabyte lazer
+    // process, longer than a complete beatmap.
+    internal static readonly TimeSpan DiscoveryStepInterval = TimeSpan.FromMilliseconds(16);
+    internal const int DiscoveryBytesPerStep = 1024 * 1024;
+
+    internal static bool ShouldDiscover(nint gameBase) => gameBase == 0;
+
+    internal static bool ShouldRearmDiscovery(nint gameBase, bool discoveryExhausted) =>
+        gameBase == 0 && discoveryExhausted;
+
+    internal static bool MayAttemptUnit(bool isFirst, bool budgetExpired) =>
+        isFirst || !budgetExpired;
+
+    internal static int FindAlignedPointerOffset(
+        ReadOnlySpan<byte> buffer,
+        long expected,
+        int searchOffset)
+    {
+        var alignedSearchOffset = (Math.Max(0, searchOffset) + sizeof(long) - 1) & ~(sizeof(long) - 1);
+        for (var offset = alignedSearchOffset; offset <= buffer.Length - sizeof(long); offset += sizeof(long))
+        {
+            if (BinaryPrimitives.ReadInt64LittleEndian(buffer.Slice(offset, sizeof(long))) == expected)
+                return offset;
+        }
+        return -1;
+    }
 }
 
 internal sealed class LazerReplayFrameMemoryReader
 {
-    private static readonly byte?[] ScalingContainerTargetDrawSizePattern =
+    private static readonly byte[] ScalingContainerTargetDrawSizePattern =
     [
         0x00, 0x00, 0x80, 0x44,
         0x00, 0x00, 0x40, 0x44,
@@ -334,12 +962,52 @@ internal sealed class LazerReplayFrameMemoryReader
     private const int ReplayFramePositionOffset = 0x20;
     private const int ReplayFrameActionsOffset = 0x18;
     private const int MaxFrameCount = 1_000_000;
-    private const int MaxFramesPerTick = 4096;
+    private const int MaxFramesPerTick = 64;
+    private const int DiscoveryChunkBytes = 1024 * 1024;
+    private const int CachedGameBaseInvalidationChecks = 3;
+    private static readonly TimeSpan CachedGameBaseValidationInterval = TimeSpan.FromSeconds(1);
+    private static readonly int[] ReplayFrameActionOffsets = [ReplayFrameActionsOffset, ReplayFrameActionsOffset + 0x8];
+    private static readonly int[] BootstrapDeltas = [0x24, 0x28, 0x2c, 0x20, 0x30, 0x1c, 0x34];
+    private static readonly int[] ReplayFrameTimeOffsetCandidates = [0x8, 0x10, 0x18, 0x28, 0x30];
 
     private readonly ProcessMemory _memory;
     private readonly LazerMemoryOffsets _offsets;
     private readonly int? _preferredReplayFrameTimeOffset;
     private readonly nint _preferredGameBase;
+    private readonly byte[] _discoveryBuffer = new byte[DiscoveryChunkBytes];
+    private MemoryRegion[]? _discoveryRegions;
+    private int _discoveryRegionIndex;
+    private long _discoveryRegionOffset;
+    private int _discoveryChunkSearchOffset;
+    private DateTimeOffset _nextDiscoveryStepAt;
+    private DateTimeOffset _nextBootstrapCandidateRetryAt;
+    private bool _discoveryExhausted;
+    private DiscoveryPhase _discoveryPhase;
+    private nint _fallbackVtableMarker;
+    private int _fallbackMarkerResumeRegionIndex;
+    private long _fallbackMarkerResumeRegionOffset;
+    private int _fallbackMarkerResumeSearchOffset;
+    private int _invalidCachedGameBasePolls;
+    private int _bootstrapCandidateIndex;
+    private DateTimeOffset _nextCachedGameBaseValidationAt;
+    private readonly List<nint> _bootstrapCandidates = [];
+    private nint _timeOffsetSearchFramesList;
+    private nint _timeOffsetSearchItems;
+    private int _timeOffsetSearchSize;
+    private int _timeOffsetSampleCount;
+    private int _timeOffsetSampleStep;
+    private int _timeOffsetCandidateIndex;
+    private int _timeOffsetSampleIndex;
+    private double? _timeOffsetPrevious;
+    private double? _timeOffsetFirst;
+    private double? _timeOffsetLast;
+    private int _timeOffsetSaneCount;
+    private bool _timeOffsetCandidateInvalid;
+    private int? _timeOffsetBestOffset;
+    private double _timeOffsetBestScore = double.NegativeInfinity;
+    private nint _failedTimeOffsetFramesList;
+    private nint _failedTimeOffsetItems;
+    private DateTimeOffset _nextTimeOffsetSearchAt;
 
     public LazerReplayFrameMemoryReader(
         ProcessMemory memory,
@@ -359,22 +1027,73 @@ internal sealed class LazerReplayFrameMemoryReader
     public int? LastReplayFrameTimeOffset { get; private set; }
     public nint LastGameBase { get; private set; }
 
+    public void ResetAttemptSearch()
+    {
+        ResetReplayFrameTimeOffsetSearch();
+        _failedTimeOffsetFramesList = 0;
+        _failedTimeOffsetItems = 0;
+        _nextTimeOffsetSearchAt = DateTimeOffset.MinValue;
+        if (LazerMemoryReadPolicy.ShouldRearmDiscovery(LastGameBase, _discoveryExhausted))
+        {
+            _discoveryExhausted = false;
+            _discoveryPhase = DiscoveryPhase.BootstrapPattern;
+            _fallbackVtableMarker = 0;
+            _fallbackMarkerResumeRegionIndex = 0;
+            _fallbackMarkerResumeRegionOffset = 0;
+            _fallbackMarkerResumeSearchOffset = 0;
+            ResetDiscoveryCursor();
+            _nextDiscoveryStepAt = DateTimeOffset.MinValue;
+            _nextBootstrapCandidateRetryAt = DateTimeOffset.MinValue;
+        }
+    }
+
+    public void WarmGameBase() =>
+        _ = FindGameBase(allowDiscovery: true, DeadlineFromNow(TimeSpan.FromMilliseconds(3)));
+
+    public bool TryAdoptValidatedGameBase(nint candidate)
+    {
+        var vtableMatches = IsGameBase(candidate);
+        var screenStackUsable = vtableMatches && HasUsableScreenStack(candidate);
+        if (!TosuGameBaseAdoptionPolicy.ShouldAdopt(
+                candidate,
+                vtableMatches,
+                screenStackUsable))
+        {
+            LastStatus = "tosu GameBase hint did not pass native vtable and ScreenStack validation";
+            return false;
+        }
+
+        LastGameBase = candidate;
+        _invalidCachedGameBasePolls = 0;
+        _nextCachedGameBaseValidationAt = DateTimeOffset.UtcNow + CachedGameBaseValidationInterval;
+        LastStatus = null;
+        return true;
+    }
+
     public IReadOnlyList<LazerReplayFrame> ReadFramesAfter(long lastSequence, nint previousFramesList)
     {
+        LastStatus = null;
         LastFramesList = 0;
         FramesListChanged = false;
-        var players = FindPlayers();
+        var allowDiscovery = LazerMemoryReadPolicy.ShouldDiscover(LastGameBase);
+        var deadline = DeadlineFromNow(
+            allowDiscovery
+                ? LazerMemoryReadPolicy.DiscoveryReadBudget
+                : LazerMemoryReadPolicy.CachedReadBudget);
+        var players = FindPlayers(allowDiscovery, deadline);
         if (players.Count == 0)
         {
             LastStatus ??= "player screen unavailable";
             return Array.Empty<LazerReplayFrame>();
         }
 
-        foreach (var player in players)
+        for (var index = 0; index < players.Count; index++)
         {
+            if (!LazerMemoryReadPolicy.MayAttemptUnit(index == 0, BudgetExpired(deadline)))
+                break;
             try
             {
-                var frames = ReadFramesAfter(player, lastSequence, previousFramesList);
+                var frames = ReadFramesAfter(players[index], lastSequence, previousFramesList, deadline: deadline);
                 if (frames.Count > 0)
                 {
                     return frames;
@@ -396,9 +1115,10 @@ internal sealed class LazerReplayFrameMemoryReader
 
     public IReadOnlyList<LazerReplayFrame> ReadAllFrames()
     {
+        LastStatus = null;
         LastFramesList = 0;
         FramesListChanged = false;
-        var players = FindPlayers();
+        var players = FindPlayers(allowDiscovery: false, long.MaxValue);
         if (players.Count == 0)
         {
             LastStatus ??= "player screen unavailable";
@@ -409,7 +1129,12 @@ internal sealed class LazerReplayFrameMemoryReader
         {
             try
             {
-                var frames = ReadFramesAfter(player, lastSequence: 0, previousFramesList: 0, readAll: true);
+                var frames = ReadFramesAfter(
+                    player,
+                    lastSequence: 0,
+                    previousFramesList: 0,
+                    readAll: true,
+                    deadline: long.MaxValue);
                 if (frames.Count > 0)
                 {
                     return frames;
@@ -437,8 +1162,11 @@ internal sealed class LazerReplayFrameMemoryReader
             return false;
         }
 
-        foreach (var player in FindPlayers())
+        var deadline = DeadlineFromNow(LazerMemoryReadPolicy.CachedReadBudget);
+        foreach (var player in FindPlayers(allowDiscovery: false, deadline))
         {
+            if (BudgetExpired(deadline))
+                break;
             try
             {
                 var drawableRuleset = _memory.ReadIntPtr(player + _offsets.PlayerDrawableRuleset);
@@ -458,7 +1186,12 @@ internal sealed class LazerReplayFrameMemoryReader
         return false;
     }
 
-    private IReadOnlyList<LazerReplayFrame> ReadFramesAfter(nint player, long lastSequence, nint previousFramesList, bool readAll = false)
+    private IReadOnlyList<LazerReplayFrame> ReadFramesAfter(
+        nint player,
+        long lastSequence,
+        nint previousFramesList,
+        bool readAll = false,
+        long deadline = long.MaxValue)
     {
         var score = _memory.ReadIntPtr(player + _offsets.PlayerScore);
         if (!IsReadablePointer(score))
@@ -494,9 +1227,19 @@ internal sealed class LazerReplayFrameMemoryReader
             return Array.Empty<LazerReplayFrame>();
         }
 
-        var timeOffset = IsReplayFrameTimeOffsetUsable(items, size, _preferredReplayFrameTimeOffset)
-            ? _preferredReplayFrameTimeOffset
-            : FindReplayFrameTimeOffset(items, size);
+        var cachedTimeOffset = LastReplayFrameTimeOffset ?? _preferredReplayFrameTimeOffset;
+        int? timeOffset;
+        if (IsReplayFrameTimeOffsetUsable(items, size, cachedTimeOffset, deadline))
+        {
+            timeOffset = cachedTimeOffset;
+            ResetReplayFrameTimeOffsetSearch();
+            _failedTimeOffsetFramesList = 0;
+            _failedTimeOffsetItems = 0;
+        }
+        else
+        {
+            timeOffset = FindReplayFrameTimeOffset(framesList, items, size, deadline);
+        }
         if (timeOffset is null)
         {
             LastStatus = "replay frame time offset unavailable";
@@ -509,16 +1252,16 @@ internal sealed class LazerReplayFrameMemoryReader
             ? 0
             : lastSequence;
         var startIndex = Math.Clamp((int)Math.Max(0, effectiveLastSequence), 0, size);
-        if (!readAll)
+        var endIndex = readAll ? size : Math.Min(size, startIndex + MaxFramesPerTick);
+        var frames = new List<LazerReplayFrame>(Math.Max(0, endIndex - startIndex));
+        for (var index = startIndex; index < endIndex; index++)
         {
-            startIndex = Math.Max(startIndex, size - MaxFramesPerTick);
-        }
-        var frames = new List<LazerReplayFrame>();
-        for (var index = startIndex; index < size; index++)
-        {
+            if (!readAll &&
+                !LazerMemoryReadPolicy.MayAttemptUnit(index == startIndex, BudgetExpired(deadline)))
+                break;
             try
             {
-                if (ReadFrameAt(items, index, timeOffset.Value) is { } frame)
+                if (ReadFrameAt(items, index, timeOffset.Value, deadline) is { } frame)
                 {
                     frames.Add(frame);
                 }
@@ -538,9 +1281,9 @@ internal sealed class LazerReplayFrameMemoryReader
         return frames;
     }
 
-    private IReadOnlyList<nint> FindPlayers()
+    private IReadOnlyList<nint> FindPlayers(bool allowDiscovery, long deadline)
     {
-        var gameBase = FindGameBase();
+        var gameBase = FindGameBase(allowDiscovery, deadline);
         if (!IsReadablePointer(gameBase))
         {
             LastStatus ??= "osu! game base unavailable";
@@ -572,6 +1315,9 @@ internal sealed class LazerReplayFrameMemoryReader
         var players = new List<nint>();
         for (var index = count - 1; index >= 0; index--)
         {
+            if (!LazerMemoryReadPolicy.MayAttemptUnit(index == count - 1, BudgetExpired(deadline)) ||
+                players.Count >= 4)
+                break;
             var screen = _memory.ReadIntPtr(items + 0x10 + 0x8 * index);
             if (IsReadablePointer(screen) && LooksLikePlayer(screen))
             {
@@ -587,127 +1333,296 @@ internal sealed class LazerReplayFrameMemoryReader
         return players;
     }
 
-    private nint FindGameBase()
+    private nint FindGameBase(bool allowDiscovery, long deadline)
     {
-        // Resolving GameBase requires scanning large portions of osu!'s managed
-        // heap. Doing that on every 16 ms poll can occasionally take tens of
-        // seconds and leave an otherwise exact replay with a missing tail.
-        // The object is stable for the process lifetime, so reuse it while its
-        // vtable and screen stack still validate, then fall back to a scan.
-        if (IsGameBase(_preferredGameBase) && HasUsableScreenStack(_preferredGameBase))
+        var now = DateTimeOffset.UtcNow;
+        // Screen transitions can briefly make ScreenStack unreadable, while a
+        // compacting GC can permanently move GameBase. Tolerate the former,
+        // but eventually invalidate the cached object and retry the already
+        // discovered bootstrap anchors instead of remaining stuck forever.
+        if (LastGameBase != 0)
+        {
+            if (now < _nextCachedGameBaseValidationAt)
+                return LastGameBase;
+            _nextCachedGameBaseValidationAt = now + CachedGameBaseValidationInterval;
+
+            if (!BudgetExpired(deadline) && HasUsableScreenStack(LastGameBase))
+            {
+                _invalidCachedGameBasePolls = 0;
+                return LastGameBase;
+            }
+
+            if (++_invalidCachedGameBasePolls < CachedGameBaseInvalidationChecks)
+            {
+                LastStatus = "cached osu! game base is temporarily unavailable";
+                return LastGameBase;
+            }
+
+            LastGameBase = 0;
+            _invalidCachedGameBasePolls = 0;
+            _nextBootstrapCandidateRetryAt = DateTimeOffset.MinValue;
+            // If the previous bootstrap anchors no longer resolve after an
+            // update, bounded discovery may run again. It remains subject to
+            // the 1 MiB / 3 ms step budget below.
+            _discoveryExhausted = false;
+            _discoveryRegions = null;
+            _discoveryRegionIndex = 0;
+            _discoveryRegionOffset = 0;
+            _discoveryChunkSearchOffset = 0;
+            _discoveryPhase = DiscoveryPhase.BootstrapPattern;
+            _fallbackVtableMarker = 0;
+            _fallbackMarkerResumeRegionIndex = 0;
+            _fallbackMarkerResumeRegionOffset = 0;
+            _fallbackMarkerResumeSearchOffset = 0;
+            _nextDiscoveryStepAt = now + TimeSpan.FromSeconds(1);
+        }
+
+        if (IsReadablePointer(_preferredGameBase)
+            && !BudgetExpired(deadline)
+            && HasUsableScreenStack(_preferredGameBase))
         {
             LastGameBase = _preferredGameBase;
             return _preferredGameBase;
         }
 
-        foreach (var fromPattern in FindGameBasesFromTosuBootstrapPattern())
+        if (_bootstrapCandidates.Count > 0 && now >= _nextBootstrapCandidateRetryAt)
         {
-            // The bootstrap pattern follows a live object graph directly to
-            // OsuGame. Its vtable marker can lag an osu!lazer update even when
-            // the graph and ScreenStack offsets are already valid. The screen
-            // stack is the data this reader actually needs and is a stronger
-            // practical validation here than rejecting the candidate solely on
-            // a stale vtable value.
-            if (HasUsableScreenStack(fromPattern))
+            _nextBootstrapCandidateRetryAt = now + TimeSpan.FromSeconds(1);
+            var candidatesToTry = _bootstrapCandidates.Count;
+            while (candidatesToTry-- > 0 && !BudgetExpired(deadline))
             {
-                LastGameBase = fromPattern;
-                return fromPattern;
-            }
-        }
-
-        // Fallback: scan for object references whose vtable points at the
-        // expected GameBase vtable marker. This is slower and less precise
-        // than tosu's bootstrap path, but keeps diagnostics alive if the
-        // pattern changes.
-        foreach (var region in _memory.Regions())
-        {
-            if (region.RegionSize <= 0 || region.RegionSize > 256 * 1024 * 1024)
-            {
-                continue;
-            }
-
-            var vtableMarker = _memory.FindPointer(region.BaseAddress, region.RegionSize, (nint)_offsets.GameBaseVtable);
-            if (vtableMarker == 0)
-            {
-                continue;
-            }
-
-            var gameBase = FindObjectWithVtable(vtableMarker);
-            if (IsGameBase(gameBase) && HasUsableScreenStack(gameBase))
-            {
-                LastGameBase = gameBase;
-                return gameBase;
-            }
-        }
-
-        LastStatus = "osu! game base unavailable; no bootstrap or fallback candidate had a usable screen stack";
-        return 0;
-    }
-
-    private IEnumerable<nint> FindGameBasesFromTosuBootstrapPattern()
-    {
-        foreach (var region in _memory.Regions())
-        {
-            if (region.RegionSize <= 0 || region.RegionSize > 256 * 1024 * 1024)
-            {
-                continue;
-            }
-
-            foreach (var patternAddress in _memory.FindPatterns(region.BaseAddress, region.RegionSize, ScalingContainerTargetDrawSizePattern, maxMatches: 16))
-            {
-                // osu!lazer has shifted this field relative to the
-                // ScalingContainer anchor across releases. Mirror tosu's
-                // compatible sweep instead of pinning the old 0x24 layout.
-                foreach (var delta in new[] { 0x24, 0x28, 0x2c, 0x20, 0x30, 0x1c, 0x34 })
-                {
-                    nint game = 0;
-                    try
-                    {
-                        var externalLinkOpener = _memory.ReadIntPtr(patternAddress - delta);
-                        if (!IsReadablePointer(externalLinkOpener))
-                        {
-                            continue;
-                        }
-
-                        var api = _memory.ReadIntPtr(externalLinkOpener + _offsets.ExternalLinkOpenerApi);
-                        if (!IsReadablePointer(api))
-                        {
-                            continue;
-                        }
-
-                        game = _memory.ReadIntPtr(api + _offsets.ApiAccessGame);
-                    }
-                    catch
-                    {
-                        // A wrong delta can land on an unreadable field; the
-                        // remaining offsets are still valid candidates.
-                    }
-
-                    if (IsReadablePointer(game) && HasUsableScreenStack(game))
-                    {
-                        yield return game;
-                    }
-                }
-            }
-        }
-    }
-
-    private nint FindObjectWithVtable(nint vtableAddress)
-    {
-        foreach (var region in _memory.Regions())
-        {
-            if (region.RegionSize <= 0 || region.RegionSize > 256 * 1024 * 1024)
-            {
-                continue;
-            }
-
-            var candidate = _memory.FindPointer(region.BaseAddress, region.RegionSize, vtableAddress);
-            if (candidate != 0)
-            {
+                var index = _bootstrapCandidateIndex++ % _bootstrapCandidates.Count;
+                var candidate = TryResolveBootstrapGameBase(_bootstrapCandidates[index]);
+                if (candidate == 0)
+                    continue;
+                LastGameBase = candidate;
+                LastStatus = null;
                 return candidate;
             }
         }
 
+        if (_discoveryExhausted)
+        {
+            LastStatus = _bootstrapCandidates.Count > 0
+                ? "osu! game base bootstrap found; waiting for its object graph to become readable"
+                : "osu! game base discovery exhausted without a usable bootstrap or vtable candidate";
+            return 0;
+        }
+
+        if (!allowDiscovery)
+        {
+            LastStatus = _bootstrapCandidates.Count > 0
+                ? "osu! game base bootstrap is not readable; waiting for menu prewarm"
+                : "osu! game base is not prewarmed; bounded discovery is paused";
+            return 0;
+        }
+
+        if (now < _nextDiscoveryStepAt)
+        {
+            LastStatus = "osu! game base discovery is waiting for its next bounded scan step";
+            return 0;
+        }
+        _nextDiscoveryStepAt = now + LazerMemoryReadPolicy.DiscoveryStepInterval;
+
+        _discoveryRegions ??= _memory.Regions()
+            .Where(region => region.RegionSize > 0 && region.RegionSize <= 256 * 1024 * 1024)
+            .OrderByDescending(region => region.Writable && region.Type == 0x20000)
+            .ToArray();
+
+        var stopwatch = Stopwatch.StartNew();
+        var remainingBudget = LazerMemoryReadPolicy.DiscoveryBytesPerStep;
+        while (_discoveryRegionIndex < _discoveryRegions.Length
+               && remainingBudget > 0
+               && stopwatch.Elapsed < TimeSpan.FromMilliseconds(3))
+        {
+            var region = _discoveryRegions[_discoveryRegionIndex];
+            var remainingInRegion = region.RegionSize - _discoveryRegionOffset;
+            if (remainingInRegion <= 0)
+            {
+                _discoveryRegionIndex++;
+                _discoveryRegionOffset = 0;
+                _discoveryChunkSearchOffset = 0;
+                continue;
+            }
+
+            var readSize = (int)Math.Min(
+                Math.Min(DiscoveryChunkBytes, remainingBudget),
+                remainingInRegion);
+            var chunkAddress = region.BaseAddress + checked((int)_discoveryRegionOffset);
+            try
+            {
+                _memory.ReadBytes(chunkAddress, _discoveryBuffer, readSize);
+            }
+            catch
+            {
+                _discoveryRegionOffset += readSize;
+                _discoveryChunkSearchOffset = 0;
+                remainingBudget -= readSize;
+                continue;
+            }
+
+            if (_discoveryPhase == DiscoveryPhase.BootstrapPattern)
+            {
+                var searchStart = _discoveryChunkSearchOffset;
+                var buffer = _discoveryBuffer.AsSpan(0, readSize);
+                while (searchStart <= buffer.Length - ScalingContainerTargetDrawSizePattern.Length)
+                {
+                    var relative = buffer[searchStart..].IndexOf(ScalingContainerTargetDrawSizePattern);
+                    if (relative < 0)
+                        break;
+                    var patternOffset = searchStart + relative;
+                    var patternAddress = chunkAddress + patternOffset;
+                    _discoveryChunkSearchOffset = patternOffset + 1;
+                    var gameBase = TryResolveBootstrapGameBase(patternAddress);
+                    if (gameBase != 0)
+                    {
+                        LastGameBase = gameBase;
+                        LastStatus = null;
+                        return gameBase;
+                    }
+                    if (_bootstrapCandidates.Count < 64 && !_bootstrapCandidates.Contains(patternAddress))
+                        _bootstrapCandidates.Add(patternAddress);
+                    searchStart = _discoveryChunkSearchOffset;
+                    if (BudgetExpired(deadline))
+                    {
+                        LastStatus = "osu! game base bootstrap discovery will resume within the current bounded chunk";
+                        return 0;
+                    }
+                }
+            }
+            else if (_discoveryPhase == DiscoveryPhase.VtableMarker)
+            {
+                var markerOffset = FindPointerOffsetInDiscoveryBuffer(
+                    readSize,
+                    (nint)_offsets.GameBaseVtable,
+                    _discoveryChunkSearchOffset);
+                if (markerOffset >= 0)
+                {
+                    _fallbackVtableMarker = chunkAddress + markerOffset;
+                    _discoveryChunkSearchOffset = markerOffset + sizeof(long);
+                    _fallbackMarkerResumeRegionIndex = _discoveryRegionIndex;
+                    _fallbackMarkerResumeRegionOffset = _discoveryRegionOffset;
+                    _fallbackMarkerResumeSearchOffset = _discoveryChunkSearchOffset;
+                    _discoveryPhase = DiscoveryPhase.GameBaseObject;
+                    ResetDiscoveryCursor();
+                    LastStatus = "osu! game base vtable marker found; bounded object discovery will continue";
+                    return 0;
+                }
+            }
+            else if (_discoveryPhase == DiscoveryPhase.GameBaseObject)
+            {
+                while (true)
+                {
+                    var candidateOffset = FindPointerOffsetInDiscoveryBuffer(
+                        readSize,
+                        _fallbackVtableMarker,
+                        _discoveryChunkSearchOffset);
+                    if (candidateOffset < 0)
+                        break;
+                    _discoveryChunkSearchOffset = candidateOffset + sizeof(long);
+                    var candidate = chunkAddress + candidateOffset;
+                    if (IsGameBase(candidate) && HasUsableScreenStack(candidate))
+                    {
+                        LastGameBase = candidate;
+                        LastStatus = null;
+                        return candidate;
+                    }
+                    if (BudgetExpired(deadline))
+                    {
+                        LastStatus = "osu! game base object fallback will resume within the current bounded chunk";
+                        return 0;
+                    }
+                }
+            }
+
+            var overlap = _discoveryPhase == DiscoveryPhase.BootstrapPattern
+                ? ScalingContainerTargetDrawSizePattern.Length - 1
+                : 0;
+            var advance = remainingInRegion <= readSize ? readSize : Math.Max(1, readSize - overlap);
+            _discoveryRegionOffset += advance;
+            _discoveryChunkSearchOffset = 0;
+            remainingBudget -= readSize;
+        }
+
+        if (_discoveryRegionIndex >= _discoveryRegions.Length)
+        {
+            if (_discoveryPhase == DiscoveryPhase.BootstrapPattern && _offsets.GameBaseVtable > 0)
+            {
+                _discoveryPhase = DiscoveryPhase.VtableMarker;
+                ResetDiscoveryCursor();
+                LastStatus = "osu! game base bootstrap scan completed; bounded vtable fallback will continue";
+            }
+            else if (_discoveryPhase == DiscoveryPhase.GameBaseObject)
+            {
+                // A region can contain multiple values that look like the
+                // vtable marker. Resume the bounded marker scan after the last
+                // one instead of permanently negative-caching a false lead.
+                _discoveryPhase = DiscoveryPhase.VtableMarker;
+                _discoveryRegionIndex = _fallbackMarkerResumeRegionIndex;
+                _discoveryRegionOffset = _fallbackMarkerResumeRegionOffset;
+                _discoveryChunkSearchOffset = _fallbackMarkerResumeSearchOffset;
+                _fallbackVtableMarker = 0;
+                LastStatus = "osu! game base object was not found for the current vtable marker; bounded fallback will continue";
+            }
+            else
+            {
+                _discoveryExhausted = true;
+                LastStatus = "osu! game base discovery completed without a usable candidate";
+            }
+        }
+        else
+        {
+            LastStatus = $"osu! game base {_discoveryPhase switch
+            {
+                DiscoveryPhase.BootstrapPattern => "bootstrap",
+                DiscoveryPhase.VtableMarker => "vtable-marker fallback",
+                _ => "object fallback",
+            }} discovery in progress ({_discoveryRegionIndex + 1}/{_discoveryRegions.Length} regions)";
+        }
+        return 0;
+    }
+
+    private void ResetDiscoveryCursor()
+    {
+        _discoveryRegionIndex = 0;
+        _discoveryRegionOffset = 0;
+        _discoveryChunkSearchOffset = 0;
+    }
+
+    private int FindPointerOffsetInDiscoveryBuffer(
+        int readSize,
+        nint value,
+        int searchOffset)
+        => LazerMemoryReadPolicy.FindAlignedPointerOffset(
+            _discoveryBuffer.AsSpan(0, readSize),
+            value.ToInt64(),
+            searchOffset);
+
+    private nint TryResolveBootstrapGameBase(nint patternAddress)
+    {
+        // osu!lazer has shifted this field relative to the ScalingContainer
+        // anchor across releases. The candidate dereferences are constant-size;
+        // the surrounding pattern search is incrementally budgeted above.
+        foreach (var delta in BootstrapDeltas)
+        {
+            try
+            {
+                var externalLinkOpener = _memory.ReadIntPtr(patternAddress - delta);
+                if (!IsReadablePointer(externalLinkOpener))
+                    continue;
+                var api = _memory.ReadIntPtr(externalLinkOpener + _offsets.ExternalLinkOpenerApi);
+                if (!IsReadablePointer(api))
+                    continue;
+                var game = _memory.ReadIntPtr(api + _offsets.ApiAccessGame);
+                if (IsReadablePointer(game) && HasUsableScreenStack(game))
+                    return game;
+            }
+            catch
+            {
+                // A wrong delta can land on an unreadable field.
+                continue;
+            }
+        }
         return 0;
     }
 
@@ -768,7 +1683,11 @@ internal sealed class LazerReplayFrameMemoryReader
         }
     }
 
-    private LazerReplayFrame? ReadFrameAt(nint items, int index, int replayFrameTimeOffset)
+    private LazerReplayFrame? ReadFrameAt(
+        nint items,
+        int index,
+        int replayFrameTimeOffset,
+        long deadline)
     {
         var frame = ReadItem(items, index);
         if (!IsReadablePointer(frame))
@@ -784,7 +1703,7 @@ internal sealed class LazerReplayFrameMemoryReader
             return null;
         }
 
-        var (leftPressed, rightPressed) = ReadActionsFromFrame(frame);
+        var (leftPressed, rightPressed) = ReadActionsFromFrame(frame, deadline);
         return new LazerReplayFrame
         {
             MapTimeMs = mapTimeMs,
@@ -798,90 +1717,148 @@ internal sealed class LazerReplayFrameMemoryReader
         };
     }
 
-    private int? FindReplayFrameTimeOffset(nint items, int size)
+    private int? FindReplayFrameTimeOffset(nint framesList, nint items, int size, long deadline)
     {
         if (size < 2)
+        {
+            ResetReplayFrameTimeOffsetSearch();
+            return null;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (_failedTimeOffsetFramesList == framesList
+            && _failedTimeOffsetItems == items
+            && now < _nextTimeOffsetSearchAt)
         {
             return null;
         }
 
-        var candidates = new[] { 0x8, 0x10, 0x18, 0x28, 0x30 };
-        int? bestOffset = null;
-        var bestScore = double.NegativeInfinity;
-        var sampleCount = Math.Min(size, 64);
-        var step = Math.Max(1, size / sampleCount);
-
-        foreach (var offset in candidates)
+        if (_timeOffsetSearchFramesList != framesList || _timeOffsetSearchItems != items)
         {
-            double? previous = null;
-            double? first = null;
-            double? last = null;
-            var monotonic = true;
-            var saneCount = 0;
-            var index = 0;
+            BeginReplayFrameTimeOffsetSearch(framesList, items, size);
+        }
 
-            while (index < size && saneCount < sampleCount)
+        while (_timeOffsetCandidateIndex < ReplayFrameTimeOffsetCandidates.Length)
+        {
+            var offset = ReplayFrameTimeOffsetCandidates[_timeOffsetCandidateIndex];
+            while (_timeOffsetSampleIndex < _timeOffsetSampleCount && !_timeOffsetCandidateInvalid)
             {
+                if (BudgetExpired(deadline))
+                {
+                    // Retain both candidate and sample position. Restarting at
+                    // candidate zero every 16 ms can permanently starve a valid
+                    // later offset while consuming the full live-read budget.
+                    return null;
+                }
+
+                var index = _timeOffsetSampleIndex * _timeOffsetSampleStep;
                 double time;
                 try
                 {
                     var frame = ReadItem(items, index);
                     if (!IsReadablePointer(frame))
                     {
-                        monotonic = false;
-                        break;
+                        _timeOffsetCandidateInvalid = true;
+                        continue;
                     }
 
                     time = _memory.ReadDouble(frame + offset);
                 }
                 catch
                 {
-                    monotonic = false;
-                    break;
+                    _timeOffsetCandidateInvalid = true;
+                    continue;
                 }
 
                 if (!double.IsFinite(time) || time <= -300_000 || time >= 12 * 60 * 60 * 1000)
                 {
-                    monotonic = false;
-                    break;
+                    _timeOffsetCandidateInvalid = true;
+                    continue;
                 }
 
-                if (previous is not null && time < previous - 0.001)
+                if (_timeOffsetPrevious is not null && time < _timeOffsetPrevious - 0.001)
                 {
-                    monotonic = false;
-                    break;
+                    _timeOffsetCandidateInvalid = true;
+                    continue;
                 }
 
-                first ??= time;
-                last = time;
-                previous = time;
-                saneCount++;
-                index += step;
+                _timeOffsetFirst ??= time;
+                _timeOffsetLast = time;
+                _timeOffsetPrevious = time;
+                _timeOffsetSaneCount++;
+                _timeOffsetSampleIndex++;
             }
 
-            if (!monotonic || saneCount < Math.Min(size, 4))
+            if (!_timeOffsetCandidateInvalid && _timeOffsetSaneCount == _timeOffsetSampleCount)
             {
-                continue;
+                var span = (_timeOffsetLast ?? 0) - (_timeOffsetFirst ?? 0);
+                if (_timeOffsetSearchSize <= 1 || span > 0.001)
+                {
+                    var score = _timeOffsetSaneCount * 1000 + span;
+                    if (score > _timeOffsetBestScore)
+                    {
+                        _timeOffsetBestOffset = offset;
+                        _timeOffsetBestScore = score;
+                    }
+                }
             }
 
-            var span = (last ?? 0) - (first ?? 0);
-            if (size > 1 && span <= 0.001)
-            {
-                continue;
-            }
-
-            var score = saneCount * 1000 + span;
-            if (score > bestScore)
-            {
-                bestOffset = offset;
-                bestScore = score;
-            }
+            AdvanceReplayFrameTimeOffsetCandidate();
         }
 
+        var bestOffset = _timeOffsetBestOffset;
+        ResetReplayFrameTimeOffsetSearch();
+        if (bestOffset is null)
+        {
+            _failedTimeOffsetFramesList = framesList;
+            _failedTimeOffsetItems = items;
+            _nextTimeOffsetSearchAt = now + TimeSpan.FromMilliseconds(100);
+        }
         return bestOffset;
     }
 
-    private bool IsReplayFrameTimeOffsetUsable(nint items, int size, int? offset)
+    private void BeginReplayFrameTimeOffsetSearch(nint framesList, nint items, int size)
+    {
+        ResetReplayFrameTimeOffsetSearch();
+        _failedTimeOffsetFramesList = 0;
+        _failedTimeOffsetItems = 0;
+        _timeOffsetSearchFramesList = framesList;
+        _timeOffsetSearchItems = items;
+        _timeOffsetSearchSize = size;
+        _timeOffsetSampleCount = Math.Min(size, 4);
+        _timeOffsetSampleStep = Math.Max(1, size / _timeOffsetSampleCount);
+    }
+
+    private void AdvanceReplayFrameTimeOffsetCandidate()
+    {
+        _timeOffsetCandidateIndex++;
+        _timeOffsetSampleIndex = 0;
+        _timeOffsetPrevious = null;
+        _timeOffsetFirst = null;
+        _timeOffsetLast = null;
+        _timeOffsetSaneCount = 0;
+        _timeOffsetCandidateInvalid = false;
+    }
+
+    private void ResetReplayFrameTimeOffsetSearch()
+    {
+        _timeOffsetSearchFramesList = 0;
+        _timeOffsetSearchItems = 0;
+        _timeOffsetSearchSize = 0;
+        _timeOffsetSampleCount = 0;
+        _timeOffsetSampleStep = 0;
+        _timeOffsetCandidateIndex = 0;
+        _timeOffsetSampleIndex = 0;
+        _timeOffsetPrevious = null;
+        _timeOffsetFirst = null;
+        _timeOffsetLast = null;
+        _timeOffsetSaneCount = 0;
+        _timeOffsetCandidateInvalid = false;
+        _timeOffsetBestOffset = null;
+        _timeOffsetBestScore = double.NegativeInfinity;
+    }
+
+    private bool IsReplayFrameTimeOffsetUsable(nint items, int size, int? offset, long deadline)
     {
         if (offset is not { } value || size < 2)
         {
@@ -890,6 +1867,8 @@ internal sealed class LazerReplayFrameMemoryReader
 
         try
         {
+            if (BudgetExpired(deadline))
+                return false;
             var firstFrame = ReadItem(items, 0);
             var lastFrame = ReadItem(items, size - 1);
             if (!IsReadablePointer(firstFrame) || !IsReadablePointer(lastFrame))
@@ -911,14 +1890,29 @@ internal sealed class LazerReplayFrameMemoryReader
         }
     }
 
-    private (bool LeftPressed, bool RightPressed) ReadActionsFromFrame(nint frame)
+    private static long DeadlineFromNow(TimeSpan budget) =>
+        Stopwatch.GetTimestamp() + Math.Max(1, (long)(budget.TotalSeconds * Stopwatch.Frequency));
+
+    private static bool BudgetExpired(long deadline) =>
+        deadline != long.MaxValue && Stopwatch.GetTimestamp() >= deadline;
+
+    private enum DiscoveryPhase
     {
-        foreach (var offset in new[] { ReplayFrameActionsOffset, ReplayFrameActionsOffset + 0x8 })
+        BootstrapPattern,
+        VtableMarker,
+        GameBaseObject,
+    }
+
+    private (bool LeftPressed, bool RightPressed) ReadActionsFromFrame(nint frame, long deadline)
+    {
+        foreach (var offset in ReplayFrameActionOffsets)
         {
+            if (BudgetExpired(deadline))
+                break;
             try
             {
                 var actionsList = _memory.ReadIntPtr(frame + offset);
-                var result = ReadActions(actionsList);
+                var result = ReadActions(actionsList, deadline);
                 if (result.Readable)
                 {
                     return (result.LeftPressed, result.RightPressed);
@@ -932,7 +1926,7 @@ internal sealed class LazerReplayFrameMemoryReader
         return (false, false);
     }
 
-    private (bool LeftPressed, bool RightPressed, bool Readable) ReadActions(nint actionsList)
+    private (bool LeftPressed, bool RightPressed, bool Readable) ReadActions(nint actionsList, long deadline)
     {
         var leftPressed = false;
         var rightPressed = false;
@@ -949,6 +1943,8 @@ internal sealed class LazerReplayFrameMemoryReader
 
         for (var i = 0; i < size; i++)
         {
+            if (BudgetExpired(deadline))
+                return (leftPressed, rightPressed, false);
             var action = _memory.ReadInt32(items + 0x10 + 0x4 * i);
             if (action == 0)
             {
@@ -1026,6 +2022,62 @@ internal sealed record LazerMemoryOffsets(
         {
             return null;
         }
+    }
+
+    public static async Task<LazerMemoryOffsets> LoadAsync(
+        string? path,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            if (!File.Exists(path))
+                throw new FileNotFoundException("osu!lazer offsets.json was not found.", path);
+            var explicitJson = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Parse(explicitJson);
+        }
+
+        path = Path.Combine(AppPaths.CacheDir, "tosu", "offsets.json");
+        if (File.Exists(path))
+        {
+            try
+            {
+                var cachedJson = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                return Parse(cachedJson);
+            }
+            catch (Exception ex) when (
+                ex is IOException or JsonException or InvalidDataException)
+            {
+                // Replace an unreadable cache only after a fresh response has
+                // been downloaded and validated below.
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Kumori");
+        var json = await http.GetStringAsync(OfficialOffsetsUrl, cancellationToken).ConfigureAwait(false);
+        var offsets = Parse(json);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var isNew = !File.Exists(path);
+        var temp = path + $".new-{Guid.NewGuid():N}";
+        try
+        {
+            await File.WriteAllTextAsync(temp, json, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temp); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        if (isNew)
+            CacheActivityLog.RecordAddition(path, "tosu-memory-offsets");
+        return offsets;
     }
 
     private static LazerMemoryOffsets Parse(string json)
@@ -1108,6 +2160,7 @@ public sealed class ProcessMemory : IDisposable
     private const int ProcessVmRead = 0x0010;
     private const int ProcessQueryInformation = 0x0400;
     private readonly nint _handle;
+    private readonly byte[] _scalarBuffer = new byte[8];
 
     private ProcessMemory(nint handle)
     {
@@ -1125,12 +2178,62 @@ public sealed class ProcessMemory : IDisposable
         return new ProcessMemory(handle);
     }
 
-    public int ReadInt32(nint address) => BitConverter.ToInt32(Read(address, 4));
-    public long ReadInt64(nint address) => BitConverter.ToInt64(Read(address, 8));
-    public float ReadFloat(nint address) => BitConverter.ToSingle(Read(address, 4));
-    public double ReadDouble(nint address) => BitConverter.ToDouble(Read(address, 8));
-    public nint ReadIntPtr(nint address) => (nint)BitConverter.ToInt64(Read(address, 8));
+    // ProcessMemory instances are intentionally serialized by their owners.
+    // Reusing this scalar buffer avoids several short-lived arrays per frame.
+    public int ReadInt32(nint address)
+    {
+        ReadScalar(address, 4);
+        return BitConverter.ToInt32(_scalarBuffer, 0);
+    }
+
+    public long ReadInt64(nint address)
+    {
+        ReadScalar(address, 8);
+        return BitConverter.ToInt64(_scalarBuffer, 0);
+    }
+
+    public float ReadFloat(nint address)
+    {
+        ReadScalar(address, 4);
+        return BitConverter.ToSingle(_scalarBuffer, 0);
+    }
+
+    public double ReadDouble(nint address)
+    {
+        ReadScalar(address, 8);
+        return BitConverter.ToDouble(_scalarBuffer, 0);
+    }
+
+    public nint ReadIntPtr(nint address)
+    {
+        ReadScalar(address, IntPtr.Size);
+        return IntPtr.Size == 8
+            ? (nint)BitConverter.ToInt64(_scalarBuffer, 0)
+            : (nint)BitConverter.ToInt32(_scalarBuffer, 0);
+    }
+
+    public byte ReadByte(nint address)
+    {
+        ReadScalar(address, 1);
+        return _scalarBuffer[0];
+    }
+
     public byte[] ReadBytes(nint address, int count) => Read(address, count);
+
+    public void ReadBytes(nint address, byte[] buffer, int count)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        if ((uint)count > (uint)buffer.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        if (!ReadProcessMemory(_handle, address, buffer, count, out var bytesRead) || bytesRead != count)
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
+    private void ReadScalar(nint address, int count)
+    {
+        if (!ReadProcessMemory(_handle, address, _scalarBuffer, count, out var bytesRead) || bytesRead != count)
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
 
     public IEnumerable<MemoryRegion> Regions()
     {

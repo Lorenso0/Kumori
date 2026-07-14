@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using Kumori.Core;
 using Kumori.Core.Models;
 using osu.Game.Beatmaps;
 using osu.Game.Rulesets;
@@ -206,7 +207,7 @@ public sealed record OsrValidationResult(
     public string RecordedComboText => RecordedCombo.ToString("N0", CultureInfo.InvariantCulture);
     public string ComboDeltaText => ComboDelta.ToString("+#,0;-#,0;0", CultureInfo.InvariantCulture);
     public string ComboComparisonText => $"Kumori {RecordedComboText} · difference {ComboDeltaText}";
-    public string ReplayIdentityText => $"{ReplayPlayer} · {ReplayDate.LocalDateTime:dd/MM/yyyy HH:mm:ss}" + (ReplayOnlineId > 0 ? $" · score #{ReplayOnlineId}" : "");
+    public string ReplayIdentityText => $"{ReplayPlayer} · {DisplayDateTime.FormatLocalDateTimeWithSeconds(ReplayDate)}" + (ReplayOnlineId > 0 ? $" · score #{ReplayOnlineId}" : "");
     public string CaptureText => Movement is { Available: true } m
         ? $"{m.SampleCount:N0} samples at {m.SampleRate:0} Hz · {m.DroppedSamples:N0} dropped"
         : "No cursor samples were saved for this attempt.";

@@ -334,9 +334,9 @@
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
                         <TextBlock Text="Companion Automation" Style="{StaticResource SettingsTitle}" />
-                        <TextBlock Text="Controls helpers Kumori can run when osu! is detected." Style="{StaticResource SettingsHint}" />
+                        <TextBlock Text="Controls optional helpers managed by Kumori." Style="{StaticResource SettingsHint}" />
 
-                        <CheckBox x:Name="OtdAutoLaunch" Content="Launch OpenTabletDriver when osu! starts" />
+                        <CheckBox x:Name="OtdAutoLaunch" Content="Run OpenTabletDriver while Kumori is open" />
                         <TextBlock Text="OpenTabletDriver executable" Style="{StaticResource SettingsLabel}" />
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions>
@@ -350,6 +350,9 @@
                         </Grid>
 
                         <CheckBox x:Name="DualModeEnabled" Content="Switch LG monitor dual mode automatically" />
+                        <CheckBox x:Name="SuspendOsuDuringDualModeSwitch"
+                                  Content="Pause osu! while the display mode changes"
+                                  Margin="0,4,0,0" />
                         <TextBlock Text="Uses Kumori's built-in DDC/CI command. This option works only with compatible LG monitors." Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
@@ -389,7 +392,6 @@
                             <CheckBox x:Name="TrackingEnabled" Content="Log plays with tosu metadata" />
                             <CheckBox x:Name="LazerReplayFrameEnabled" Content="Capture osu! replay frames (stable and lazer)" />
                             <CheckBox x:Name="RunAtLogin" Content="Run Kumori when Windows starts" />
-                            <CheckBox x:Name="SuspendOsuDuringDualModeSwitch" Content="Experimentally pause osu! during dual-mode switching" />
                         </UniformGrid>
                         <TextBlock Text="Retention days" Style="{StaticResource SettingsLabel}" />
                         <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" />

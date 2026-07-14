@@ -1,25 +1,21 @@
 using Kumori.Core.State;
+using Kumori.Storage;
 using Kumori.Tracking;
 
 namespace Kumori.App;
 
 internal sealed class StatePublishingAttemptSink : IAttemptSink
 {
-    private readonly IAttemptSink _inner;
-    private readonly Func<long?> _currentAttemptId;
-    private readonly Func<long, bool> _hasReplayData;
+    private readonly AttemptSqliteSink _inner;
     private readonly AppStateStore _store;
 
     public StatePublishingAttemptSink(
-        IAttemptSink inner,
-        Func<long?> currentAttemptId,
-        Func<long, bool> hasReplayData,
+        AttemptSqliteSink inner,
         AppStateStore store)
     {
         _inner = inner;
-        _currentAttemptId = currentAttemptId;
-        _hasReplayData = hasReplayData;
         _store = store;
+        _inner.AttemptPersisted += PublishPersistedAttempt;
     }
 
     public void StartAttempt(AttemptStart start) => _inner.StartAttempt(start);
@@ -28,21 +24,15 @@ internal sealed class StatePublishingAttemptSink : IAttemptSink
 
     public void DiscardIfEmpty(AttemptDiscard discard) => _inner.DiscardIfEmpty(discard);
 
-    public void Finalize(AttemptFinalization finalization)
-    {
-        var attemptId = _currentAttemptId();
-        _inner.Finalize(finalization);
-        if (attemptId is not { } id)
-        {
-            return;
-        }
+    public void Finalize(AttemptFinalization finalization) => _inner.Finalize(finalization);
 
+    private void PublishPersistedAttempt(long attemptId)
+    {
         _store.Update(s => s with
         {
             Tracking = s.Tracking with
             {
-                LatestAttemptId = id,
-                LatestReplayAttemptId = _hasReplayData(id) ? id : s.Tracking.LatestReplayAttemptId,
+                LatestAttemptId = attemptId,
             },
         });
     }

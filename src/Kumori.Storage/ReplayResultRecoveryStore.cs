@@ -35,53 +35,69 @@ public sealed record ReplayResultRecoveryOutcome(
 
 /// <summary>
 /// Repairs result fields which tosu omitted, using the checksum-matched replay.
-/// Existing non-zero telemetry wins unless an older recovery schema is known
-/// to have replaced replay accuracy with a reconstructed core-hit formula.
+/// Existing non-zero telemetry wins unless the result snapshot was incomplete
+/// enough that its accuracy was only a tosu placeholder, or an older recovery
+/// schema replaced replay accuracy with a reconstructed core-hit formula.
 /// </summary>
 public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
 {
     public const int CurrentSimulationSchema = 2;
 
-    public ReplayResultRecoveryOutcome Apply(long attemptId, ReplayResultData replay, string source)
+    public ReplayResultRecoveryOutcome Apply(
+        long attemptId,
+        ReplayResultData replay,
+        string source,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var con = factory.Open();
-        using var tx = con.BeginTransaction();
-        var current = Read(con, tx, attemptId);
-        if (current is null || string.Equals(current.Outcome, "active", StringComparison.OrdinalIgnoreCase))
-            return ReplayResultRecoveryOutcome.NotReady;
-
-        var fields = new List<string>();
-        long score = FillLong(current.Score, replay.Score, "score");
-        double accuracy = WasAccuracyOverwrittenByLegacySimulation(current.SourceJson)
-            ? ReplaceDouble(current.Accuracy, replay.Accuracy, "accuracy")
-            : FillDouble(current.Accuracy, replay.Accuracy, "accuracy");
-        int combo = FillInt(current.Combo, replay.Combo, "combo");
-        int n300 = FillInt(current.N300, replay.N300, "300");
-        int n100 = FillInt(current.N100, replay.N100, "100");
-        int n50 = FillInt(current.N50, replay.N50, "50");
-        int misses = FillInt(current.Misses, replay.Misses, "misses");
-        int geki = FillInt(current.Geki, replay.Geki, "geki");
-        int katu = FillInt(current.Katu, replay.Katu, "katu");
-        int largeTickHits = FillInt(current.LargeTickHits, replay.LargeTickHits, "large tick hits");
-        int largeTickMisses = FillInt(current.LargeTickMisses, replay.LargeTickMisses, "large tick misses");
-        int smallTickHits = FillInt(current.SmallTickHits, replay.SmallTickHits, "small tick hits");
-        int smallTickMisses = FillInt(current.SmallTickMisses, replay.SmallTickMisses, "small tick misses");
-        int sliderTailHits = FillInt(current.SliderTailHits, replay.SliderTailHits, "slider tail hits");
-        int sliderTailMisses = FillInt(current.SliderTailMisses, replay.SliderTailMisses, "slider tail misses");
-        string? grade = current.Grade;
-        if (string.IsNullOrWhiteSpace(grade) && !string.IsNullOrWhiteSpace(replay.Grade))
+        if (cancellationToken.CanBeCanceled)
+            con.DefaultTimeout = 1;
+        using var interruptRegistration = cancellationToken.Register(
+            static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle),
+            con);
+        try
         {
-            grade = replay.Grade;
-            fields.Add("grade");
-        }
+            using var tx = con.BeginTransaction();
+            ReplayResultRecoveryOutcome ApplyCore()
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var current = Read(con, tx, attemptId, cancellationToken);
+                if (current is null || string.Equals(current.Outcome, "active", StringComparison.OrdinalIgnoreCase))
+                    return ReplayResultRecoveryOutcome.NotReady;
 
-        if (fields.Count == 0)
-            return ReplayResultRecoveryOutcome.NoChanges;
+                var fields = new List<string>();
+                long score = FillLong(current.Score, replay.Score, "score");
+                double accuracy = ReplayMustOwnAccuracy(current, replay)
+                    ? ReplaceDouble(current.Accuracy, replay.Accuracy, "accuracy")
+                    : FillDouble(current.Accuracy, replay.Accuracy, "accuracy");
+                int combo = FillInt(current.Combo, replay.Combo, "combo");
+                int n300 = FillInt(current.N300, replay.N300, "300");
+                int n100 = FillInt(current.N100, replay.N100, "100");
+                int n50 = FillInt(current.N50, replay.N50, "50");
+                int misses = FillInt(current.Misses, replay.Misses, "misses");
+                int geki = FillInt(current.Geki, replay.Geki, "geki");
+                int katu = FillInt(current.Katu, replay.Katu, "katu");
+                int largeTickHits = FillInt(current.LargeTickHits, replay.LargeTickHits, "large tick hits");
+                int largeTickMisses = FillInt(current.LargeTickMisses, replay.LargeTickMisses, "large tick misses");
+                int smallTickHits = FillInt(current.SmallTickHits, replay.SmallTickHits, "small tick hits");
+                int smallTickMisses = FillInt(current.SmallTickMisses, replay.SmallTickMisses, "small tick misses");
+                int sliderTailHits = FillInt(current.SliderTailHits, replay.SliderTailHits, "slider tail hits");
+                int sliderTailMisses = FillInt(current.SliderTailMisses, replay.SliderTailMisses, "slider tail misses");
+                string? grade = current.Grade;
+                if (string.IsNullOrWhiteSpace(grade) && !string.IsNullOrWhiteSpace(replay.Grade))
+                {
+                    grade = replay.Grade;
+                    fields.Add("grade");
+                }
 
-        using (var update = con.CreateCommand())
-        {
-            update.Transaction = tx;
-            update.CommandText = """
+                if (fields.Count == 0)
+                    return ReplayResultRecoveryOutcome.NoChanges;
+
+                using (var update = con.CreateCommand())
+                {
+                    update.Transaction = tx;
+                    update.CommandText = """
                 UPDATE attempts
                 SET score=@score, accuracy=@accuracy, grade=@grade, combo=@combo,
                     n300=@n300, n100=@n100, n50=@n50, misses=@misses,
@@ -91,75 +107,101 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
                     slider_tail_hits=@slider_tail_hits, slider_tail_misses=@slider_tail_misses
                 WHERE id=@id AND outcome <> 'active'
                 """;
-            update.Parameters.AddWithValue("@score", score);
-            update.Parameters.AddWithValue("@accuracy", accuracy);
-            update.Parameters.AddWithValue("@grade", (object?)grade ?? DBNull.Value);
-            update.Parameters.AddWithValue("@combo", combo);
-            update.Parameters.AddWithValue("@n300", n300);
-            update.Parameters.AddWithValue("@n100", n100);
-            update.Parameters.AddWithValue("@n50", n50);
-            update.Parameters.AddWithValue("@misses", misses);
-            update.Parameters.AddWithValue("@geki", geki);
-            update.Parameters.AddWithValue("@katu", katu);
-            update.Parameters.AddWithValue("@large_tick_hits", largeTickHits);
-            update.Parameters.AddWithValue("@large_tick_misses", largeTickMisses);
-            update.Parameters.AddWithValue("@small_tick_hits", smallTickHits);
-            update.Parameters.AddWithValue("@small_tick_misses", smallTickMisses);
-            update.Parameters.AddWithValue("@slider_tail_hits", sliderTailHits);
-            update.Parameters.AddWithValue("@slider_tail_misses", sliderTailMisses);
-            update.Parameters.AddWithValue("@id", attemptId);
-            if (update.ExecuteNonQuery() == 0)
-                return ReplayResultRecoveryOutcome.NotReady;
+                    update.Parameters.AddWithValue("@score", score);
+                    update.Parameters.AddWithValue("@accuracy", accuracy);
+                    update.Parameters.AddWithValue("@grade", (object?)grade ?? DBNull.Value);
+                    update.Parameters.AddWithValue("@combo", combo);
+                    update.Parameters.AddWithValue("@n300", n300);
+                    update.Parameters.AddWithValue("@n100", n100);
+                    update.Parameters.AddWithValue("@n50", n50);
+                    update.Parameters.AddWithValue("@misses", misses);
+                    update.Parameters.AddWithValue("@geki", geki);
+                    update.Parameters.AddWithValue("@katu", katu);
+                    update.Parameters.AddWithValue("@large_tick_hits", largeTickHits);
+                    update.Parameters.AddWithValue("@large_tick_misses", largeTickMisses);
+                    update.Parameters.AddWithValue("@small_tick_hits", smallTickHits);
+                    update.Parameters.AddWithValue("@small_tick_misses", smallTickMisses);
+                    update.Parameters.AddWithValue("@slider_tail_hits", sliderTailHits);
+                    update.Parameters.AddWithValue("@slider_tail_misses", sliderTailMisses);
+                    update.Parameters.AddWithValue("@id", attemptId);
+                    if (update.ExecuteNonQuery() == 0)
+                        return ReplayResultRecoveryOutcome.NotReady;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                UpsertScoreContext(
+                    con, tx, attemptId, score, grade, n300, n100, n50, misses, geki, katu,
+                    largeTickHits, largeTickMisses, smallTickHits, smallTickMisses, sliderTailHits, sliderTailMisses);
+                cancellationToken.ThrowIfCancellationRequested();
+                RecordRecoverySource(con, tx, attemptId, source, fields);
+                RebuildRecoveredPersonalBests(con, tx, attemptId, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                tx.Commit();
+                Log.Warning(
+                    "Recovered missing tosu result fields for attempt {AttemptId} from {Source}: {Fields}",
+                    attemptId, source, string.Join(", ", fields));
+                return new ReplayResultRecoveryOutcome(true, true, fields);
+
+                long FillLong(long currentValue, long replayValue, string field)
+                {
+                    if (currentValue != 0 || replayValue == 0) return currentValue;
+                    fields.Add(field);
+                    return replayValue;
+                }
+
+                int FillInt(int currentValue, int replayValue, string field)
+                {
+                    if (currentValue != 0 || replayValue == 0) return currentValue;
+                    fields.Add(field);
+                    return replayValue;
+                }
+
+                double FillDouble(double currentValue, double replayValue, string field)
+                {
+                    if (Math.Abs(currentValue) > 0.000001 || Math.Abs(replayValue) <= 0.000001) return currentValue;
+                    fields.Add(field);
+                    return replayValue;
+                }
+
+                double ReplaceDouble(double currentValue, double replayValue, string field)
+                {
+                    if (Math.Abs(replayValue) <= 0.000001)
+                        return currentValue;
+                    fields.Add(field);
+                    return Math.Abs(currentValue - replayValue) <= 0.000001 ? currentValue : replayValue;
+                }
+            }
+
+            return ApplyCore();
         }
-
-        UpsertScoreContext(
-            con, tx, attemptId, score, grade, n300, n100, n50, misses, geki, katu,
-            largeTickHits, largeTickMisses, smallTickHits, smallTickMisses, sliderTailHits, sliderTailMisses);
-        RecordRecoverySource(con, tx, attemptId, source, fields);
-        RebuildRecoveredPersonalBests(con, tx, attemptId);
-        tx.Commit();
-        Log.Warning(
-            "Recovered missing tosu result fields for attempt {AttemptId} from {Source}: {Fields}",
-            attemptId, source, string.Join(", ", fields));
-        return new ReplayResultRecoveryOutcome(true, true, fields);
-
-        long FillLong(long currentValue, long replayValue, string field)
+        catch (SqliteException exception) when (cancellationToken.IsCancellationRequested)
         {
-            if (currentValue != 0 || replayValue == 0) return currentValue;
-            fields.Add(field);
-            return replayValue;
-        }
-
-        int FillInt(int currentValue, int replayValue, string field)
-        {
-            if (currentValue != 0 || replayValue == 0) return currentValue;
-            fields.Add(field);
-            return replayValue;
-        }
-
-        double FillDouble(double currentValue, double replayValue, string field)
-        {
-            if (Math.Abs(currentValue) > 0.000001 || Math.Abs(replayValue) <= 0.000001) return currentValue;
-            fields.Add(field);
-            return replayValue;
-        }
-
-        double ReplaceDouble(double currentValue, double replayValue, string field)
-        {
-            if (Math.Abs(replayValue) <= 0.000001)
-                return currentValue;
-            fields.Add(field);
-            return Math.Abs(currentValue - replayValue) <= 0.000001 ? currentValue : replayValue;
+            throw new OperationCanceledException(
+                "Replay result recovery was interrupted by gameplay.",
+                exception,
+                cancellationToken);
         }
     }
 
-    public ReplayResultRecoveryOutcome ApplySimulation(long attemptId, ReplaySimulationResult simulation)
+    public ReplayResultRecoveryOutcome ApplySimulation(
+        long attemptId,
+        ReplaySimulationResult simulation,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var con = factory.Open();
-        using var tx = con.BeginTransaction();
-        using var read = con.CreateCommand();
-        read.Transaction = tx;
-        read.CommandText = """
+        if (cancellationToken.CanBeCanceled)
+            con.DefaultTimeout = 1;
+        using var interruptRegistration = cancellationToken.Register(
+            static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle),
+            con);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var tx = con.BeginTransaction();
+            using var read = con.CreateCommand();
+            read.Transaction = tx;
+            read.CommandText = """
             SELECT a.outcome, a.slider_breaks, a.large_tick_hits, a.large_tick_misses,
                    a.small_tick_hits, a.small_tick_misses, a.slider_tail_hits, a.slider_tail_misses,
                    a.unstable_rate,
@@ -173,89 +215,91 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             LEFT JOIN attempt_context c ON c.attempt_id = a.id
             WHERE a.id=@id
             """;
-        read.Parameters.AddWithValue("@id", attemptId);
-        using var reader = read.ExecuteReader();
-        if (!reader.Read() || reader.GetString(0).Equals("active", StringComparison.OrdinalIgnoreCase))
-            return ReplayResultRecoveryOutcome.NotReady;
+            read.Parameters.AddWithValue("@id", attemptId);
+            cancellationToken.ThrowIfCancellationRequested();
+            using var reader = read.ExecuteReader();
+            if (!reader.Read() || reader.GetString(0).Equals("active", StringComparison.OrdinalIgnoreCase))
+                return ReplayResultRecoveryOutcome.NotReady;
 
-        int sliderBreaks = reader.GetInt32(1);
-        int largeTickHits = reader.GetInt32(2);
-        int largeTickMisses = reader.GetInt32(3);
-        int smallTickHits = reader.GetInt32(4);
-        int smallTickMisses = reader.GetInt32(5);
-        int sliderTailHits = reader.GetInt32(6);
-        int sliderTailMisses = reader.GetInt32(7);
-        double unstableRate = reader.GetDouble(8);
-        int timingCount = reader.GetInt32(9);
-        double pp = reader.GetDouble(10);
-        double fcPp = reader.GetDouble(11);
-        double maxPp = reader.GetDouble(12);
-        double? baseStars = reader.IsDBNull(13) ? null : reader.GetDouble(13);
-        double? adjustedStars = reader.IsDBNull(14) ? null : reader.GetDouble(14);
-        long beatmapId = reader.GetInt64(15);
-        double? beatmapStars = reader.IsDBNull(16) ? null : reader.GetDouble(16);
-        double? ar = reader.IsDBNull(17) ? null : reader.GetDouble(17);
-        double? cs = reader.IsDBNull(18) ? null : reader.GetDouble(18);
-        double? od = reader.IsDBNull(19) ? null : reader.GetDouble(19);
-        double? hp = reader.IsDBNull(20) ? null : reader.GetDouble(20);
-        double? bpm = reader.IsDBNull(21) ? null : reader.GetDouble(21);
-        int maxCombo = reader.GetInt32(22);
-        long score = reader.GetInt64(23);
-        double accuracy = reader.GetDouble(24);
-        string? grade = reader.IsDBNull(25) ? null : reader.GetString(25);
-        int combo = reader.GetInt32(26);
-        int n300 = reader.GetInt32(27);
-        int n100 = reader.GetInt32(28);
-        int n50 = reader.GetInt32(29);
-        int misses = reader.GetInt32(30);
-        int geki = reader.GetInt32(31);
-        int katu = reader.GetInt32(32);
-        string sourceJson = reader.GetString(33);
-        reader.Close();
+            int sliderBreaks = reader.GetInt32(1);
+            int largeTickHits = reader.GetInt32(2);
+            int largeTickMisses = reader.GetInt32(3);
+            int smallTickHits = reader.GetInt32(4);
+            int smallTickMisses = reader.GetInt32(5);
+            int sliderTailHits = reader.GetInt32(6);
+            int sliderTailMisses = reader.GetInt32(7);
+            double unstableRate = reader.GetDouble(8);
+            int timingCount = reader.GetInt32(9);
+            double pp = reader.GetDouble(10);
+            double fcPp = reader.GetDouble(11);
+            double maxPp = reader.GetDouble(12);
+            double? baseStars = reader.IsDBNull(13) ? null : reader.GetDouble(13);
+            double? adjustedStars = reader.IsDBNull(14) ? null : reader.GetDouble(14);
+            long beatmapId = reader.GetInt64(15);
+            double? beatmapStars = reader.IsDBNull(16) ? null : reader.GetDouble(16);
+            double? ar = reader.IsDBNull(17) ? null : reader.GetDouble(17);
+            double? cs = reader.IsDBNull(18) ? null : reader.GetDouble(18);
+            double? od = reader.IsDBNull(19) ? null : reader.GetDouble(19);
+            double? hp = reader.IsDBNull(20) ? null : reader.GetDouble(20);
+            double? bpm = reader.IsDBNull(21) ? null : reader.GetDouble(21);
+            int maxCombo = reader.GetInt32(22);
+            long score = reader.GetInt64(23);
+            double accuracy = reader.GetDouble(24);
+            string? grade = reader.IsDBNull(25) ? null : reader.GetString(25);
+            int combo = reader.GetInt32(26);
+            int n300 = reader.GetInt32(27);
+            int n100 = reader.GetInt32(28);
+            int n50 = reader.GetInt32(29);
+            int misses = reader.GetInt32(30);
+            int geki = reader.GetInt32(31);
+            int katu = reader.GetInt32(32);
+            string sourceJson = reader.GetString(33);
+            reader.Close();
+            cancellationToken.ThrowIfCancellationRequested();
 
-        var fields = new List<string>();
-        bool replayRecovery = IsReplayRecovery(sourceJson);
-        int simulatedCoreTotal = simulation.N300 + simulation.N100 + simulation.N50 + simulation.Misses;
-        if (replayRecovery && simulatedCoreTotal > 0)
-        {
-            Replace(ref n300, simulation.N300, "300");
-            Replace(ref n100, simulation.N100, "100");
-            Replace(ref n50, simulation.N50, "50");
-            Replace(ref misses, simulation.Misses, "misses");
-            // The replay decoder (or valid tosu telemetry) owns final accuracy.
-            // Re-simulation can produce different modern-lazer slider judgements,
-            // so its core 300/100/50/miss counts are not an accuracy substitute.
-            accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
-        }
-        sliderBreaks = FillInt(sliderBreaks, simulation.SliderBreaks, "slider breaks");
-        largeTickHits = FillInt(largeTickHits, simulation.LargeTickHits, "large tick hits");
-        largeTickMisses = FillInt(largeTickMisses, simulation.LargeTickMisses, "large tick misses");
-        smallTickHits = FillInt(smallTickHits, simulation.SmallTickHits, "small tick hits");
-        smallTickMisses = FillInt(smallTickMisses, simulation.SmallTickMisses, "small tick misses");
-        sliderTailHits = FillInt(sliderTailHits, simulation.SliderTailHits, "slider tail hits");
-        sliderTailMisses = FillInt(sliderTailMisses, simulation.SliderTailMisses, "slider tail misses");
-        if (Math.Abs(unstableRate) <= 0.000001 && simulation.UnstableRate > 0)
-        {
-            unstableRate = simulation.UnstableRate;
-            fields.Add("unstable rate");
-        }
-        pp = FillDouble(pp, simulation.Pp, "pp");
-        fcPp = FillDouble(fcPp, simulation.FcPp, "FC pp");
-        maxPp = FillDouble(maxPp, simulation.MaxPp, "max pp");
-        baseStars = FillNullable(baseStars, simulation.BaseStars, "base star rating");
-        adjustedStars = FillNullable(adjustedStars, simulation.AdjustedStars, "mod-adjusted star rating");
-        beatmapStars = FillNullable(beatmapStars, simulation.BaseStars, "beatmap star rating");
-        ar = FillNullable(ar, simulation.ApproachRate, "AR", allowZero: true);
-        cs = FillNullable(cs, simulation.CircleSize, "CS", allowZero: true);
-        od = FillNullable(od, simulation.OverallDifficulty, "OD", allowZero: true);
-        hp = FillNullable(hp, simulation.DrainRate, "HP", allowZero: true);
-        bpm = FillNullable(bpm, simulation.Bpm, "BPM");
-        maxCombo = FillInt(maxCombo, simulation.MaxCombo, "map max combo");
+            var fields = new List<string>();
+            bool replayRecovery = IsReplayRecovery(sourceJson);
+            int simulatedCoreTotal = simulation.N300 + simulation.N100 + simulation.N50 + simulation.Misses;
+            if (replayRecovery && simulatedCoreTotal > 0)
+            {
+                Replace(ref n300, simulation.N300, "300");
+                Replace(ref n100, simulation.N100, "100");
+                Replace(ref n50, simulation.N50, "50");
+                Replace(ref misses, simulation.Misses, "misses");
+                // The replay decoder (or valid tosu telemetry) owns final accuracy.
+                // Re-simulation can produce different modern-lazer slider judgements,
+                // so its core 300/100/50/miss counts are not an accuracy substitute.
+                accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
+            }
+            sliderBreaks = FillInt(sliderBreaks, simulation.SliderBreaks, "slider breaks");
+            largeTickHits = FillInt(largeTickHits, simulation.LargeTickHits, "large tick hits");
+            largeTickMisses = FillInt(largeTickMisses, simulation.LargeTickMisses, "large tick misses");
+            smallTickHits = FillInt(smallTickHits, simulation.SmallTickHits, "small tick hits");
+            smallTickMisses = FillInt(smallTickMisses, simulation.SmallTickMisses, "small tick misses");
+            sliderTailHits = FillInt(sliderTailHits, simulation.SliderTailHits, "slider tail hits");
+            sliderTailMisses = FillInt(sliderTailMisses, simulation.SliderTailMisses, "slider tail misses");
+            if (Math.Abs(unstableRate) <= 0.000001 && simulation.UnstableRate > 0)
+            {
+                unstableRate = simulation.UnstableRate;
+                fields.Add("unstable rate");
+            }
+            pp = FillDouble(pp, simulation.Pp, "pp");
+            fcPp = FillDouble(fcPp, simulation.FcPp, "FC pp");
+            maxPp = FillDouble(maxPp, simulation.MaxPp, "max pp");
+            baseStars = FillNullable(baseStars, simulation.BaseStars, "base star rating");
+            adjustedStars = FillNullable(adjustedStars, simulation.AdjustedStars, "mod-adjusted star rating");
+            beatmapStars = FillNullable(beatmapStars, simulation.BaseStars, "beatmap star rating");
+            ar = FillNullable(ar, simulation.ApproachRate, "AR", allowZero: true);
+            cs = FillNullable(cs, simulation.CircleSize, "CS", allowZero: true);
+            od = FillNullable(od, simulation.OverallDifficulty, "OD", allowZero: true);
+            hp = FillNullable(hp, simulation.DrainRate, "HP", allowZero: true);
+            bpm = FillNullable(bpm, simulation.Bpm, "BPM");
+            maxCombo = FillInt(maxCombo, simulation.MaxCombo, "map max combo");
 
-        using (var update = con.CreateCommand())
-        {
-            update.Transaction = tx;
-            update.CommandText = """
+            using (var update = con.CreateCommand())
+            {
+                update.Transaction = tx;
+                update.CommandText = """
                 UPDATE attempts SET
                     accuracy=@accuracy,
                     n300=@n300,
@@ -277,99 +321,113 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
                     adjusted_stars=@adjusted_stars
                 WHERE id=@id AND outcome <> 'active'
                 """;
-            update.Parameters.AddWithValue("@slider_breaks", sliderBreaks);
-            update.Parameters.AddWithValue("@accuracy", accuracy);
-            update.Parameters.AddWithValue("@n300", n300);
-            update.Parameters.AddWithValue("@n100", n100);
-            update.Parameters.AddWithValue("@n50", n50);
-            update.Parameters.AddWithValue("@misses", misses);
-            update.Parameters.AddWithValue("@large_tick_hits", largeTickHits);
-            update.Parameters.AddWithValue("@large_tick_misses", largeTickMisses);
-            update.Parameters.AddWithValue("@small_tick_hits", smallTickHits);
-            update.Parameters.AddWithValue("@small_tick_misses", smallTickMisses);
-            update.Parameters.AddWithValue("@slider_tail_hits", sliderTailHits);
-            update.Parameters.AddWithValue("@slider_tail_misses", sliderTailMisses);
-            update.Parameters.AddWithValue("@unstable_rate", unstableRate);
-            update.Parameters.AddWithValue("@pp", pp);
-            update.Parameters.AddWithValue("@fc_pp", fcPp);
-            update.Parameters.AddWithValue("@max_pp", maxPp);
-            update.Parameters.AddWithValue("@base_stars", (object?)baseStars ?? DBNull.Value);
-            update.Parameters.AddWithValue("@adjusted_stars", (object?)adjustedStars ?? DBNull.Value);
-            update.Parameters.AddWithValue("@id", attemptId);
-            update.ExecuteNonQuery();
-        }
+                update.Parameters.AddWithValue("@slider_breaks", sliderBreaks);
+                update.Parameters.AddWithValue("@accuracy", accuracy);
+                update.Parameters.AddWithValue("@n300", n300);
+                update.Parameters.AddWithValue("@n100", n100);
+                update.Parameters.AddWithValue("@n50", n50);
+                update.Parameters.AddWithValue("@misses", misses);
+                update.Parameters.AddWithValue("@large_tick_hits", largeTickHits);
+                update.Parameters.AddWithValue("@large_tick_misses", largeTickMisses);
+                update.Parameters.AddWithValue("@small_tick_hits", smallTickHits);
+                update.Parameters.AddWithValue("@small_tick_misses", smallTickMisses);
+                update.Parameters.AddWithValue("@slider_tail_hits", sliderTailHits);
+                update.Parameters.AddWithValue("@slider_tail_misses", sliderTailMisses);
+                update.Parameters.AddWithValue("@unstable_rate", unstableRate);
+                update.Parameters.AddWithValue("@pp", pp);
+                update.Parameters.AddWithValue("@fc_pp", fcPp);
+                update.Parameters.AddWithValue("@max_pp", maxPp);
+                update.Parameters.AddWithValue("@base_stars", (object?)baseStars ?? DBNull.Value);
+                update.Parameters.AddWithValue("@adjusted_stars", (object?)adjustedStars ?? DBNull.Value);
+                update.Parameters.AddWithValue("@id", attemptId);
+                cancellationToken.ThrowIfCancellationRequested();
+                update.ExecuteNonQuery();
+            }
 
-        using (var updateBeatmap = con.CreateCommand())
-        {
-            updateBeatmap.Transaction = tx;
-            updateBeatmap.CommandText = """
+            using (var updateBeatmap = con.CreateCommand())
+            {
+                updateBeatmap.Transaction = tx;
+                updateBeatmap.CommandText = """
                 UPDATE beatmaps SET stars=@stars, ar=@ar, cs=@cs, od=@od, hp=@hp,
                                     bpm=@bpm, max_combo=@max_combo
                 WHERE id=@id
                 """;
-            updateBeatmap.Parameters.AddWithValue("@stars", (object?)beatmapStars ?? DBNull.Value);
-            updateBeatmap.Parameters.AddWithValue("@ar", (object?)ar ?? DBNull.Value);
-            updateBeatmap.Parameters.AddWithValue("@cs", (object?)cs ?? DBNull.Value);
-            updateBeatmap.Parameters.AddWithValue("@od", (object?)od ?? DBNull.Value);
-            updateBeatmap.Parameters.AddWithValue("@hp", (object?)hp ?? DBNull.Value);
-            updateBeatmap.Parameters.AddWithValue("@bpm", (object?)bpm ?? DBNull.Value);
-            updateBeatmap.Parameters.AddWithValue("@max_combo", maxCombo);
-            updateBeatmap.Parameters.AddWithValue("@id", beatmapId);
-            updateBeatmap.ExecuteNonQuery();
-        }
+                updateBeatmap.Parameters.AddWithValue("@stars", (object?)beatmapStars ?? DBNull.Value);
+                updateBeatmap.Parameters.AddWithValue("@ar", (object?)ar ?? DBNull.Value);
+                updateBeatmap.Parameters.AddWithValue("@cs", (object?)cs ?? DBNull.Value);
+                updateBeatmap.Parameters.AddWithValue("@od", (object?)od ?? DBNull.Value);
+                updateBeatmap.Parameters.AddWithValue("@hp", (object?)hp ?? DBNull.Value);
+                updateBeatmap.Parameters.AddWithValue("@bpm", (object?)bpm ?? DBNull.Value);
+                updateBeatmap.Parameters.AddWithValue("@max_combo", maxCombo);
+                updateBeatmap.Parameters.AddWithValue("@id", beatmapId);
+                cancellationToken.ThrowIfCancellationRequested();
+                updateBeatmap.ExecuteNonQuery();
+            }
 
-        if (timingCount == 0 && simulation.TimingOffsets.Count > 0)
-        {
-            UpsertSimulationTiming(con, tx, attemptId, simulation.TimingOffsets);
-            fields.Add("timing offsets");
-        }
-        if (replayRecovery)
-        {
-            UpsertScoreContext(
-                con, tx, attemptId, score, grade, n300, n100, n50, misses, geki, katu,
-                largeTickHits, largeTickMisses, smallTickHits, smallTickMisses, sliderTailHits, sliderTailMisses);
-            ReplaceRecoveredJudgementEvents(con, tx, attemptId, simulation.Judgements);
-            if (simulation.Judgements.Count > 0)
-                fields.Add("judgement events");
-        }
-        UpsertSimulationContext(con, tx, attemptId, simulation);
-        RecordSimulation(con, tx, attemptId, fields);
-        RebuildRecoveredPersonalBests(con, tx, attemptId);
-        tx.Commit();
-        Log.Information(
-            "Completed replay simulation recovery for attempt {AttemptId}: {Fields}",
-            attemptId, fields.Count == 0 ? "no additional non-zero fields" : string.Join(", ", fields));
-        return new ReplayResultRecoveryOutcome(true, fields.Count > 0, fields);
+            if (timingCount == 0 && simulation.TimingOffsets.Count > 0)
+            {
+                UpsertSimulationTiming(con, tx, attemptId, simulation.TimingOffsets, cancellationToken);
+                fields.Add("timing offsets");
+            }
+            if (replayRecovery)
+            {
+                UpsertScoreContext(
+                    con, tx, attemptId, score, grade, n300, n100, n50, misses, geki, katu,
+                    largeTickHits, largeTickMisses, smallTickHits, smallTickMisses, sliderTailHits, sliderTailMisses);
+                cancellationToken.ThrowIfCancellationRequested();
+                ReplaceRecoveredJudgementEvents(con, tx, attemptId, simulation.Judgements, cancellationToken);
+                if (simulation.Judgements.Count > 0)
+                    fields.Add("judgement events");
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            UpsertSimulationContext(con, tx, attemptId, simulation);
+            cancellationToken.ThrowIfCancellationRequested();
+            RecordSimulation(con, tx, attemptId, fields);
+            RebuildRecoveredPersonalBests(con, tx, attemptId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            tx.Commit();
+            Log.Information(
+                "Completed replay simulation recovery for attempt {AttemptId}: {Fields}",
+                attemptId, fields.Count == 0 ? "no additional non-zero fields" : string.Join(", ", fields));
+            return new ReplayResultRecoveryOutcome(true, fields.Count > 0, fields);
 
-        int FillInt(int current, int simulated, string field)
-        {
-            if (current != 0 || simulated == 0) return current;
-            fields.Add(field);
-            return simulated;
-        }
+            int FillInt(int current, int simulated, string field)
+            {
+                if (current != 0 || simulated == 0) return current;
+                fields.Add(field);
+                return simulated;
+            }
 
-        double FillDouble(double current, double simulated, string field)
-        {
-            if (Math.Abs(current) > 0.000001 || simulated <= 0) return current;
-            fields.Add(field);
-            return simulated;
-        }
+            double FillDouble(double current, double simulated, string field)
+            {
+                if (Math.Abs(current) > 0.000001 || simulated <= 0) return current;
+                fields.Add(field);
+                return simulated;
+            }
 
-        double? FillNullable(double? current, double simulated, string field, bool allowZero = false)
-        {
-            bool hasCurrentValue = allowZero
-                ? current is not null
-                : current is { } currentValue && currentValue > 0.000001;
-            if (hasCurrentValue || (!allowZero && simulated <= 0) || simulated < 0) return current;
-            fields.Add(field);
-            return simulated;
-        }
+            double? FillNullable(double? current, double simulated, string field, bool allowZero = false)
+            {
+                bool hasCurrentValue = allowZero
+                    ? current is not null
+                    : current is { } currentValue && currentValue > 0.000001;
+                if (hasCurrentValue || (!allowZero && simulated <= 0) || simulated < 0) return current;
+                fields.Add(field);
+                return simulated;
+            }
 
-        void Replace(ref int current, int simulated, string field)
+            void Replace(ref int current, int simulated, string field)
+            {
+                if (current == simulated) return;
+                current = simulated;
+                fields.Add(field);
+            }
+        }
+        catch (SqliteException exception) when (cancellationToken.IsCancellationRequested)
         {
-            if (current == simulated) return;
-            current = simulated;
-            fields.Add(field);
+            throw new OperationCanceledException(
+                "Replay simulation recovery was interrupted by gameplay.",
+                exception,
+                cancellationToken);
         }
     }
 
@@ -388,12 +446,26 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         }
     }
 
-    private static bool WasAccuracyOverwrittenByLegacySimulation(string sourceJson)
+    private static bool ReplayMustOwnAccuracy(CurrentResult current, ReplayResultData replay)
     {
+        int currentCoreTotal = current.N300 + current.N100 + current.N50 + current.Misses;
+        int replayCoreTotal = replay.N300 + replay.N100 + replay.N50 + replay.Misses;
+
+        // tosu can briefly report 100% while omitting the entire final result.
+        // Once a checksum-matched replay supplies those judgements, its header
+        // is the authority for accuracy as well as the other missing fields.
+        if (currentCoreTotal == 0 && replayCoreTotal > 0)
+            return true;
+
         try
         {
-            using var document = JsonDocument.Parse(sourceJson);
-            return NeedsAccuracyAuthorityRepair(document.RootElement);
+            using var document = JsonDocument.Parse(current.SourceJson);
+            return NeedsAccuracyAuthorityRepair(
+                document.RootElement,
+                current.Accuracy,
+                current.N100,
+                current.N50,
+                current.Misses);
         }
         catch (JsonException)
         {
@@ -421,12 +493,49 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             && string.Equals(field.GetString(), "accuracy", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Also detects results produced by the previous recovery path, which kept
+    /// a placeholder 100% after replay judgements had proved the play imperfect.
+    /// </summary>
+    public static bool NeedsAccuracyAuthorityRepair(
+        JsonElement source,
+        double accuracy,
+        int n100,
+        int n50,
+        int misses)
+    {
+        if (NeedsAccuracyAuthorityRepair(source))
+            return true;
+
+        if (accuracy < 99.999999 || (n100 == 0 && n50 == 0 && misses == 0))
+            return false;
+
+        if (!source.TryGetProperty("result_recovery", out var recovery)
+            || recovery.ValueKind != JsonValueKind.Object
+            || !recovery.TryGetProperty("reason", out var reason)
+            || !string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal))
+            return false;
+
+        if (recovery.TryGetProperty("accuracy_source", out var accuracySource)
+            && accuracySource.ValueKind == JsonValueKind.String
+            && string.Equals(accuracySource.GetString(), "replay_or_tosu", StringComparison.Ordinal))
+            return false;
+
+        return recovery.TryGetProperty("fields", out var fields)
+               && fields.ValueKind == JsonValueKind.Array
+               && fields.EnumerateArray().Any(field =>
+                   field.ValueKind == JsonValueKind.String
+                   && field.GetString() is "100" or "50" or "misses");
+    }
+
     private static void ReplaceRecoveredJudgementEvents(
         SqliteConnection con,
         SqliteTransaction tx,
         long attemptId,
-        IReadOnlyList<ReplaySimulationJudgement> judgements)
+        IReadOnlyList<ReplaySimulationJudgement> judgements,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using (var delete = con.CreateCommand())
         {
             delete.Transaction = tx;
@@ -435,8 +544,11 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             delete.ExecuteNonQuery();
         }
 
-        foreach (var judgement in judgements)
+        for (var index = 0; index < judgements.Count; index++)
         {
+            if ((index & 127) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+            var judgement = judgements[index];
             string? eventType = judgement.Kind switch
             {
                 0 => "miss",
@@ -469,8 +581,13 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         }
     }
 
-    private static CurrentResult? Read(SqliteConnection con, SqliteTransaction tx, long attemptId)
+    private static CurrentResult? Read(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var cmd = con.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
@@ -484,6 +601,7 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             """;
         cmd.Parameters.AddWithValue("@id", attemptId);
         using var reader = cmd.ExecuteReader();
+        cancellationToken.ThrowIfCancellationRequested();
         return reader.Read()
             ? new CurrentResult(
                 reader.GetString(0), reader.GetInt64(1), reader.GetDouble(2),
@@ -583,8 +701,10 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
     private static void RebuildRecoveredPersonalBests(
         SqliteConnection con,
         SqliteTransaction tx,
-        long attemptId)
+        long attemptId,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         long beatmapId;
         string modsKey;
         using (var group = con.CreateCommand())
@@ -607,6 +727,7 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
             ("fewest_misses", "misses", "ASC"),
         })
         {
+            cancellationToken.ThrowIfCancellationRequested();
             using (var delete = con.CreateCommand())
             {
                 delete.Transaction = tx;
@@ -641,10 +762,20 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         SqliteConnection con,
         SqliteTransaction tx,
         long attemptId,
-        IReadOnlyList<double> offsets)
+        IReadOnlyList<double> offsets,
+        CancellationToken cancellationToken)
     {
-        var values = offsets.ToArray();
-        var sorted = values.OrderBy(value => value).ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        var values = new double[offsets.Count];
+        for (var index = 0; index < offsets.Count; index++)
+        {
+            if ((index & 1023) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+            values[index] = offsets[index];
+        }
+        var sorted = (double[])values.Clone();
+        Array.Sort(sorted);
+        cancellationToken.ThrowIfCancellationRequested();
         double mean = values.Average();
         double median = sorted.Length % 2 == 1
             ? sorted[sorted.Length / 2]

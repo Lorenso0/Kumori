@@ -99,11 +99,13 @@ public partial class MainViewModel : ObservableObject
     private readonly HashSet<long> _collapsedSessions = new();
     private long _dbBytes;
     private long _cacheBytes;
+    private DateTimeOffset _cacheMeasuredAtUtc;
     private AnalyticsSummary _currentAnalytics = new();
     private bool _usingLazerRealm;
     private long? _activeSessionId;
     private long? _latestAttemptId;
     private Func<Task<bool>>? _endLiveSession;
+    private Action? _dashboardRefreshRequested;
     public event Action<Window, string>? WorkspaceWindowRequested;
     private long? _oldestLoadedId;
     private bool _reachedEnd;
@@ -117,6 +119,8 @@ public partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _searchDebounce;
     private readonly SemaphoreSlim _reloadGate = new(1, 1);
     private long _reloadGeneration;
+    private AppState? _pendingUiState;
+    private int _stateDispatchScheduled;
 
     public MainViewModel(
         AppStateStore store,
@@ -145,12 +149,15 @@ public partial class MainViewModel : ObservableObject
 
     public void SetEndLiveSessionHandler(Func<Task<bool>> handler) => _endLiveSession = handler;
 
+    public void SetDashboardRefreshHandler(Action handler) =>
+        _dashboardRefreshRequested = handler;
+
     public bool IsThumbnailArtwork => SelectedArtworkMode == "Thumbnail cards";
     public string ResultsText => $"{Attempts.Count:N0} results";
     public string ResultsShortText => $"{Attempts.Count:N0}";
     public bool CanLaunchTosu => CanStartTosu && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.3.1"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.0"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -185,9 +192,57 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsThumbnailArtwork));
     }
 
-    public Task HydrateAsync() => ReloadFirstPageAsync();
+    public Task HydrateAsync(CancellationToken cancellationToken = default) =>
+        ReloadFirstPageAsync(cancellationToken);
 
-    public Task RefreshDashboardAsync() => ReloadFirstPageAsync();
+    public Task RefreshDashboardAsync(CancellationToken cancellationToken = default) =>
+        ReloadFirstPageAsync(cancellationToken);
+
+    /// <summary>
+    /// Movement persistence does not change dashboard totals. Refresh only the
+    /// affected row instead of rebuilding the full history a second time after
+    /// every completed play.
+    /// </summary>
+    public async Task RefreshAttemptMovementAsync(
+        long attemptId,
+        CancellationToken cancellationToken = default)
+    {
+        var refreshed = await Task.Run(
+            () => _attempts.GetAttempt(attemptId),
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (refreshed is null)
+        {
+            return;
+        }
+
+        ReplaceAttemptModel(_loadedAttempts, refreshed);
+        ReplaceAttemptModel(_mapAttempts, refreshed);
+
+        var oldRow = Attempts.FirstOrDefault(row => row.Id == attemptId);
+        if (oldRow is null)
+        {
+            return;
+        }
+
+        var replacement = new AttemptRowViewModel(refreshed);
+        var attemptIndex = Attempts.IndexOf(oldRow);
+        if (attemptIndex >= 0)
+        {
+            Attempts[attemptIndex] = replacement;
+        }
+
+        var rowIndex = Rows.IndexOf(oldRow);
+        if (rowIndex >= 0)
+        {
+            Rows[rowIndex] = replacement;
+        }
+
+        if (SelectedAttempt?.Id == attemptId)
+        {
+            SelectedAttempt = replacement;
+        }
+    }
 
     private async Task DebouncedSearchAsync(string search, CancellationToken token)
     {
@@ -200,47 +255,58 @@ public partial class MainViewModel : ObservableObject
             return;
         }
         _activeSearch = string.IsNullOrWhiteSpace(search) ? null : search;
-        await ReloadFirstPageAsync();
-    }
-
-    private async Task ReloadFirstPageAsync()
-    {
-        var generation = Interlocked.Increment(ref _reloadGeneration);
-        await _reloadGate.WaitAsync();
         try
         {
+            await ReloadFirstPageAsync(token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task ReloadFirstPageAsync(CancellationToken cancellationToken = default)
+    {
+        var generation = Interlocked.Increment(ref _reloadGeneration);
+        await _reloadGate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             if (generation != Volatile.Read(ref _reloadGeneration)) return;
             var search = _activeSearch;
-            var load = await Task.Run(() => new
+            var page = await Task.Run(() =>
             {
-                Page = _attempts.GetRecentAttempts(null, PageSize, search, mapKey: _mapFilterKey),
-                Maps = _attempts.GetMapSummaries(),
-                Analytics = _analytics.GetSummary(),
-                Sessions = _sessionsRepo.GetRecentSessions(10_000),
-                DbBytes = SafeFileSize(AppPaths.TrackingDatabase),
-                CacheBytes = CacheStorageUsage.GetAdditionalBytes(AppPaths.BeatmapMediaDir),
-                UsingLazerRealm = LazerStorage.GetDiagnostics().RealmOpened,
-            });
+                cancellationToken.ThrowIfCancellationRequested();
+                return _attempts.GetRecentAttempts(null, PageSize, search, mapKey: _mapFilterKey);
+            }, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (search != _activeSearch || generation != Volatile.Read(ref _reloadGeneration))
+            {
+                return;
+            }
+
+            // Session headers are needed for the visible page, but aggregating
+            // every historical session made startup and every auto-refresh
+            // increasingly expensive as the database grew.
+            var sessionIds = page.Select(attempt => attempt.SessionId).Distinct().ToArray();
+            var sessions = await Task.Run(
+                () => _sessionsRepo.GetSessions(sessionIds),
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             if (search != _activeSearch || generation != Volatile.Read(ref _reloadGeneration))
             {
                 return;
             }
 
             _sessions.Clear();
-            foreach (var session in load.Sessions)
+            foreach (var session in sessions)
             {
                 _sessions[session.Id] = session;
             }
-            _reachedEnd = load.Page.Count < PageSize;
+            _reachedEnd = page.Count < PageSize;
             OnPropertyChanged(nameof(LoadOlderVisible));
             var destination = _mapFilterKey is null ? _loadedAttempts : _mapAttempts;
             destination.Clear();
-            destination.AddRange(load.Page);
-            MapCards.Clear();
-            foreach (var map in load.Maps)
-            {
-                MapCards.Add(new MapCardViewModel(map));
-            }
+            destination.AddRange(page);
             ApplyVisibleAttempts(selectFirst: false);
             if (Attempts.Count > 0 && (SelectedAttempt is null || !Attempts.Any(a => a.Id == SelectedAttempt.Id)))
             {
@@ -250,21 +316,61 @@ public partial class MainViewModel : ObservableObject
             {
                 SelectedAttempt = null;
             }
-            _dbBytes = load.DbBytes;
-            _cacheBytes = load.CacheBytes;
-            _currentAnalytics = load.Analytics;
-            _usingLazerRealm = load.UsingLazerRealm;
-            ApplyDashboard(load.Analytics, load.Page, load.DbBytes, load.CacheBytes);
-            _oldestLoadedId = load.Page.Count > 0 ? load.Page[^1].Id : null;
-            HistoryStatus = load.Page.Count == 0
+            _oldestLoadedId = page.Count > 0 ? page[^1].Id : null;
+            HistoryStatus = page.Count == 0
                 ? (search is not null
                     ? "No attempts match the search"
                     : File.Exists(AppPaths.TrackingDatabase)
                         ? "No attempts recorded yet"
                         : "No tracking database found - play a map with the tracker running")
                 : search is not null
-                    ? $"{load.Page.Count} matching attempts"
-                    : $"{load.Page.Count} recent attempts";
+                    ? $"{page.Count} matching attempts"
+                    : $"{page.Count} recent attempts";
+
+            // History is visible now. Slower global summaries, map cards, and
+            // the recursive media-size scan hydrate afterward without holding
+            // the first useful database result hostage.
+            var secondary = await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var maps = _attempts.GetMapSummaries();
+                cancellationToken.ThrowIfCancellationRequested();
+                var analytics = _analytics.GetSummary();
+                cancellationToken.ThrowIfCancellationRequested();
+                var dbBytes = SafeFileSize(AppPaths.TrackingDatabase);
+                var cacheBytes = GetCachedMediaBytes(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var usingLazerRealm = LazerStorage.GetDiagnostics().RealmOpened;
+                cancellationToken.ThrowIfCancellationRequested();
+                return new
+                {
+                    Maps = maps,
+                    Analytics = analytics,
+                    DbBytes = dbBytes,
+                    CacheBytes = cacheBytes,
+                    UsingLazerRealm = usingLazerRealm,
+                };
+            }, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (search != _activeSearch || generation != Volatile.Read(ref _reloadGeneration))
+            {
+                return;
+            }
+
+            MapCards.Clear();
+            foreach (var map in secondary.Maps)
+            {
+                MapCards.Add(new MapCardViewModel(map));
+            }
+            _dbBytes = secondary.DbBytes;
+            _cacheBytes = secondary.CacheBytes;
+            _currentAnalytics = secondary.Analytics;
+            _usingLazerRealm = secondary.UsingLazerRealm;
+            ApplyDashboard(secondary.Analytics, page, secondary.DbBytes, secondary.CacheBytes);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -305,9 +411,9 @@ public partial class MainViewModel : ObservableObject
         SyncLine = Invariant($"Profile synced {synced}  ·  DB {dbBytes / 1_048_576.0:0.0} MB  ·  {mediaStatus}");
 
         var first = page.FirstOrDefault();
-        GroupHeader = first?.StartedAt.Length >= 10 && DateTime.TryParse(first.StartedAt[..10], out var day)
-            ? day.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture)
-            : "Recent plays";
+        GroupHeader = first is null
+            ? "Recent plays"
+            : LocalTimeDisplay.Date(first.StartedAt, "Recent plays");
         var completed = page.Count(a => a.Outcome == "completed");
         var averageAccuracy = page.Count == 0 ? 0 : page.Average(a => a.Accuracy);
         var bestPp = page.Count == 0 ? 0 : page.Max(a => a.Pp);
@@ -370,26 +476,17 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private static string FormatAccountChange(AccountChangeSummary? change)
+    private long GetCachedMediaBytes(CancellationToken cancellationToken)
     {
-        if (change is null)
+        var now = DateTimeOffset.UtcNow;
+        if (_cacheMeasuredAtUtc != default && now - _cacheMeasuredAtUtc < TimeSpan.FromMinutes(1))
         {
-            return "ACCOUNT CHANGE  ·  pending profile data";
+            return _cacheBytes;
         }
 
-        var pp = change is { OldTotalPp: { } oldPp, NewTotalPp: { } newPp }
-            ? Invariant($"PP {newPp - oldPp:+0.0;-0.0;0.0}")
-            : "PP n/a";
-        var rank = change is { OldGlobalRank: { } oldRank, NewGlobalRank: { } newRank }
-            ? Invariant($"Rank {oldRank - newRank:+0;-0;0}")
-            : "Rank n/a";
-        var acc = change is { OldAccuracy: { } oldAcc, NewAccuracy: { } newAcc }
-            ? Invariant($"Accuracy {newAcc - oldAcc:+0.000;-0.000;0.000}%")
-            : "Accuracy n/a";
-        var plays = change is { OldPlayCount: { } oldPlays, NewPlayCount: { } newPlays }
-            ? Invariant($"Plays {newPlays - oldPlays:+0;-0;0}")
-            : "Plays n/a";
-        return $"ACCOUNT CHANGE  ·  {pp}  ·  {rank}  ·  {acc}  ·  {plays}";
+        var bytes = CacheStorageUsage.GetAdditionalBytes(AppPaths.BeatmapMediaDir, cancellationToken);
+        _cacheMeasuredAtUtc = now;
+        return bytes;
     }
 
     [RelayCommand]
@@ -719,6 +816,15 @@ public partial class MainViewModel : ObservableObject
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..(max - 1)] + "...";
 
+    private static void ReplaceAttemptModel(List<AttemptSummary> attempts, AttemptSummary replacement)
+    {
+        var index = attempts.FindIndex(attempt => attempt.Id == replacement.Id);
+        if (index >= 0)
+        {
+            attempts[index] = replacement;
+        }
+    }
+
     private void ApplyVisibleAttempts(bool selectFirst = true)
     {
         var previousSelectedId = SelectedAttempt?.Id;
@@ -856,6 +962,16 @@ public partial class MainViewModel : ObservableObject
     {
         SelectedAttempt = row;
         var owner = ActiveOwner();
+        if (!_settings.Current.ReplayViewer.Enabled)
+        {
+            KumoriDialog.Show(
+                owner,
+                "Replay Analyzer is disabled in Settings.",
+                "Kumori",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
         IsReplayAnalyzerLoading = true;
         ReplayAnalyzerLoadingText = "Loading replay details...";
         try
@@ -967,64 +1083,111 @@ public partial class MainViewModel : ObservableObject
 
     private void OnStateChanged(AppState state)
     {
-        Application.Current?.Dispatcher.InvokeAsync(() =>
+        Interlocked.Exchange(ref _pendingUiState, state);
+        ScheduleStateDispatch();
+    }
+
+    private void ScheduleStateDispatch()
+    {
+        if (Interlocked.CompareExchange(ref _stateDispatchScheduled, 1, 0) != 0)
         {
-            CaptureChipText = state.Capture.Health switch
+            return;
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted)
+        {
+            Interlocked.Exchange(ref _pendingUiState, null);
+            Interlocked.Exchange(ref _stateDispatchScheduled, 0);
+            return;
+        }
+        dispatcher.InvokeAsync(ApplyPendingState);
+    }
+
+    private void ApplyPendingState()
+    {
+        try
+        {
+            var state = Interlocked.Exchange(ref _pendingUiState, null);
+            if (state is not null)
             {
-                HealthLevel.Ok => "Capture healthy",
-                HealthLevel.Degraded => "Capture degraded",
-                HealthLevel.Error => "Capture error",
-                _ => "Capture idle",
+                ApplyState(state);
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _stateDispatchScheduled, 0);
+            if (Volatile.Read(ref _pendingUiState) is not null)
+            {
+                ScheduleStateDispatch();
+            }
+        }
+    }
+
+    private void ApplyState(AppState state)
+    {
+        CaptureChipText = state.Capture.Health switch
+        {
+            HealthLevel.Ok => "Capture healthy",
+            HealthLevel.Degraded => "Capture degraded",
+            HealthLevel.Error => "Capture error",
+            _ => "Capture idle",
+        };
+        CaptureChipColor = state.Capture.Health switch
+        {
+            HealthLevel.Ok => "#33F078",
+            HealthLevel.Degraded => "#FFD43B",
+            HealthLevel.Error => "#FF4F7B",
+            _ => "#A86C9E",
+        };
+        CompanionLine = FormatCompanionLine(state.Companions);
+        var activeSessionId = state.ActiveSession?.SessionId;
+        SessionIndicator = state.ActiveSession is { } s
+            ? $"Session #{s.SessionId}"
+            : "No active session";
+        if (activeSessionId != _activeSessionId)
+        {
+            _activeSessionId = activeSessionId;
+            OnPropertyChanged(nameof(HasActiveSession));
+            ApplyVisibleAttempts(selectFirst: false);
+        }
+
+        var tracking = state.Tracking;
+        if (tracking.LatestAttemptId is { } latestAttemptId && latestAttemptId != _latestAttemptId)
+        {
+            _latestAttemptId = latestAttemptId;
+            try
+            {
+                _dashboardRefreshRequested?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "Could not queue the completed-attempt dashboard refresh");
+            }
+        }
+
+        TosuChipText = !state.Companions.OsuRunning
+            ? "tosu waiting for osu!"
+            : tracking switch
+            {
+                { TosuConnected: true } => "tosu running",
+                { Detail: { } detail } => Truncate(detail, 44),
+                _ => "tosu starting...",
             };
-            CaptureChipColor = state.Capture.Health switch
+        TosuChipColor = !state.Companions.OsuRunning
+            ? "#A86C9E"
+            : tracking.Health switch
             {
                 HealthLevel.Ok => "#33F078",
                 HealthLevel.Degraded => "#FFD43B",
                 HealthLevel.Error => "#FF4F7B",
                 _ => "#A86C9E",
             };
-            CompanionLine = FormatCompanionLine(state.Companions);
-            var activeSessionId = state.ActiveSession?.SessionId;
-            SessionIndicator = state.ActiveSession is { } s
-                ? $"Session #{s.SessionId}"
-                : "No active session";
-            if (activeSessionId != _activeSessionId)
-            {
-                _activeSessionId = activeSessionId;
-                OnPropertyChanged(nameof(HasActiveSession));
-                ApplyVisibleAttempts(selectFirst: false);
-            }
-
-            var tracking = state.Tracking;
-            if (tracking.LatestAttemptId is { } latestAttemptId && latestAttemptId != _latestAttemptId)
-            {
-                _latestAttemptId = latestAttemptId;
-                _ = ReloadFirstPageAsync();
-            }
-
-            TosuChipText = !state.Companions.OsuRunning
-                ? "tosu waiting for osu!"
-                : tracking switch
-                {
-                    { TosuConnected: true } => "tosu running",
-                    { Detail: { } detail } => Truncate(detail, 44),
-                    _ => "tosu starting...",
-                };
-            TosuChipColor = !state.Companions.OsuRunning
-                ? "#A86C9E"
-                : tracking.Health switch
-                {
-                    HealthLevel.Ok => "#33F078",
-                    HealthLevel.Degraded => "#FFD43B",
-                    HealthLevel.Error => "#FF4F7B",
-                    _ => "#A86C9E",
-                };
-            CanStartTosu = !tracking.TosuConnected;
-            IsUpdateAvailable = state.ApplicationUpdate.IsAvailable;
-            UpdateAvailableText = string.IsNullOrWhiteSpace(state.ApplicationUpdate.Version)
-                ? "Update available"
-                : $"Update {state.ApplicationUpdate.Version} available";
-        });
+        CanStartTosu = !tracking.TosuConnected;
+        IsUpdateAvailable = state.ApplicationUpdate.IsAvailable;
+        UpdateAvailableText = string.IsNullOrWhiteSpace(state.ApplicationUpdate.Version)
+            ? "Update available"
+            : $"Update {state.ApplicationUpdate.Version} available";
     }
 
     private static string FormatCompanionLine(CompanionStatus status)

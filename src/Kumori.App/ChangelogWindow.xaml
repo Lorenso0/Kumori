@@ -54,7 +54,7 @@
                                     <Border Grid.Column="1" Padding="9,4" CornerRadius="11"
                                             Background="{DynamicResource Brush.ControlBackground}"
                                             BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
-                                        <TextBlock Text="{Binding Date}" FontSize="10" Foreground="{DynamicResource Brush.TextMuted}" />
+                                        <TextBlock Text="{Binding DisplayDate}" FontSize="10" Foreground="{DynamicResource Brush.TextMuted}" />
                                     </Border>
                                 </Grid>
 

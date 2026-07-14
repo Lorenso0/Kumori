@@ -257,7 +257,7 @@ public partial class WelcomeWindow : Window
         OtdStatus.Text = enabled
             ? string.IsNullOrWhiteSpace(OtdPath.Text)
                 ? "Choose an executable or use Detect."
-                : "OpenTabletDriver will launch when osu! is detected."
+                : "OpenTabletDriver will run while Kumori is open."
             : "Optional · auto-launch is off.";
     }
 }

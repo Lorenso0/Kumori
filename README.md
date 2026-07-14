@@ -88,7 +88,7 @@ An internet connection is needed when Kumori downloads or updates tosu. Normal t
 Kumori can also:
 
 - Start automatically when you sign in to Windows.
-- Launch OpenTabletDriver when osu! starts and close the copy it launched when osu! closes.
+- Run OpenTabletDriver minimized in the tray while Kumori is open, close the copy Kumori launched on exit, and transiently refresh live tablet display mappings after resolution changes without overwriting OTD's saved settings.
 - Switch supported LG monitors into Dual Mode when osu! starts, with an option to restore the display after osu! closes.
 - Check for new Kumori versions and show an update notice.
 - Keep running in the system tray when the main window is closed.

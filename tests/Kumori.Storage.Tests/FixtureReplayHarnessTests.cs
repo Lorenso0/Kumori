@@ -73,7 +73,9 @@ public class FixtureReplayHarnessTests : IDisposable
 
     private async Task ReplayAsync()
     {
-        var sink = new AttemptSqliteSink(new SqliteConnectionFactory(_dbPath, readOnly: false));
+        var sink = new AttemptSqliteSink(
+            new SqliteConnectionFactory(_dbPath, readOnly: false),
+            (_, work) => work(CancellationToken.None));
         var runner = new TrackingReplayRunner(new AttemptTracker(sink), new SessionTracker(sink));
         await runner.RunAsync(new FixturePacketSource(_fixturePath));
     }

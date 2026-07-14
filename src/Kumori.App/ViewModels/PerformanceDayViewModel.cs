@@ -13,8 +13,7 @@ public sealed class PerformanceDayViewModel
     }
 
     public DailyAttemptTrend Model { get; }
-    public string DateText => DateTime.TryParseExact(Model.Day, "yyyy-MM-dd", CultureInfo.InvariantCulture,
-        DateTimeStyles.None, out var date) ? date.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) : Model.Day;
+    public string DateText => LocalTimeDisplay.CalendarDate(Model.Day);
     public string DayText => DateTime.TryParseExact(Model.Day, "yyyy-MM-dd", CultureInfo.InvariantCulture,
         DateTimeStyles.None, out var date) ? date.ToString("dddd", CultureInfo.InvariantCulture) : "Recorded day";
     public string PlaysText => Invariant($"{Model.Attempts:N0}");

@@ -40,8 +40,10 @@ public sealed class AttemptStateMachine
 
     public sealed record Decision(Kind Kind, string? Outcome = null, string? Evidence = null);
 
-    public sealed record PacketView
+    public readonly record struct PacketView
     {
+        public PacketView() { }
+
         public double MonoTime { get; init; }
         public string State { get; init; } = "";          // normalized
         public bool IsPlaying { get; init; }
@@ -74,8 +76,15 @@ public sealed class AttemptStateMachine
     public void AttemptCleared() => AttemptIdentity = null;
 
     public IReadOnlyList<Decision> Ingest(PacketView p)
+        => TryIngest(p, out var decision) ? [decision!] : [];
+
+    /// <summary>
+    /// Allocation-free packet path. State transitions create a decision only
+    /// at an attempt boundary; ordinary gameplay packets return false.
+    /// </summary>
+    public bool TryIngest(PacketView p, out Decision? decision)
     {
-        var decisions = new List<Decision>(2);
+        decision = null;
         if (p.IsPlaying)
         {
             _closeDeadline = null;
@@ -86,15 +95,15 @@ public sealed class AttemptStateMachine
 
             if (!HasAttempt)
             {
-                decisions.Add(new Decision(Kind.StartAttempt));
+                decision = new Decision(Kind.StartAttempt);
             }
             else if (p.Identity != AttemptIdentity)
             {
-                decisions.Add(new Decision(Kind.FinalizeAndStart, "abandoned", "beatmap_changed"));
+                decision = new Decision(Kind.FinalizeAndStart, "abandoned", "beatmap_changed");
             }
             else if (restarted || !PlayStates.Contains(_lastState))
             {
-                decisions.Add(new Decision(Kind.RetryBoundary, "retried", "fresh_gameplay_same_map"));
+                decision = new Decision(Kind.RetryBoundary, "retried", "fresh_gameplay_same_map");
             }
             _pendingQuitState = "";
         }
@@ -104,13 +113,13 @@ public sealed class AttemptStateMachine
                 && AttemptIdentity is not (null or "" or "unknown")
                 && p.Identity != AttemptIdentity)
             {
-                decisions.Add(new Decision(Kind.StaleResultsIgnored));
-                return decisions; // Python: early return — do NOT update last state
+                decision = new Decision(Kind.StaleResultsIgnored);
+                return true; // Python: early return — do NOT update last state
             }
             var outcome = string.Equals(p.Grade, "F", StringComparison.OrdinalIgnoreCase)
                 ? "failed"
                 : "completed";
-            decisions.Add(new Decision(Kind.Finalize, outcome, "results_screen"));
+            decision = new Decision(Kind.Finalize, outcome, "results_screen");
         }
         else if (HasAttempt && (PlayStates.Contains(_lastState) || _closeDeadline is not null))
         {
@@ -121,14 +130,14 @@ public sealed class AttemptStateMachine
                 // Python uses _pending_quit_data (= last_data, the packet
                 // BEFORE this transition) for the hp check — not this packet.
                 _pendingHealth = _lastHealth;
-                decisions.Add(new Decision(Kind.GraceStarted));
+                decision = new Decision(Kind.GraceStarted);
             }
             else if (p.MonoTime >= _closeDeadline)
             {
                 var outcome = _pendingHealth <= 0 ? "failed" : "quit";
-                decisions.Add(new Decision(
+                decision = new Decision(
                     Kind.Finalize, outcome,
-                    $"state_transition:{_pendingQuitState}->{p.State}"));
+                    $"state_transition:{_pendingQuitState}->{p.State}");
                 _closeDeadline = null;
                 _pendingQuitState = "";
             }
@@ -140,6 +149,6 @@ public sealed class AttemptStateMachine
         {
             _lastLiveTimeMs = p.LiveTimeMs;
         }
-        return decisions;
+        return decision is not null;
     }
 }

@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using Kumori.Core;
 using Kumori.Core.Settings;
 using Kumori.Native;
 
@@ -65,7 +66,7 @@ public partial class LazerFrameDebugWindow : Window
             Current summary
               Capture source: lazer_memory
               Status file: {statusPath}
-              Updated: {status.UpdatedAt:O}
+              Updated: {DisplayDateTime.FormatLocalDateTimeWithSeconds(status.UpdatedAt)}
               State: {status.State}
               Detail: {status.Detail ?? "none"}
               Replay-frame reader state: {status.State}

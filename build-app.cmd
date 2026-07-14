@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not defined KUMORI_VERSION set KUMORI_VERSION=0.3.1
+if not defined KUMORI_VERSION set KUMORI_VERSION=0.4.0
 
 REM ============================================================
 REM  Kumori WPF app (new .NET solution) build script.
@@ -44,6 +44,12 @@ if exist artifacts\viewer-release rmdir /S /Q artifacts\viewer-release
 if exist artifacts\Kumori.ReplayViewer.zip del /Q artifacts\Kumori.ReplayViewer.zip
 if exist artifacts\app-publish rmdir /S /Q artifacts\app-publish
 if exist dist\app rmdir /S /Q dist\app
+
+REM Kumori.StableFrameBridge is built by an MSBuild target rather than a normal
+REM ProjectReference. Restore the full solution explicitly so a publish made
+REM immediately after clean-workspace.bat has its win-x86 assets file.
+dotnet restore Kumori.sln -p:Version=%KUMORI_VERSION%
+if errorlevel 1 exit /b %errorlevel%
 
 dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Release -r win-x64 -p:Version=%KUMORI_VERSION% ^
   --self-contained true ^

@@ -12,60 +12,177 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
 {
     private readonly SqliteConnectionFactory _factory;
     private readonly object _gate = new();
+    private readonly object _schemaGate = new();
+    private int _schemaEnsured;
+    private readonly Func<string, Func<CancellationToken, Task>, Task>? _deferPersistence;
     private readonly Dictionary<long, ProfileReading> _latest = new();
     private readonly Dictionary<long, ProfileReading> _attemptBaselines = new();
     private readonly Dictionary<long, ProfileReading> _pendingResults = new();
+    private readonly Dictionary<long, PendingProfileWrite> _pendingProfileWrites = new();
+    private readonly HashSet<long> _scheduledProfileWrites = [];
 
     /// <summary>Raised after profile data or an account-change delta is persisted.</summary>
     public event Action? ProfileUpdated;
 
-    public ProfileTelemetryStore(SqliteConnectionFactory factory)
+    public ProfileTelemetryStore(
+        SqliteConnectionFactory factory,
+        Func<string, Func<CancellationToken, Task>, Task>? deferPersistence = null)
     {
         _factory = factory;
+        _deferPersistence = deferPersistence;
     }
 
     public void Ingest(TosuSnapshot snapshot)
     {
         if (snapshot.Profile is not { } profile || profile.Id <= 0 || string.IsNullOrWhiteSpace(profile.Name)) return;
 
-        var current = ProfileReading.From(profile, snapshot.WallTime);
+        long? schedulePlayerId = null;
         var updated = false;
         lock (_gate)
         {
-            if (!_latest.TryGetValue(current.PlayerId, out var previous))
+            if (!_latest.TryGetValue(profile.Id, out var previous))
             {
-                previous = ReadLatest(current.PlayerId);
+                // Production persistence is gameplay-idle. Do not turn a first
+                // profile packet (including one after a mandatory tosu restart)
+                // into a synchronous SQLite read on the websocket thread.
+                previous = _deferPersistence is null ? ReadLatest(profile.Id, CancellationToken.None) : null;
             }
 
-            if (previous is not null && previous.Fingerprint == current.Fingerprint)
+            // tosu repeats the complete profile in every packet. Compare its
+            // typed fields before allocating a timestamp, reading JSON, or
+            // constructing the legacy fingerprint stored in SQLite.
+            if (previous is not null && previous.Matches(profile))
             {
-                _latest[current.PlayerId] = previous;
-                return;
+                _latest[profile.Id] = previous;
+                if (_deferPersistence is not null
+                    && _pendingProfileWrites.ContainsKey(profile.Id)
+                    && _scheduledProfileWrites.Add(profile.Id))
+                {
+                    schedulePlayerId = profile.Id;
+                }
+                else
+                {
+                    return;
+                }
             }
-
-            InsertSnapshot(current);
-            _latest[current.PlayerId] = current;
-            updated = true;
+            var current = previous is not null && previous.Matches(profile)
+                ? previous
+                : ProfileReading.From(profile, snapshot.WallTime);
 
             // A profile update is attributed to the oldest completed attempt
             // awaiting an update for this same account. Never cross accounts.
             var pending = _pendingResults
                 .OrderBy(pair => pair.Key)
                 .FirstOrDefault(pair => pair.Value.PlayerId == current.PlayerId);
-            if (pending.Value is not null)
+
+            (long AttemptId, ProfileReading Baseline)? pendingResult =
+                _pendingProfileWrites.TryGetValue(current.PlayerId, out var existingWrite)
+                    ? existingWrite.Pending ?? (pending.Value is null ? null : (pending.Key, pending.Value))
+                    : pending.Value is null ? null : (pending.Key, pending.Value);
+            if (_deferPersistence is null)
             {
-                InsertAccountChange(pending.Key, pending.Value, current);
+                PersistUpdate(current, pendingResult, CancellationToken.None);
+                updated = true;
+            }
+            else
+            {
+                _pendingProfileWrites[current.PlayerId] = new PendingProfileWrite(current, pendingResult);
+                if (_scheduledProfileWrites.Add(current.PlayerId))
+                    schedulePlayerId = current.PlayerId;
+            }
+            _latest[current.PlayerId] = current;
+            if (_deferPersistence is null && pending.Value is not null)
+            {
                 _pendingResults.Remove(pending.Key);
             }
         }
+        if (schedulePlayerId is { } playerId)
+        {
+            try
+            {
+                _ = _deferPersistence!(
+                    $"profile-telemetry-{playerId}",
+                    token => PersistPendingProfileUpdates(playerId, token));
+            }
+            catch
+            {
+                lock (_gate)
+                    _scheduledProfileWrites.Remove(playerId);
+                throw;
+            }
+        }
         if (updated) ProfileUpdated?.Invoke();
+    }
+
+    private Task PersistPendingProfileUpdates(long playerId, CancellationToken token)
+    {
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            PendingProfileWrite write;
+            lock (_gate)
+            {
+                if (!_pendingProfileWrites.TryGetValue(playerId, out write!))
+                {
+                    _scheduledProfileWrites.Remove(playerId);
+                    return Task.CompletedTask;
+                }
+            }
+
+            try
+            {
+                var persisted = ReadLatest(playerId, token);
+                token.ThrowIfCancellationRequested();
+                if (write.Pending is not null || persisted is null || !persisted.Matches(write.Reading))
+                    PersistUpdate(write.Reading, write.Pending, token);
+            }
+            catch
+            {
+                lock (_gate)
+                    _scheduledProfileWrites.Remove(playerId);
+                throw;
+            }
+
+            // PersistUpdate is transactional. Once it returns, acknowledge the
+            // committed write even if gameplay cancellation raced the commit;
+            // retrying here would duplicate the snapshot row.
+            var hasNewerWrite = false;
+            lock (_gate)
+            {
+                if (_pendingProfileWrites.TryGetValue(playerId, out var current)
+                    && ReferenceEquals(current, write))
+                {
+                    _pendingProfileWrites.Remove(playerId);
+                }
+                if (write.Pending is { } completed)
+                {
+                    _pendingResults.Remove(completed.AttemptId);
+                    if (_pendingProfileWrites.TryGetValue(playerId, out var newer)
+                        && newer.Pending?.AttemptId == completed.AttemptId)
+                    {
+                        _pendingProfileWrites[playerId] = newer with { Pending = null };
+                    }
+                }
+                hasNewerWrite = _pendingProfileWrites.ContainsKey(playerId);
+                if (!hasNewerWrite)
+                    _scheduledProfileWrites.Remove(playerId);
+            }
+            ProfileUpdated?.Invoke();
+            if (!hasNewerWrite)
+                return Task.CompletedTask;
+        }
     }
 
     public void BeginAttempt(long attemptId)
     {
         lock (_gate)
         {
-            var current = _latest.Values.OrderByDescending(value => value.CapturedAt).FirstOrDefault();
+            ProfileReading? current = null;
+            foreach (var candidate in _latest.Values)
+            {
+                if (current is null || string.CompareOrdinal(candidate.CapturedAt, current.CapturedAt) > 0)
+                    current = candidate;
+            }
             if (current is not null) _attemptBaselines[attemptId] = current;
         }
     }
@@ -98,30 +215,86 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
         }
     }
 
-    private ProfileReading? ReadLatest(long playerId)
+    private ProfileReading? ReadLatest(long playerId, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!_factory.DatabaseExists) return null;
         using var con = _factory.Open();
-        EnsureSchema(con);
-        using var command = con.CreateCommand();
-        command.CommandText = """
+        if (cancellationToken.CanBeCanceled)
+            con.DefaultTimeout = 1;
+        using var interruptRegistration = cancellationToken.Register(
+            static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle),
+            con);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureSchema(con, cancellationToken);
+            using var command = con.CreateCommand();
+            command.CommandText = """
             SELECT captured_at, player_id, player_name, total_pp, global_rank,
-                   accuracy, play_count, level, ranked_score, country_code, fingerprint
+                   accuracy, play_count, level, ranked_score, country_code
             FROM profile_snapshots
             WHERE player_id = @player_id
             ORDER BY id DESC
             LIMIT 1
             """;
-        command.Parameters.AddWithValue("@player_id", playerId);
-        using var reader = command.ExecuteReader();
-        return reader.Read() ? ProfileReading.Read(reader) : null;
+            command.Parameters.AddWithValue("@player_id", playerId);
+            cancellationToken.ThrowIfCancellationRequested();
+            using var reader = command.ExecuteReader();
+            return reader.Read() ? ProfileReading.Read(reader) : null;
+        }
+        catch (SqliteException exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Profile telemetry read was interrupted by gameplay.",
+                exception,
+                cancellationToken);
+        }
     }
 
-    private void InsertSnapshot(ProfileReading reading)
+    private void PersistUpdate(
+        ProfileReading reading,
+        (long AttemptId, ProfileReading Baseline)? pending,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         using var con = _factory.Open();
-        EnsureSchema(con);
+        if (cancellationToken.CanBeCanceled)
+            con.DefaultTimeout = 1;
+        using var interruptRegistration = cancellationToken.Register(
+            static state => SQLitePCL.raw.sqlite3_interrupt(((SqliteConnection)state!).Handle),
+            con);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureSchema(con, cancellationToken);
+            using var tx = con.BeginTransaction();
+            cancellationToken.ThrowIfCancellationRequested();
+            InsertSnapshot(con, tx, reading);
+            if (pending is { } result)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                InsertAccountChange(con, tx, result.AttemptId, result.Baseline, reading);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            tx.Commit();
+        }
+        catch (SqliteException exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Profile telemetry persistence was interrupted by gameplay.",
+                exception,
+                cancellationToken);
+        }
+    }
+
+    private static void InsertSnapshot(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        ProfileReading reading)
+    {
         using var command = con.CreateCommand();
+        command.Transaction = tx;
         command.CommandText = """
             INSERT INTO profile_snapshots(
                 captured_at, player_id, player_name, total_pp, global_rank,
@@ -133,11 +306,15 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
         command.ExecuteNonQuery();
     }
 
-    private void InsertAccountChange(long attemptId, ProfileReading oldReading, ProfileReading newReading)
+    private static void InsertAccountChange(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId,
+        ProfileReading oldReading,
+        ProfileReading newReading)
     {
-        using var con = _factory.Open();
-        EnsureSchema(con);
         using var command = con.CreateCommand();
+        command.Transaction = tx;
         command.CommandText = """
             INSERT OR REPLACE INTO attempt_profile_changes(
                 attempt_id, captured_at, old_total_pp, new_total_pp,
@@ -160,10 +337,15 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
         command.ExecuteNonQuery();
     }
 
-    private static void EnsureSchema(SqliteConnection con)
+    private void EnsureSchema(SqliteConnection con, CancellationToken cancellationToken)
     {
-        using var command = con.CreateCommand();
-        command.CommandText = """
+        lock (_schemaGate)
+        {
+            if (Volatile.Read(ref _schemaEnsured) != 0)
+                return;
+            cancellationToken.ThrowIfCancellationRequested();
+            using var command = con.CreateCommand();
+            command.CommandText = """
             CREATE TABLE IF NOT EXISTS profile_snapshots(
                 id INTEGER PRIMARY KEY,
                 captured_at TEXT NOT NULL,
@@ -194,7 +376,9 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
                 new_play_count INTEGER
             );
             """;
-        command.ExecuteNonQuery();
+            command.ExecuteNonQuery();
+            Volatile.Write(ref _schemaEnsured, 1);
+        }
     }
 
     private static void AddSnapshotParameters(SqliteCommand command, ProfileReading reading)
@@ -209,32 +393,55 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
         command.Parameters.AddWithValue("@level", (object?)reading.Level ?? DBNull.Value);
         command.Parameters.AddWithValue("@ranked_score", (object?)reading.RankedScore ?? DBNull.Value);
         command.Parameters.AddWithValue("@country_code", (object?)reading.CountryCode ?? DBNull.Value);
-        command.Parameters.AddWithValue("@fingerprint", reading.Fingerprint);
+        command.Parameters.AddWithValue("@fingerprint", reading.CreateFingerprint());
     }
 
     private sealed record ProfileReading(
         string CapturedAt, long PlayerId, string PlayerName, double? TotalPp,
         long? GlobalRank, double? Accuracy, long? PlayCount, double? Level,
-        long? RankedScore, string? CountryCode, string Fingerprint)
+        long? RankedScore, string? CountryCode)
     {
+        public bool Matches(TosuProfile profile) =>
+            PlayerId == profile.Id
+            && string.Equals(PlayerName, profile.Name, StringComparison.Ordinal)
+            && TotalPp == profile.TotalPp
+            && GlobalRank == profile.GlobalRank
+            && Accuracy == profile.Accuracy
+            && PlayCount == profile.PlayCount
+            && Level == profile.Level
+            && RankedScore == profile.RankedScore
+            && string.Equals(CountryCode, profile.CountryCode, StringComparison.Ordinal);
+
+        public bool Matches(ProfileReading other) =>
+            PlayerId == other.PlayerId
+            && string.Equals(PlayerName, other.PlayerName, StringComparison.Ordinal)
+            && TotalPp == other.TotalPp
+            && GlobalRank == other.GlobalRank
+            && Accuracy == other.Accuracy
+            && PlayCount == other.PlayCount
+            && Level == other.Level
+            && RankedScore == other.RankedScore
+            && string.Equals(CountryCode, other.CountryCode, StringComparison.Ordinal);
+
+        public string CreateFingerprint() => JsonSerializer.Serialize(new
+        {
+            Id = PlayerId,
+            Name = PlayerName,
+            TotalPp,
+            GlobalRank,
+            Accuracy,
+            PlayCount,
+            Level,
+            RankedScore,
+            CountryCode,
+        });
+
         public static ProfileReading From(TosuProfile profile, double unixSeconds)
         {
             var capturedAt = DateTimeOffset.FromUnixTimeMilliseconds((long)(unixSeconds * 1000)).ToString("O");
-            var fingerprint = JsonSerializer.Serialize(new
-            {
-                profile.Id,
-                profile.Name,
-                profile.TotalPp,
-                profile.GlobalRank,
-                profile.Accuracy,
-                profile.PlayCount,
-                profile.Level,
-                profile.RankedScore,
-                profile.CountryCode,
-            });
             return new ProfileReading(capturedAt, profile.Id, profile.Name, profile.TotalPp,
                 profile.GlobalRank, profile.Accuracy, profile.PlayCount, profile.Level,
-                profile.RankedScore, profile.CountryCode, fingerprint);
+                profile.RankedScore, profile.CountryCode);
         }
 
         public static ProfileReading Read(SqliteDataReader reader) => new(
@@ -247,9 +454,12 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             reader.IsDBNull(6) ? null : reader.GetInt64(6),
             reader.IsDBNull(7) ? null : reader.GetDouble(7),
             reader.IsDBNull(8) ? null : reader.GetInt64(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9),
-            reader.GetString(10));
+            reader.IsDBNull(9) ? null : reader.GetString(9));
     }
+
+    private sealed record PendingProfileWrite(
+        ProfileReading Reading,
+        (long AttemptId, ProfileReading Baseline)? Pending);
 }
 
 /// <summary>Attaches a profile baseline to the exact persisted attempt ID.</summary>

@@ -2,12 +2,14 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Kumori is exiting"
-        Width="390" Height="142"
+        Width="414" Height="166"
         SizeToContent="Manual"
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        WindowStartupLocation="CenterScreen"
+        ShowActivated="False"
+        Focusable="False"
+        WindowStartupLocation="Manual"
         Topmost="True"
         Background="Transparent"
         AllowsTransparency="True">
@@ -15,7 +17,13 @@
             BorderBrush="{DynamicResource Brush.AccentPink}"
             BorderThickness="1"
             CornerRadius="{DynamicResource Radius.ThemeCard}"
+            Margin="12"
             Padding="20">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="18"
+                              ShadowDepth="4"
+                              Opacity="0.45" />
+        </Border.Effect>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />

@@ -9,7 +9,9 @@ public sealed record SkinLibraryItem(
     string Path,
     bool IsFolder,
     long SizeBytes,
-    bool IsBuiltIn = false);
+    bool IsBuiltIn = false,
+    bool IsImported = true,
+    bool IsAvailable = true);
 
 public static class SkinLibraryService
 {
@@ -17,18 +19,43 @@ public static class SkinLibraryService
 
     public static string SkinDirectory => AppPaths.SkinsDir;
 
-    public static IReadOnlyList<SkinLibraryItem> List()
+    public static IReadOnlyList<SkinLibraryItem> List(string? configuredPath = null)
+        => ListFromDirectory(SkinDirectory, configuredPath);
+
+    internal static IReadOnlyList<SkinLibraryItem> ListFromDirectory(
+        string skinDirectory,
+        string? configuredPath = null)
     {
-        Directory.CreateDirectory(SkinDirectory);
+        Directory.CreateDirectory(skinDirectory);
         SkinLibraryItem[] builtIn =
         [
-            new SkinLibraryItem("Argon Pro", BuiltInArgonProPath, false, 0, IsBuiltIn: true),
+            new SkinLibraryItem("Argon Pro", BuiltInArgonProPath, false, 0,
+                IsBuiltIn: true, IsImported: false),
         ];
-        var files = Directory.EnumerateFiles(SkinDirectory, "*.osk")
+        var files = Directory.EnumerateFiles(skinDirectory, "*.osk")
             .Select(path => new SkinLibraryItem(Path.GetFileNameWithoutExtension(path), path, false, SafeFileSize(path)));
-        var folders = Directory.EnumerateDirectories(SkinDirectory)
+        var folders = Directory.EnumerateDirectories(skinDirectory)
             .Select(path => new SkinLibraryItem(Path.GetFileName(path), path, true, SafeDirectorySize(path)));
-        return builtIn.Concat(files).Concat(folders)
+        var items = builtIn.Concat(files).Concat(folders).ToList();
+        string selection = (configuredPath ?? "").Trim();
+        if (!IsBuiltInPath(selection)
+            && !items.Any(item => MatchesSelection(item.Path, selection)))
+        {
+            bool isFile = File.Exists(selection);
+            bool isFolder = Directory.Exists(selection);
+            string name = isFolder
+                ? Path.GetFileName(selection.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                : Path.GetFileNameWithoutExtension(selection);
+            items.Add(new SkinLibraryItem(
+                string.IsNullOrWhiteSpace(name) ? "Selected skin" : name,
+                selection,
+                isFolder,
+                isFile ? SafeFileSize(selection) : isFolder ? SafeDirectorySize(selection) : 0,
+                IsImported: false,
+                IsAvailable: isFile || isFolder));
+        }
+
+        return items
             .OrderByDescending(item => item.IsBuiltIn)
             .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -90,18 +117,6 @@ public static class SkinLibraryService
         }
 
         settings.Update(s => s.ReplayViewer.SkinPath = fullPath);
-    }
-
-    public static bool EnsureValidSelection(SettingsService settings)
-    {
-        var path = (settings.Current.ReplayViewer.SkinPath ?? "").Trim();
-        if (IsBuiltInPath(path) || File.Exists(path) || Directory.Exists(path))
-        {
-            return false;
-        }
-
-        settings.Update(s => s.ReplayViewer.SkinPath = "");
-        return true;
     }
 
     public static bool IsBuiltInPath(string? path) =>

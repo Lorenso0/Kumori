@@ -24,7 +24,7 @@ public sealed class AppStateStore
         lock (_lock)
         {
             next = transform(_state);
-            if (ReferenceEquals(next, _state))
+            if (ReferenceEquals(next, _state) || EqualityComparer<AppState>.Default.Equals(next, _state))
             {
                 return;
             }

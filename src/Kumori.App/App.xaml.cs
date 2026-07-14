@@ -1,5 +1,6 @@
 using System.IO;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
 using Kumori.App.ViewModels;
@@ -25,7 +26,12 @@ public partial class App : Application
     // Companion activation should feel immediate when osu! is launched, while
     // still avoiding a busy process-polling loop.
     private static readonly TimeSpan CompanionMonitorInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan CompanionTransitionMonitorInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan IdleCompanionMonitorInterval = TimeSpan.FromSeconds(2);
+    // Replay preparation includes final source draining, compression and a
+    // durable SQLite transaction. Give both capture services one realistic,
+    // shared window while keeping shutdown strictly bounded.
+    private static readonly TimeSpan ReplayCaptureShutdownTimeout = TimeSpan.FromSeconds(15);
     private SingleInstance? _singleInstance;
     private TrayIconService? _tray;
     private MainWindow? _mainWindow;
@@ -35,22 +41,36 @@ public partial class App : Application
     private bool _lazerReplayCaptureStarted;
     private bool _stableReplayCaptureStarted;
     private AppStateStore? _store;
+    private GameplayWorkCoordinator? _gameplayWork;
+    private AttemptSqliteSink? _attemptPersistence;
     private CancellationTokenSource? _companionMonitorCts;
     private Task? _companionMonitorTask;
-    private bool _otdAutoLaunchAttemptedForOsu;
+    private DispatcherTimer? _trayUpdateTimer;
+    private string _pendingTrayStatus = "Tracker not running";
+    private bool _pendingTrayEndSessionEnabled;
+    private bool _trayStateDirty;
+    private bool _otdLaunchAttemptedForKumori;
+    private bool _otdLaunchInProgress;
+    private bool _otdLifetimeManagementEnabled;
+    private bool _observedOtdAutoLaunch;
+    private string _observedOtdInstallPath = string.Empty;
     private bool _dualModeActivatedForOsu;
-    private bool _companionRestartInProgress;
     private bool _managedOsuSessionActive;
     private bool _tosuStartedForOsu;
-    private bool _hasObservedOsuProcessState;
-    private bool _osuWasRunning;
     private bool? _trayDualModeToggleEnabled;
     private bool _exitRequested;
     private bool _shutdownCleanupCompleted;
     private KumoriUpdateResult? _pendingUpdatePrompt;
     private string? _promptedUpdateVersion;
     private bool _updatePromptOpen;
+    private readonly CompanionTransitionPolicy _companionTransitionPolicy = new();
     private readonly object _osuCompanionGate = new();
+    private readonly object _otdLifetimeGate = new();
+    private readonly object _trayStateGate = new();
+    private readonly object _recoveryRestartGate = new();
+    private readonly HashSet<long> _queuedRecoveryRestartAttempts = [];
+    private readonly HashSet<long> _completedRecoveryRestartAttempts = [];
+    private bool _recoveryRestartWorkerRunning;
     private readonly CancellationTokenSource _backgroundCts = new();
     private readonly object _backgroundGate = new();
     private readonly HashSet<Task> _backgroundTasks = new();
@@ -64,8 +84,6 @@ public partial class App : Application
             Shutdown();
             return;
         }
-        KumoriUpdateInstaller.CleanupStaleFiles();
-
         _singleInstance = new SingleInstance();
         if (!_singleInstance.IsPrimaryInstance)
         {
@@ -74,6 +92,12 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        // Capture the real startup baseline before initialization can delay the
+        // companion monitor. If osu! is launched while Kumori is still starting,
+        // the monitor can now classify it as a new session and run display
+        // automation instead of mistaking it for a pre-existing process.
+        _companionTransitionPolicy.Observe(OsuProcessDetector.RunningProcessIds());
 
         AppDataOrganizer.Organize();
 
@@ -100,18 +124,22 @@ public partial class App : Application
 
         var settings = new SettingsService();
         settings.Load();
+        _observedOtdAutoLaunch = settings.Current.OpenTabletDriver.AutoLaunch;
+        _observedOtdInstallPath = settings.Current.OpenTabletDriver.InstallPath;
+        settings.Changed += HandleSettingsChanged;
         var logRetentionDays = LogRetentionPolicy.NormalizeDays(settings.Current.Developer.LogRetentionDays);
         CacheActivityLog.ConfigureRotationDays(logRetentionDays);
         AppDataOrganizer.PruneLogs(retentionDays: logRetentionDays);
         Log.CloseAndFlush();
         ConfigureFileLogging(logRetentionDays);
-        SkinLibraryService.EnsureValidSelection(settings);
         Themes = new ThemeManager(settings);
         Themes.ApplyCurrent();
         SyncStartupRegistration(settings.Current);
 
         var store = new AppStateStore();
         _store = store;
+        var gameplayWork = new GameplayWorkCoordinator(_backgroundCts.Token);
+        _gameplayWork = gameplayWork;
         var factory = new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false);
         var attempts = new AttemptRepository(factory);
         var details = new AttemptDetailsRepository(factory);
@@ -128,11 +156,21 @@ public partial class App : Application
         _mainWindow.IsVisibleChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         _mainWindow.Show();
         await Dispatcher.Yield(DispatcherPriority.Loaded);
-        TrackBackground(Task.Run(async () =>
-        {
-            await Task.Delay(TimeSpan.FromSeconds(3), _backgroundCts.Token);
-            KumoriUpdateInstaller.CleanupStaleFiles();
-        }, _backgroundCts.Token), "stale updater cleanup");
+        TrackBackground(
+            RunBelowNormalAsync(
+                () =>
+                {
+                    SyncOpenTabletDriverLifetime(settings.Current);
+                    return true;
+                },
+                _backgroundCts.Token),
+            "OpenTabletDriver startup");
+        TrackBackground(CleanupStaleUpdaterAfterStartupAsync(
+                store,
+                settings.Current.Tracking.Enabled,
+                gameplayWork,
+                _backgroundCts.Token),
+            "stale updater cleanup");
         if (KumoriUpdateInstaller.ConsumeFailure() is { } updateFailure)
         {
             _ = Dispatcher.InvokeAsync(() => KumoriDialog.Show(
@@ -145,9 +183,69 @@ public partial class App : Application
         // Establish and migrate the application-owned schema after first paint,
         // even when live tracking is disabled, so application-owned schema
         // migrations are always applied consistently.
-        var trackingSink = new AttemptSqliteSink(factory);
-        TrackBackground(Task.Run(() => new BackupService().CreateAutomaticIfDue(settings.Current.Backup), _backgroundCts.Token), "automatic backup");
-        TrackBackground(RecoverHistoricalBeatmapsAsync(attempts, settings, _backgroundCts.Token), "historical beatmap recovery");
+        Task DeferAttemptPersistence(string key, Func<CancellationToken, Task> work) =>
+            gameplayWork.EnqueuePriority(key, work);
+        var trackingSink = await Task.Run(
+            () => new AttemptSqliteSink(factory, DeferAttemptPersistence),
+            _backgroundCts.Token);
+        _attemptPersistence = trackingSink;
+        // Visible read-only data is core startup work. It must not wait behind
+        // backup, update, or replay-reconciliation maintenance.
+        var dashboardHydration = viewModel.HydrateAsync(_backgroundCts.Token);
+        TrackBackground(dashboardHydration, "dashboard hydration");
+        TrackBackground(EnqueueAfterSafeStartupAsync(
+            store,
+            settings.Current.Tracking.Enabled,
+            gameplayWork,
+            "automatic-backup",
+            token => Task.Run(
+                () => new BackupService().CreateAutomaticIfDue(settings.Current.Backup, token),
+                token),
+            dashboardHydration,
+            _backgroundCts.Token),
+            "automatic backup");
+        TrackBackground(EnqueueAfterSafeStartupAsync(
+            store,
+            settings.Current.Tracking.Enabled,
+            gameplayWork,
+            "historical-beatmap-recovery",
+            token => Dispatcher.InvokeAsync(
+                    () =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        return RecoverHistoricalBeatmapsAsync(attempts, settings, token);
+                    },
+                    DispatcherPriority.ContextIdle)
+                    .Task.Unwrap(),
+            dashboardHydration,
+            _backgroundCts.Token),
+            "historical beatmap recovery");
+        var trackingRetentionDays = settings.Current.Tracking.RetentionDays;
+        if (trackingRetentionDays > 0)
+        {
+            TrackBackground(EnqueueAfterSafeStartupAsync(
+                store,
+                settings.Current.Tracking.Enabled,
+                gameplayWork,
+                "tracking-retention",
+                token => Task.Run(() =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    var normalizedDays = Math.Clamp(trackingRetentionDays, 1, 36_500);
+                    var cutoff = DateTimeOffset.UtcNow
+                        .AddDays(-normalizedDays)
+                        .ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                    var deleted = maintenance.DeleteBefore(cutoff);
+                    Log.Information(
+                        "Tracking retention removed {DeletedSessionCount} session(s) older than {RetentionDays} days",
+                        deleted,
+                        normalizedDays);
+                }, token),
+                dashboardHydration,
+                _backgroundCts.Token,
+                coalesce: true),
+                "tracking retention");
+        }
         if (!settings.Current.FirstRunCompleted ||
             settings.Current.OnboardingVersion < WelcomeWindow.CurrentOnboardingVersion)
         {
@@ -191,18 +289,12 @@ public partial class App : Application
             }
             _exitRequested = true;
             _tray.UpdateStatus("Kumori is exiting...");
-            _tray.ShowNotification("Kumori is exiting", "Finishing capture and closing companion services.");
             if (_mainWindow is not null)
             {
                 _mainWindow.ForceClose = true;
             }
 
             var statusWindow = new ShutdownStatusWindow();
-            if (_mainWindow?.IsVisible == true)
-            {
-                statusWindow.Owner = _mainWindow;
-                statusWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            }
             statusWindow.Show();
 
             // Let WPF render once, then keep the dispatcher alive while the
@@ -219,98 +311,236 @@ public partial class App : Application
             var status = state.Tracking.TosuConnected
                 ? state.Tracking.CurrentBeatmap ?? "Tracker connected"
                 : state.Tracking.Detail ?? "Tracker not running";
-            Dispatcher.InvokeAsync(() =>
+            lock (_trayStateGate)
             {
-                _tray?.UpdateStatus(status);
-                _tray?.SetEndSessionEnabled(state.ActiveSession is not null);
-            });
+                _pendingTrayStatus = status;
+                _pendingTrayEndSessionEnabled = state.ActiveSession is not null;
+                _trayStateDirty = true;
+            }
         };
+        _trayUpdateTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(250),
+        };
+        _trayUpdateTimer.Tick += (_, _) => FlushTrayState();
+        _trayUpdateTimer.Start();
         _companionMonitorCts = new CancellationTokenSource();
         _companionMonitorTask = Task.Run(() => CompanionMonitorLoopAsync(store, settings, _companionMonitorCts.Token));
-        _ = Dispatcher.InvokeAsync(
-            () => TrackBackground(
-                CheckForTosuUpdatesOnLaunchAsync(_backgroundCts.Token),
-                "tosu startup update check"),
-            DispatcherPriority.ApplicationIdle);
-        _ = Dispatcher.InvokeAsync(
-            () => TrackBackground(
-                CheckForKumoriUpdatesOnLaunchAsync(store, _backgroundCts.Token),
-                "Kumori update check"),
-            DispatcherPriority.ApplicationIdle);
+        TrackBackground(
+            EnqueueAfterSafeStartupAsync(
+                store,
+                settings.Current.Tracking.Enabled,
+                gameplayWork,
+                "tosu-startup-update-check",
+                CheckForTosuUpdatesOnLaunchAsync,
+                dashboardHydration,
+                _backgroundCts.Token,
+                coalesce: true),
+            "tosu startup update check");
+        TrackBackground(
+            EnqueueAfterSafeStartupAsync(
+                store,
+                settings.Current.Tracking.Enabled,
+                gameplayWork,
+                "kumori-startup-update-check",
+                token => CheckForKumoriUpdatesOnLaunchAsync(store, token),
+                dashboardHydration,
+                _backgroundCts.Token,
+                coalesce: true),
+            "Kumori update check");
 
         // Background services start only after the shell is visible
         // (no-flicker startup plan: shell first, services second).
         if (settings.Current.Tracking.Enabled)
         {
-            var profileTelemetry = new ProfileTelemetryStore(factory);
-            IReplayPlaybackDetector replayPlaybackDetector = new OsuReplayPlaybackDetector();
-            profileTelemetry.ProfileUpdated += () => _ = Dispatcher.InvokeAsync(
-                () => viewModel.RefreshDashboardAsync());
-            IAttemptSink attemptSink = new StatePublishingAttemptSink(
-                trackingSink,
-                () => trackingSink.CurrentAttemptId,
-                HasReplayData,
-                store);
-            void OnReplayResultRecovered(ReplayResultRecoveryContext recovery)
+            var profileTelemetry = new ProfileTelemetryStore(
+                factory,
+                (key, work) => gameplayWork.Enqueue(key, work));
+            IReplayPlaybackDetector replayPlaybackDetector;
+            var dashboardRefreshRequested = 0;
+            var dashboardRefreshRunning = 0;
+            void QueueMovementUiRefresh(long attemptId)
             {
-                TrackBackground(
-                    CompleteReplayResultRecoveryAsync(recovery),
-                    $"replay simulation recovery for attempt {recovery.AttemptId}");
+                TrackBackground(gameplayWork.Enqueue(
+                    $"movement-ui-refresh-{attemptId}",
+                    token => Dispatcher.InvokeAsync(
+                            async () =>
+                            {
+                                token.ThrowIfCancellationRequested();
+                                // Replay recovery may replace movement without
+                                // changing any result fields. Refresh the row
+                                // first so replay availability/HasMovement is
+                                // visible immediately, then refresh an open
+                                // inspector from the same committed data.
+                                await viewModel.RefreshAttemptMovementAsync(attemptId, token);
+                                await viewModel.Inspector.RefreshAfterMovementReplacementAsync(attemptId, token);
+                            },
+                            DispatcherPriority.Background)
+                        .Task.Unwrap(),
+                    coalesce: true),
+                    $"movement UI refresh for attempt {attemptId}");
             }
-            async Task CompleteReplayResultRecoveryAsync(ReplayResultRecoveryContext recovery)
+            void QueueDashboardRefresh()
             {
-                if (!recovery.RequiresSimulation)
-                {
-                    await Dispatcher.InvokeAsync(async () =>
-                    {
-                        await viewModel.RefreshDashboardAsync();
-                        await viewModel.Inspector.RefreshAfterMovementReplacementAsync(recovery.AttemptId);
-                    }).Task.Unwrap();
-                    return;
-                }
-
-                // Start the companion restart immediately while the headless
-                // ruleset simulation runs independently at accelerated speed.
-                Task restart = TosuManager.RestartAsync(_backgroundCts.Token);
+                Interlocked.Exchange(ref dashboardRefreshRequested, 1);
+                if (Interlocked.CompareExchange(ref dashboardRefreshRunning, 1, 0) == 0)
+                    TrackBackground(RunDashboardRefreshLoopAsync(), "dashboard refresh");
+            }
+            async Task RunDashboardRefreshLoopAsync()
+            {
                 try
                 {
-                    var simulation = await replayViewer.SimulateRecoveryAsync(
-                        recovery.AttemptId,
-                        recovery.ReplayPath,
-                        recovery.BeatmapPath,
-                        recovery.MediaDirectory,
-                        recovery.MediaPaths,
-                        recovery.Samples,
-                        _backgroundCts.Token);
-                    new ReplayResultRecoveryStore(factory).ApplySimulation(recovery.AttemptId, simulation);
+                    while (Volatile.Read(ref dashboardRefreshRequested) != 0)
+                    {
+                        // Attempt and replay transactions usually commit within
+                        // the same short window. Fold those notifications into
+                        // one database/UI refresh instead of rebuilding up to a
+                        // thousand rows twice in rapid succession.
+                        await Task.Delay(TimeSpan.FromMilliseconds(150), _backgroundCts.Token);
+                        if (Interlocked.Exchange(ref dashboardRefreshRequested, 0) == 0)
+                            continue;
+                        await Dispatcher.InvokeAsync(
+                                () => viewModel.RefreshDashboardAsync(_backgroundCts.Token),
+                                DispatcherPriority.Background)
+                            .Task.Unwrap();
+                    }
                 }
                 catch (OperationCanceledException) when (_backgroundCts.IsCancellationRequested)
                 {
                 }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "Replay result simulation failed for attempt {AttemptId}; header recovery was retained", recovery.AttemptId);
-                }
                 finally
                 {
-                    await Dispatcher.InvokeAsync(async () =>
+                    Interlocked.Exchange(ref dashboardRefreshRunning, 0);
+                    if (!_backgroundCts.IsCancellationRequested &&
+                        Volatile.Read(ref dashboardRefreshRequested) != 0)
                     {
-                        await viewModel.RefreshDashboardAsync();
-                        await viewModel.Inspector.RefreshAfterMovementReplacementAsync(recovery.AttemptId);
-                    }).Task.Unwrap();
-                    await restart;
+                        QueueDashboardRefresh();
+                    }
                 }
+            }
+            void OnLiveReplayCaptureCommitted(long attemptId)
+            {
+                store.Update(s => s with
+                {
+                    Tracking = s.Tracking with
+                    {
+                        LatestReplayAttemptId = attemptId,
+                    },
+                });
+                // Deferred capture can commit after the selected inspector has
+                // cached the attempt without movement. Refresh both the row and
+                // that cache from the same durable post-commit notification.
+                QueueMovementUiRefresh(attemptId);
+            }
+            viewModel.SetDashboardRefreshHandler(QueueDashboardRefresh);
+            profileTelemetry.ProfileUpdated += QueueDashboardRefresh;
+            var statePublishingAttemptSink = new StatePublishingAttemptSink(trackingSink, store);
+            IAttemptSink attemptSink = statePublishingAttemptSink;
+            Task DeferReplayPersistence(string key, Func<CancellationToken, Task> work) =>
+                gameplayWork.EnqueuePriority(key, async token =>
+                {
+                    await trackingSink.FlushPendingPersistenceAsync(token);
+                    var failures = 0;
+                    while (true)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        try
+                        {
+                            await work(token);
+                            return;
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            failures++;
+                            if (failures == 1 || (failures & (failures - 1)) == 0)
+                            {
+                                Log.Warning(
+                                    ex,
+                                    "Replay persistence {Operation} failed; the detached capture remains queued for retry",
+                                    key);
+                            }
+                            var delayMs = Math.Min(2_000, 100 * (1 << Math.Min(failures - 1, 4)));
+                            await Task.Delay(delayMs, token);
+                        }
+                    }
+                });
+            void OnReplayResultRecovered(ReplayResultRecoveryContext recovery)
+            {
+                // Recovered result data proves the live tosu stream was broken.
+                // Restarting tosu is mandatory even when replay simulation is
+                // unnecessary; coalescing prevents a burst of recoveries from
+                // serially restarting the same companion several times.
+                RequestRecoveryTosuRestart(recovery.AttemptId);
+                TrackBackground(
+                    gameplayWork.Enqueue(
+                        $"replay-result-completion-{recovery.AttemptId}",
+                        token => CompleteReplayResultRecoveryAsync(recovery, token),
+                        coalesce: true),
+                    $"replay simulation recovery for attempt {recovery.AttemptId}");
+            }
+            async Task CompleteReplayResultRecoveryAsync(
+                ReplayResultRecoveryContext recovery,
+                CancellationToken operationToken)
+            {
+                if (recovery.RequiresSimulation)
+                {
+                    try
+                    {
+                        var simulation = await replayViewer.SimulateRecoveryAsync(
+                            recovery.AttemptId,
+                            recovery.ReplayPath,
+                            recovery.BeatmapPath,
+                            recovery.MediaDirectory,
+                            recovery.MediaPaths,
+                            recovery.Samples,
+                            operationToken);
+                        operationToken.ThrowIfCancellationRequested();
+                        new ReplayResultRecoveryStore(factory).ApplySimulation(
+                            recovery.AttemptId,
+                            simulation,
+                            operationToken);
+                    }
+                    catch (OperationCanceledException) when (operationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Replay result simulation failed for attempt {AttemptId}; header recovery was retained", recovery.AttemptId);
+                    }
+                }
+
+                operationToken.ThrowIfCancellationRequested();
+                QueueDashboardRefresh();
+                QueueMovementUiRefresh(recovery.AttemptId);
+                await Task.CompletedTask;
             }
             if (settings.Current.Capture.LazerReplayFrameEnabled)
             {
                 var lazerFrameSource = new LazerMemoryReplayFrameSource();
+                TrackBackground(
+                    lazerFrameSource.EnsureReplayDetectionOffsetsAsync(_backgroundCts.Token),
+                    "lazer memory offsets");
                 replayPlaybackDetector = new OsuReplayPlaybackDetector(lazerFrameSource);
                 _lazerReplayFrames = new LazerReplayFrameCaptureService(
                     store,
                     factory,
                     () => trackingSink.CurrentAttemptId,
                     lazerFrameSource,
-                    sourceName: "lazer_memory");
+                    sourceName: "lazer_memory",
+                    deferPersistence: DeferReplayPersistence,
+                    captureCommitted: OnLiveReplayCaptureCommitted);
+                // Lazer's memory reader must be warm before the first client-kind
+                // packet or StartAttempt transition. Its discovery is bounded and
+                // below normal priority; starting here restores the original
+                // always-on pre-read without restoring unbounded gameplay scans.
+                _lazerReplayCaptureStarted = true;
+                _lazerReplayFrames.Start();
+                Log.Information("Started bounded lazer replay capture pre-read before client detection");
                 var stableCaptureStatus = new StableCaptureStatusSink();
                 _stableReplayFrames = new LazerReplayFrameCaptureService(
                     store,
@@ -319,31 +549,31 @@ public partial class App : Application
                     new StableLiveReplayFrameSource(status: stableCaptureStatus),
                     stableCaptureStatus,
                     sourceName: "stable_memory",
-                    clientKind: OsuClientKind.Stable);
+                    clientKind: OsuClientKind.Stable,
+                    deferPersistence: DeferReplayPersistence,
+                    captureCommitted: OnLiveReplayCaptureCommitted);
                 attemptSink = new CompositeAttemptSink(
-                    new StatePublishingAttemptSink(
-                        trackingSink,
-                        () => trackingSink.CurrentAttemptId,
-                        HasReplayData,
-                        store),
+                    statePublishingAttemptSink,
                     new BestEffortAttemptSink(
                         new LazerReplayFrameRecoverySink(
                             factory,
                             () => trackingSink.CurrentAttemptId,
-                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id)),
+                            QueueMovementUiRefresh,
                             OnReplayResultRecovered,
                             recoverMovement: true,
-                            cancellationToken: _backgroundCts.Token),
+                            cancellationToken: _backgroundCts.Token,
+                            workCoordinator: gameplayWork),
                         "lazer Realm replay-frame recovery"),
                     new BestEffortAttemptSink(_lazerReplayFrames, "lazer replay-frame capture"),
                     new BestEffortAttemptSink(
                         new StableReplayFrameRecoverySink(
                             factory,
                             () => trackingSink.CurrentAttemptId,
-                            id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id)),
+                            QueueMovementUiRefresh,
                             OnReplayResultRecovered,
                             recoverMovement: true,
-                            cancellationToken: _backgroundCts.Token),
+                            cancellationToken: _backgroundCts.Token,
+                            workCoordinator: gameplayWork),
                         "stable replay-frame recovery"),
                     // Composite sinks finalize in reverse order. Store the live
                     // buffer first, then let an exact Data/r replay replace it.
@@ -351,6 +581,14 @@ public partial class App : Application
             }
             else
             {
+                var replayDetectionSource = new LazerMemoryReplayFrameSource();
+                TrackBackground(
+                    replayDetectionSource.EnsureReplayDetectionOffsetsAsync(_backgroundCts.Token),
+                    "lazer replay-detection offsets");
+                TrackBackground(
+                    replayDetectionSource.PrewarmGameBaseAsync(_backgroundCts.Token),
+                    "lazer replay-detection prewarm");
+                replayPlaybackDetector = new OsuReplayPlaybackDetector(replayDetectionSource);
                 LazerReplayFrameDiagnostics.Update(s =>
                 {
                     s.Enabled = false;
@@ -381,7 +619,8 @@ public partial class App : Application
                             () => trackingSink.CurrentAttemptId,
                             resultRecovered: OnReplayResultRecovered,
                             recoverMovement: false,
-                            cancellationToken: _backgroundCts.Token),
+                            cancellationToken: _backgroundCts.Token,
+                            workCoordinator: gameplayWork),
                         "lazer replay result recovery"),
                     new BestEffortAttemptSink(
                         new StableReplayFrameRecoverySink(
@@ -389,14 +628,28 @@ public partial class App : Application
                             () => trackingSink.CurrentAttemptId,
                             resultRecovered: OnReplayResultRecovered,
                             recoverMovement: false,
-                            cancellationToken: _backgroundCts.Token),
+                            cancellationToken: _backgroundCts.Token,
+                            workCoordinator: gameplayWork),
                         "stable replay result recovery"));
             }
             attemptSink = new ProfileAwareAttemptSink(
                 attemptSink,
                 profileTelemetry,
                 () => trackingSink.CurrentAttemptId);
-            attemptSink = new ReplayRecoveryTestAttemptSink(attemptSink, settings);
+            attemptSink = new ReplayRecoveryTestAttemptSink(
+                attemptSink,
+                settings,
+                persist => TrackBackground(
+                    gameplayWork.Enqueue(
+                        "consume-replay-recovery-test-switch",
+                        token => Task.Run(() =>
+                        {
+                            token.ThrowIfCancellationRequested();
+                            persist();
+                        }, token),
+                        coalesce: true),
+                    "consume developer replay recovery switch"));
+            attemptSink = new GameplayActivityAttemptSink(attemptSink, gameplayWork);
             _tracking = new TosuTrackingService(
                 store,
                 attemptTracker: new AttemptTracker(attemptSink),
@@ -410,20 +663,18 @@ public partial class App : Application
             _tracking.Start();
             if (settings.Current.Capture.LazerReplayFrameEnabled)
             {
-                TrackBackground(Task.Run(() => new PersistedReplayReconciliationService(
+                var reconciliation = new PersistedReplayReconciliationService(
                     factory,
-                    id => Dispatcher.InvokeAsync(() => viewModel.Inspector.RefreshAfterMovementReplacementAsync(id)),
-                    OnReplayResultRecovered).Run(_backgroundCts.Token),
-                    _backgroundCts.Token), "persisted replay reconciliation");
+                    QueueMovementUiRefresh,
+                    OnReplayResultRecovered);
+                TrackBackground(gameplayWork.Enqueue(
+                    "persisted-replay-reconciliation",
+                    token => Task.Run(() => reconciliation.Run(token), token)),
+                    "persisted replay reconciliation");
             }
             viewModel.SetEndLiveSessionHandler(() => Task.Run(() => _tracking?.EndSession() ?? false));
-
-            bool HasReplayData(long attemptId) =>
-                movement.GetMetadata(attemptId) is { SampleCount: > 0 };
         }
 
-        // Hydrate asynchronously after the shell is visible.
-        _ = viewModel.HydrateAsync();
     }
 
     private async Task RecoverHistoricalBeatmapsAsync(
@@ -436,6 +687,7 @@ public partial class App : Application
         // to be opened immediately; older records remain recoverable on demand.
         var pending = await Task.Run(() => HistoricalBeatmapCacheRecovery.GetPending(
             attempts.GetRecentAttempts(limit: 5_000)));
+        cancellationToken.ThrowIfCancellationRequested();
         if (pending.Count == 0 || _mainWindow is null)
         {
             return;
@@ -670,12 +922,14 @@ public partial class App : Application
         Directory.CreateDirectory(AppPaths.AppLogDir);
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
-            .WriteTo.File(
-                Path.Combine(AppPaths.AppLogDir, "kumori-.log"),
-                rollingInterval: RollingInterval.Day,
-                fileSizeLimitBytes: AppPaths.MaxLogFileBytes,
-                rollOnFileSizeLimit: true,
-                retainedFileCountLimit: LogRetentionPolicy.NormalizeDays(retentionDays))
+            .WriteTo.Async(sink => sink.File(
+                    Path.Combine(AppPaths.AppLogDir, "kumori-.log"),
+                    rollingInterval: RollingInterval.Day,
+                    fileSizeLimitBytes: AppPaths.MaxLogFileBytes,
+                    rollOnFileSizeLimit: true,
+                    retainedFileCountLimit: LogRetentionPolicy.NormalizeDays(retentionDays)),
+                bufferSize: 4_096,
+                blockWhenFull: false)
             .CreateLogger();
     }
 
@@ -686,6 +940,8 @@ public partial class App : Application
             CleanupSynchronously();
         }
         _tray?.Dispose();
+        _trayUpdateTimer?.Stop();
+        _gameplayWork?.Dispose();
         _singleInstance?.Dispose();
         _backgroundCts.Dispose();
         Log.Information("Kumori exiting");
@@ -702,19 +958,23 @@ public partial class App : Application
             {
                 await AwaitBoundedAsync(_tracking.DisposeAsync().AsTask(), TimeSpan.FromSeconds(3));
             }
+            if (_attemptPersistence is not null)
+            {
+                await AwaitBoundedAsync(
+                    _attemptPersistence.FlushPendingPersistenceAsync(),
+                    TimeSpan.FromSeconds(3));
+            }
 
             statusWindow.UpdateStatus("Finishing replay capture...");
-            if (_lazerReplayFrames is not null)
-            {
-                await AwaitBoundedAsync(_lazerReplayFrames.DisposeAsync().AsTask(), TimeSpan.FromSeconds(3));
-            }
-            if (_stableReplayFrames is not null)
-            {
-                await AwaitBoundedAsync(_stableReplayFrames.DisposeAsync().AsTask(), TimeSpan.FromSeconds(3));
-            }
+            _gameplayWork?.BeginShutdownDrain();
+            Task[] replayCaptureTasks = ReplayCaptureDisposeTasks();
+            if (replayCaptureTasks.Length > 0)
+                await AwaitBoundedAsync(Task.WhenAll(replayCaptureTasks), ReplayCaptureShutdownTimeout);
 
             statusWindow.UpdateStatus("Closing companion services...");
             _backgroundCts.Cancel();
+            _gameplayWork?.Dispose();
+            _trayUpdateTimer?.Stop();
             Task[] backgroundTasks;
             lock (_backgroundGate)
             {
@@ -731,10 +991,10 @@ public partial class App : Application
             }
             _companionMonitorCts?.Dispose();
 
-            statusWindow.UpdateStatus("Restoring display and closing helpers...");
-            DeactivateDualModeIfRequested();
-            OpenTabletDriverService.CloseOwned();
+            statusWindow.UpdateStatus("Closing tracking helper...");
             TosuManager.CloseOwned();
+            OpenTabletDriverService.StopDisplayMappingRefresh();
+            OpenTabletDriverService.CloseOwned();
             _shutdownCleanupCompleted = true;
         }
         catch (Exception ex)
@@ -764,22 +1024,76 @@ public partial class App : Application
         }
     }
 
+    private static Task<T> RunBelowNormalAsync<T>(
+        Func<T> operation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var worker = new Thread(() =>
+        {
+            var nativeThread = GetCurrentThread();
+            try
+            {
+                // A dedicated thread is safe to reprioritize permanently. On
+                // Windows background mode also lowers disk and memory I/O
+                // priority while schema migration/ID initialization runs.
+                _ = SetThreadPriority(nativeThread, ThreadModeBackgroundBegin);
+                cancellationToken.ThrowIfCancellationRequested();
+                completion.TrySetResult(operation());
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                completion.TrySetCanceled(cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+            finally
+            {
+                _ = SetThreadPriority(nativeThread, ThreadModeBackgroundEnd);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Kumori low-priority background I/O",
+            Priority = ThreadPriority.BelowNormal,
+        };
+        worker.Start();
+        return completion.Task;
+    }
+
+    private const int ThreadModeBackgroundBegin = 0x00010000;
+    private const int ThreadModeBackgroundEnd = 0x00020000;
+
+    [DllImport("kernel32.dll")]
+    private static extern nint GetCurrentThread();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetThreadPriority(nint thread, int priority);
+
     private void CleanupSynchronously()
     {
         if (_tracking is not null)
         {
             try { _tracking.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3)); } catch { }
         }
-        if (_lazerReplayFrames is not null)
+        if (_attemptPersistence is not null)
         {
-            try { _lazerReplayFrames.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3)); } catch { }
+            try { _attemptPersistence.FlushPendingPersistenceAsync().Wait(TimeSpan.FromSeconds(3)); } catch { }
         }
-        if (_stableReplayFrames is not null)
+        _gameplayWork?.BeginShutdownDrain();
+        Task[] replayCaptureTasks = ReplayCaptureDisposeTasks();
+        if (replayCaptureTasks.Length > 0)
         {
-            try { _stableReplayFrames.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3)); } catch { }
+            try { Task.WhenAll(replayCaptureTasks).Wait(ReplayCaptureShutdownTimeout); } catch { }
         }
         _companionMonitorCts?.Cancel();
         _backgroundCts.Cancel();
+        _gameplayWork?.Dispose();
+        _trayUpdateTimer?.Stop();
         Task[] backgroundTasks;
         lock (_backgroundGate)
         {
@@ -788,10 +1102,20 @@ public partial class App : Application
         try { Task.WhenAll(backgroundTasks).Wait(TimeSpan.FromSeconds(3)); } catch { }
         try { _companionMonitorTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }
         _companionMonitorCts?.Dispose();
-        DeactivateDualModeIfRequested();
-        OpenTabletDriverService.CloseOwned();
         TosuManager.CloseOwned();
+        OpenTabletDriverService.StopDisplayMappingRefresh();
+        OpenTabletDriverService.CloseOwned();
         _shutdownCleanupCompleted = true;
+    }
+
+    private Task[] ReplayCaptureDisposeTasks()
+    {
+        var tasks = new List<Task>(2);
+        if (_lazerReplayFrames is not null)
+            tasks.Add(_lazerReplayFrames.DisposeAsync().AsTask());
+        if (_stableReplayFrames is not null)
+            tasks.Add(_stableReplayFrames.DisposeAsync().AsTask());
+        return tasks.ToArray();
     }
 
     private void TrackBackground(Task task, string operation)
@@ -813,6 +1137,232 @@ public partial class App : Application
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
+    private static async Task WaitForSafeStartupMaintenanceAsync(
+        AppStateStore store,
+        bool trackingEnabled,
+        CancellationToken cancellationToken)
+    {
+        while (OsuProcessDetector.IsRunning())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var tracking = store.Current.Tracking;
+            var telemetry = tracking.LatestTelemetry;
+            if (trackingEnabled
+                && tracking.TosuConnected
+                && telemetry is not null
+                && !telemetry.IsPlaying
+                && DateTimeOffset.UtcNow - telemetry.ReceivedAt < TimeSpan.FromSeconds(2))
+            {
+                return;
+            }
+
+            // If tracking is disabled or tosu has not produced a fresh state,
+            // prefer postponing optional backup/update/recovery work until osu!
+            // exits over guessing that an active map is safe.
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+        }
+    }
+
+    private static async Task CleanupStaleUpdaterAfterStartupAsync(
+        AppStateStore store,
+        bool trackingEnabled,
+        GameplayWorkCoordinator coordinator,
+        CancellationToken cancellationToken)
+    {
+        await WaitForSafeStartupMaintenanceAsync(store, trackingEnabled, cancellationToken);
+        await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+        await coordinator.Enqueue(
+            "stale-updater-cleanup",
+            token => Task.Run(KumoriUpdateInstaller.CleanupStaleFiles, token),
+            coalesce: true);
+    }
+
+    private static async Task EnqueueAfterSafeStartupAsync(
+        AppStateStore store,
+        bool trackingEnabled,
+        GameplayWorkCoordinator coordinator,
+        string key,
+        Func<CancellationToken, Task> work,
+        Task startupPrerequisite,
+        CancellationToken cancellationToken,
+        bool coalesce = false)
+    {
+        await startupPrerequisite.WaitAsync(cancellationToken);
+        await WaitForSafeStartupMaintenanceAsync(store, trackingEnabled, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await coordinator.Enqueue(key, work, coalesce);
+    }
+
+    private void RequestRecoveryTosuRestart(long attemptId)
+    {
+        var startWorker = false;
+        lock (_recoveryRestartGate)
+        {
+            if (_completedRecoveryRestartAttempts.Contains(attemptId) ||
+                !_queuedRecoveryRestartAttempts.Add(attemptId))
+                return;
+            if (!_recoveryRestartWorkerRunning)
+            {
+                _recoveryRestartWorkerRunning = true;
+                startWorker = true;
+            }
+        }
+        if (!startWorker)
+            return;
+        TrackBackground(
+            RestartTosuAfterRecoveryAsync(),
+            "mandatory tosu restart after replay recovery");
+    }
+
+    private async Task RestartTosuAfterRecoveryAsync()
+    {
+        var restarted = false;
+        long attemptId = 0;
+        HashSet<long> generationAttempts = [];
+        try
+        {
+            // Let a burst of reconciliation callbacks join one mandatory
+            // restart generation. Only recoveries queued before the actual
+            // restart sequence begins join it; later recoveries remain queued
+            // for the next mandatory generation.
+            await Task.Delay(100, _backgroundCts.Token);
+            lock (_recoveryRestartGate)
+            {
+                generationAttempts = [.. _queuedRecoveryRestartAttempts];
+                attemptId = generationAttempts.FirstOrDefault();
+            }
+
+            Exception? lastFailure = null;
+            var failedBatches = 0;
+            while (!restarted)
+            {
+                _backgroundCts.Token.ThrowIfCancellationRequested();
+                try
+                {
+                    var coordinator = _gameplayWork
+                        ?? throw new InvalidOperationException("Gameplay work coordinator is unavailable.");
+                    restarted = await coordinator.RunFairRetryLoopAsync(
+                        "mandatory-tosu-restart-recovery-generation",
+                        maxAttempts: 3,
+                        retryDelay: TimeSpan.FromSeconds(2),
+                        async (attemptIndex, gameplayToken) =>
+                        {
+                            // Do not begin a close while gameplay is active. Once the
+                            // close starts, use the application token so cancellation
+                            // can never strand tosu between close and relaunch.
+                            gameplayToken.ThrowIfCancellationRequested();
+                            try
+                            {
+                                if (!File.Exists(AppPaths.TosuExecutable))
+                                {
+                                    await TosuManager.EnsureInstalledAsync(
+                                        cancellationToken: gameplayToken);
+                                    gameplayToken.ThrowIfCancellationRequested();
+                                }
+                                await TosuManager.RestartAsync(
+                                    _backgroundCts.Token,
+                                    transition => coordinator.ExecuteGameplayExcludingTransition(
+                                        gameplayToken,
+                                        transition));
+                                lock (_osuCompanionGate)
+                                    _tosuStartedForOsu = true;
+                                return true;
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                lastFailure = ex;
+                                Log.Warning(ex,
+                                    "Mandatory tosu recovery restart for attempt {AttemptId} failed on outer attempt {OuterAttempt}",
+                                    attemptId,
+                                    attemptIndex + 1);
+                                return false;
+                            }
+                        },
+                        _backgroundCts.Token,
+                        priority: true);
+                }
+                catch (OperationCanceledException) when (_backgroundCts.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastFailure = ex;
+                    Log.Warning(ex,
+                        "Mandatory tosu recovery restart sequence for attempt {AttemptId} failed; it remains pending",
+                        attemptId);
+                }
+
+                if (!restarted)
+                {
+                    failedBatches++;
+                    Log.Error(lastFailure,
+                        "Mandatory tosu recovery restart for attempt {AttemptId} remains pending after {AttemptCount} attempts",
+                        attemptId,
+                        failedBatches * 3);
+                    try
+                    {
+                        _store?.Update(state => state with
+                        {
+                            Tracking = state.Tracking with
+                            {
+                                Health = HealthLevel.Degraded,
+                                Detail = $"mandatory tosu restart pending after recovered attempt {attemptId}",
+                            },
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        // Status publication is optional; it must never abandon
+                        // the required restart loop.
+                        Log.Debug(ex, "Could not publish pending mandatory tosu restart status");
+                    }
+
+                    // A recovered attempt is proof that tosu's tracker is broken.
+                    // Never abandon the required restart after a short transient
+                    // failure; retain it until success or application shutdown.
+                    var retrySeconds = Math.Min(30, 5 * Math.Pow(2, Math.Min(failedBatches - 1, 3)));
+                    await Task.Delay(TimeSpan.FromSeconds(retrySeconds), _backgroundCts.Token);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (_backgroundCts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            var startNextGeneration = false;
+            lock (_recoveryRestartGate)
+            {
+                if (restarted)
+                {
+                    foreach (var queuedAttemptId in generationAttempts)
+                    {
+                        _completedRecoveryRestartAttempts.Add(queuedAttemptId);
+                        _queuedRecoveryRestartAttempts.Remove(queuedAttemptId);
+                    }
+                }
+                else if (_backgroundCts.IsCancellationRequested)
+                {
+                    _queuedRecoveryRestartAttempts.Clear();
+                }
+                _recoveryRestartWorkerRunning = false;
+                if (!_backgroundCts.IsCancellationRequested
+                    && _queuedRecoveryRestartAttempts.Count > 0)
+                {
+                    _recoveryRestartWorkerRunning = true;
+                    startNextGeneration = true;
+                }
+            }
+            if (startNextGeneration)
+            {
+                TrackBackground(
+                    RestartTosuAfterRecoveryAsync(),
+                    "next mandatory tosu restart recovery generation");
+            }
+        }
+    }
+
     private static void SyncStartupRegistration(KumoriSettings settings)
     {
         try
@@ -830,24 +1380,26 @@ public partial class App : Application
 
     private void TryActivateOsuCompanions(KumoriSettings settings)
     {
-        if (settings.Display.AutoSwitchDualMode)
-        {
-            if (settings.Display.SuspendOsuDuringDualModeSwitch)
-            {
-                SwitchDualModeWhileOsuSuspended(settings);
-            }
-            else
-            {
-                RestartOsuWithCompanions(settings);
-            }
-            return;
-        }
-
         lock (_osuCompanionGate)
         {
-            LaunchOpenTabletDriverIfRequested(settings);
-            ActivateDualModeIfRequested(settings);
+            if (_managedOsuSessionActive)
+                return;
+            _managedOsuSessionActive = true;
         }
+
+        // Display and tablet preparation is allowed only after the process PID
+        // has been confirmed by the debounce policy. The user's opt-in suspend
+        // setting is honored inside the gameplay-excluding transition; osu! is
+        // never terminated or relaunched.
+        TrackBackground(
+            RunBelowNormalAsync(
+                () =>
+                {
+                    ActivateDualModeIfRequested(settings);
+                    return true;
+                },
+                _backgroundCts.Token),
+            "prepare display and tablet companions");
     }
 
     private void StartReplayCaptureFor(OsuClientKind clientKind)
@@ -869,112 +1421,11 @@ public partial class App : Application
         }
     }
 
-    private void SwitchDualModeWhileOsuSuspended(KumoriSettings settings)
-    {
-        TrackBackground(Task.Run(() =>
-        {
-            using var suspension = OsuProcessDetector.TrySuspendRunning();
-            if (suspension is null)
-            {
-                Log.Warning("Could not suspend osu! for dual-mode switching; leaving the running client untouched");
-                PublishCompanionStatus(c => c with { DualModeDetail = "Could not suspend osu! for dual-mode switching" });
-                return;
-            }
-
-            try
-            {
-                Log.Information("osu! suspended while dual mode is switched");
-                lock (_osuCompanionGate)
-                {
-                    ActivateDualModeIfRequested(settings);
-                    LaunchOpenTabletDriverIfRequested(settings);
-                    _managedOsuSessionActive = true;
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "Could not switch dual mode while osu! was suspended");
-            }
-            // Disposing resumes osu! even if the DDC operation or OTD launch fails.
-        }, _backgroundCts.Token), "suspend osu and switch dual mode");
-    }
-
-    private void RestartOsuWithCompanions(KumoriSettings settings)
-    {
-        lock (_osuCompanionGate)
-        {
-            if (_companionRestartInProgress || _managedOsuSessionActive)
-            {
-                return;
-            }
-
-            _companionRestartInProgress = true;
-        }
-
-        TrackBackground(Task.Run(() =>
-        {
-            try
-            {
-                Log.Information("Preparing osu! companion session: stopping osu! before switching display mode");
-                // tosu keeps raw pointers into osu!lazer. It must not survive
-                // the display-mode restart and attach those stale pointers to
-                // the replacement process.
-                Log.Information("Stopping managed tosu before restarting osu! for the display-mode switch");
-                TosuManager.CloseOwned();
-                lock (_osuCompanionGate)
-                {
-                    _tosuStartedForOsu = false;
-                }
-
-                var launchPaths = OsuProcessDetector.StopAndCaptureLaunchPaths();
-                if (launchPaths.Count == 0)
-                {
-                    Log.Warning("Could not determine the running osu! executable path; companion restart was skipped");
-                    return;
-                }
-
-                lock (_osuCompanionGate)
-                {
-                    // osu! is stopped here so the LG mode change happens before OTD
-                    // and before the client is opened again.
-                    ActivateDualModeIfRequested(settings);
-                    LaunchOpenTabletDriverIfRequested(settings);
-                }
-
-                OsuProcessDetector.Launch(launchPaths);
-                lock (_osuCompanionGate)
-                {
-                    _managedOsuSessionActive = true;
-                }
-                Log.Information("osu! relaunched after display and OpenTabletDriver preparation");
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "Could not prepare the osu! companion session");
-            }
-            finally
-            {
-                lock (_osuCompanionGate)
-                {
-                    _companionRestartInProgress = false;
-                }
-
-                // Do not wait for the three-second monitor tick: after a
-                // successful relaunch this schedules a fresh tosu instance
-                // (including its startup grace) against the new osu process.
-                if (_store is not null && OsuProcessDetector.IsRunning())
-                {
-                    EnsureTosuForOsu(_store);
-                }
-            }
-        }, _backgroundCts.Token), "restart osu with companion services");
-    }
-
     private void EnsureTosuForOsu(AppStateStore store)
     {
         lock (_osuCompanionGate)
         {
-            if (_companionRestartInProgress || _tosuStartedForOsu)
+            if (_tosuStartedForOsu)
             {
                 return;
             }
@@ -1017,7 +1468,10 @@ public partial class App : Application
                     return;
                 }
 
-                await TosuManager.EnsureInstalledAndLaunchAsync(cancellationToken: _backgroundCts.Token);
+                if (File.Exists(AppPaths.TosuExecutable))
+                    TosuManager.LaunchInstalled();
+                else
+                    await TosuManager.EnsureInstalledAndLaunchAsync(cancellationToken: _backgroundCts.Token);
                 if (!OsuProcessDetector.IsRunning())
                 {
                     TosuManager.CloseOwned();
@@ -1054,29 +1508,30 @@ public partial class App : Application
         var promptToRestoreDualMode = false;
         lock (_osuCompanionGate)
         {
-            if (_companionRestartInProgress ||
-                (!_managedOsuSessionActive && !_tosuStartedForOsu && !_otdAutoLaunchAttemptedForOsu && !_dualModeActivatedForOsu))
+            if (!_managedOsuSessionActive && !_tosuStartedForOsu && !_dualModeActivatedForOsu)
             {
                 return;
             }
 
             _managedOsuSessionActive = false;
             _tosuStartedForOsu = false;
-            _otdAutoLaunchAttemptedForOsu = false;
             promptToRestoreDualMode = _dualModeActivatedForOsu;
             // The user's response now owns restoration. Clear the session flag
             // first so subsequent monitor ticks do not show duplicate prompts.
             _dualModeActivatedForOsu = false;
         }
 
-        // Leave the LG monitor in its current mode until the user explicitly
-        // chooses to restore it. OTD and tosu remain tied to the osu! session.
-        OpenTabletDriverService.CloseOwned();
+        // OTD follows Kumori's lifetime, while the display remains stable across
+        // osu! process transitions. Only tosu owns process-local pointers and
+        // must be closed when the confirmed osu! session ends.
         TosuManager.CloseOwned();
+        var otdRunning = OpenTabletDriverService.IsRunning();
         PublishCompanionStatus(c => c with
         {
-            OpenTabletDriverLaunched = false,
-            OpenTabletDriverDetail = "OpenTabletDriver closed with osu!",
+            OpenTabletDriverLaunched = otdRunning,
+            OpenTabletDriverDetail = otdRunning
+                ? "OpenTabletDriver running with Kumori"
+                : c.OpenTabletDriverDetail,
             DualModeDetail = promptToRestoreDualMode
                 ? "Waiting for confirmation to restore dual mode"
                 : c.DualModeDetail,
@@ -1109,6 +1564,8 @@ public partial class App : Application
             var settings = new SettingsService();
             settings.Load();
             var restored = DualModeService.Deactivate(settings.Current);
+            if (restored && settings.Current.OpenTabletDriver.AutoLaunch)
+                OpenTabletDriverService.RefreshAfterDisplayTransition();
             PublishCompanionStatus(c => c with
             {
                 DualModeActive = !restored && DualModeService.IsDualModeActive(),
@@ -1131,18 +1588,19 @@ public partial class App : Application
         {
             try
             {
-                var osuRunning = OsuProcessDetector.IsRunning();
+                var observedProcessIds = OsuProcessDetector.RunningProcessIds();
+                var observation = _companionTransitionPolicy.Observe(observedProcessIds);
+                var osuRunning = observation.IsRunning;
+                var transition = observation.Transition;
+                if (transition != CompanionTransition.None)
+                {
+                    Log.Information(
+                        "Confirmed osu! companion transition {Transition} for process IDs {ProcessIds}",
+                        transition,
+                        observation.ProcessIds.Order().ToArray());
+                }
+                SyncOpenTabletDriverLifetime(settings.Current);
                 UpdateTrayDualModeToggle(settings.Current.Display.AutoSwitchDualMode);
-                // Kumori may be opened after osu! is already running. Treat
-                // that first observation as a baseline, not as an osu! launch:
-                // auto-switching the display or opening OTD at that point is
-                // disruptive and can restart an active game.
-                var transition = CompanionTransitionPolicy.Evaluate(
-                    _hasObservedOsuProcessState,
-                    _osuWasRunning,
-                    osuRunning);
-                _hasObservedOsuProcessState = true;
-                _osuWasRunning = osuRunning;
                 store.Update(s => s with
                 {
                     Companions = s.Companions with
@@ -1160,8 +1618,19 @@ public partial class App : Application
                 else if (transition == CompanionTransition.EnsureTracking)
                 {
                     // Starting Kumori after osu! must still bring up the non-disruptive
-                    // tracking companion. Display switching and OTD automation remain
-                    // transition-only so an active game is never restarted unexpectedly.
+                    // tracking companion. Display switching remains transition-only.
+                    EnsureTosuForOsu(store);
+                }
+                else if (transition == CompanionTransition.Replaced)
+                {
+                    // A confirmed replacement PID invalidates tosu's process
+                    // pointers, but does not end the display/tablet session.
+                    _tracking?.NotifyOsuStopped();
+                    TosuManager.CloseOwned();
+                    lock (_osuCompanionGate)
+                    {
+                        _tosuStartedForOsu = false;
+                    }
                     EnsureTosuForOsu(store);
                 }
                 else if (transition == CompanionTransition.Stopped)
@@ -1169,8 +1638,12 @@ public partial class App : Application
                     _tracking?.NotifyOsuStopped();
                     EndOsuCompanionSession();
                 }
+                var transitionPending = observedProcessIds.Count > 0
+                    && (!osuRunning || !observedProcessIds.SetEquals(observation.ProcessIds));
                 await Task.Delay(
-                    osuRunning || _companionRestartInProgress ? CompanionMonitorInterval : IdleCompanionMonitorInterval,
+                    transitionPending
+                        ? CompanionTransitionMonitorInterval
+                        : osuRunning ? CompanionMonitorInterval : IdleCompanionMonitorInterval,
                     token);
             }
             catch (OperationCanceledException)
@@ -1185,15 +1658,91 @@ public partial class App : Application
         }
     }
 
-    private void LaunchOpenTabletDriverIfRequested(KumoriSettings settings)
+    private void SyncOpenTabletDriverLifetime(KumoriSettings settings)
     {
-        if (_otdAutoLaunchAttemptedForOsu || !settings.OpenTabletDriver.AutoLaunch)
+        if (!settings.OpenTabletDriver.AutoLaunch)
         {
+            var stopOwned = false;
+            lock (_otdLifetimeGate)
+            {
+                stopOwned = _otdLifetimeManagementEnabled;
+                _otdLifetimeManagementEnabled = false;
+                _otdLaunchAttemptedForKumori = false;
+            }
+            OpenTabletDriverService.StopDisplayMappingRefresh();
+            OpenTabletDriverService.CloseOwned();
+            if (stopOwned)
+            {
+                PublishCompanionStatus(c => c with
+                {
+                    OpenTabletDriverEnabled = false,
+                    OpenTabletDriverLaunched = OpenTabletDriverService.IsRunning(),
+                    OpenTabletDriverDetail = "OpenTabletDriver auto-launch is off",
+                });
+            }
             return;
         }
-        _otdAutoLaunchAttemptedForOsu = true;
+
+        EnsureOpenTabletDriverForKumori(settings);
+        if (OpenTabletDriverService.RefreshDisplayMappingsIfChanged())
+        {
+            PublishCompanionStatus(c => c with
+            {
+                OpenTabletDriverDetail = "OpenTabletDriver display cache refreshed",
+            });
+        }
+    }
+
+    private void HandleSettingsChanged(KumoriSettings settings)
+    {
+        var synchronizeOtd = false;
+        lock (_otdLifetimeGate)
+        {
+            if (_observedOtdAutoLaunch != settings.OpenTabletDriver.AutoLaunch
+                || !string.Equals(
+                    _observedOtdInstallPath,
+                    settings.OpenTabletDriver.InstallPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _observedOtdAutoLaunch = settings.OpenTabletDriver.AutoLaunch;
+                _observedOtdInstallPath = settings.OpenTabletDriver.InstallPath;
+                synchronizeOtd = true;
+            }
+        }
+        if (!synchronizeOtd || _backgroundCts.IsCancellationRequested)
+            return;
+
+        Log.Information(
+            "Applying saved OpenTabletDriver settings immediately: AutoLaunch={AutoLaunch}, InstallPath={InstallPath}",
+            settings.OpenTabletDriver.AutoLaunch,
+            settings.OpenTabletDriver.InstallPath);
+        TrackBackground(
+            RunBelowNormalAsync(
+                () =>
+                {
+                    SyncOpenTabletDriverLifetime(settings);
+                    return true;
+                },
+                _backgroundCts.Token),
+            "apply saved OpenTabletDriver settings");
+    }
+
+    private void EnsureOpenTabletDriverForKumori(KumoriSettings settings)
+    {
+        lock (_otdLifetimeGate)
+        {
+            _otdLifetimeManagementEnabled = true;
+            if (_otdLaunchInProgress
+                || (_otdLaunchAttemptedForKumori && OpenTabletDriverService.IsUiRunning()))
+                return;
+            _otdLaunchAttemptedForKumori = true;
+            _otdLaunchInProgress = true;
+        }
+
         try
         {
+            _backgroundCts.Token.ThrowIfCancellationRequested();
+            var uiWasRunning = OpenTabletDriverService.IsUiRunning();
             var installation = OpenTabletDriverService.Detect(settings.OpenTabletDriver.InstallPath);
             if (installation is null)
             {
@@ -1206,12 +1755,23 @@ public partial class App : Application
                 });
                 return;
             }
-            var launched = OpenTabletDriverService.Launch(installation.ExecutablePath);
+
+            var launched = !uiWasRunning && OpenTabletDriverService.Launch(installation.ExecutablePath);
+            var uiRunning = launched || OpenTabletDriverService.IsUiRunning();
+            var running = OpenTabletDriverService.IsRunning();
+            if (running)
+                OpenTabletDriverService.ConfigureDisplayMappingRefresh(installation.ExecutablePath);
             PublishCompanionStatus(c => c with
             {
                 OpenTabletDriverEnabled = true,
-                OpenTabletDriverLaunched = launched || OpenTabletDriverService.IsUiRunning(),
-                OpenTabletDriverDetail = launched ? "OpenTabletDriver launched" : "OpenTabletDriver already running",
+                OpenTabletDriverLaunched = running,
+                OpenTabletDriverDetail = launched
+                    ? "OpenTabletDriver launched in the tray"
+                    : uiRunning
+                        ? "OpenTabletDriver already running"
+                        : running
+                            ? "OpenTabletDriver daemon is running, but its tray failed to open"
+                            : "OpenTabletDriver launch failed",
             });
         }
         catch (Exception ex)
@@ -1224,6 +1784,13 @@ public partial class App : Application
                 OpenTabletDriverDetail = ex.Message,
             });
         }
+        finally
+        {
+            lock (_otdLifetimeGate)
+            {
+                _otdLaunchInProgress = false;
+            }
+        }
     }
 
     private void ActivateDualModeIfRequested(KumoriSettings settings)
@@ -1235,18 +1802,93 @@ public partial class App : Application
         try
         {
             var wasActive = DualModeService.IsDualModeActive();
-            var sent = DualModeService.Activate(settings);
+            var coordinator = _gameplayWork;
+            var transitionExecuted = false;
+            var suspensionFailed = false;
+            bool ExecuteTransition(Func<bool> transition)
+            {
+                bool RunTransition()
+                {
+                    transitionExecuted = true;
+                    bool ExecuteAndRefreshOpenTabletDriver()
+                    {
+                        var transitioned = transition();
+                        if (transitioned && settings.OpenTabletDriver.AutoLaunch)
+                            OpenTabletDriverService.RefreshAfterDisplayTransition();
+                        return transitioned;
+                    }
+
+                    if (!settings.Display.SuspendOsuDuringDualModeSwitch)
+                        return ExecuteAndRefreshOpenTabletDriver();
+
+                    using var suspension = OsuProcessDetector.TrySuspendRunning();
+                    if (suspension is null)
+                    {
+                        suspensionFailed = true;
+                        Log.Warning("Could not suspend every osu! process for LG dual-mode switching");
+                        return false;
+                    }
+
+                    Log.Information("osu! suspended while dual mode is switched");
+                    return ExecuteAndRefreshOpenTabletDriver();
+                }
+
+                if (coordinator is null)
+                    return RunTransition();
+                if (!coordinator.TryExecuteGameplayExcludingTransition(
+                        _backgroundCts.Token,
+                        RunTransition,
+                        out var result))
+                {
+                    return false;
+                }
+                return result;
+            }
+
+            var activated = DualModeService.Activate(
+                settings,
+                _backgroundCts.Token,
+                ExecuteTransition);
             var active = DualModeService.IsDualModeActive();
+            if (!wasActive && !transitionExecuted && !active)
+            {
+                Log.Information("Skipped automatic dual-mode switch because gameplay began during companion preparation");
+                PublishCompanionStatus(c => c with
+                {
+                    DualModeEnabled = true,
+                    DualModeCommandSent = false,
+                    DualModeActive = false,
+                    DualModeDetail = "Display switch skipped because gameplay started",
+                });
+                return;
+            }
+            if (suspensionFailed && !active)
+            {
+                PublishCompanionStatus(c => c with
+                {
+                    DualModeEnabled = true,
+                    DualModeCommandSent = false,
+                    DualModeActive = false,
+                    DualModeDetail = "Display switch failed because osu! could not be suspended",
+                });
+                return;
+            }
+            Log.Information(
+                "LG dual-mode activation completed: WasActive={WasActive}, Activated={Activated}, Active={Active}, SuspendOsu={SuspendOsu}",
+                wasActive,
+                activated,
+                active,
+                settings.Display.SuspendOsuDuringDualModeSwitch);
             PublishCompanionStatus(c => c with
             {
                 DualModeEnabled = true,
-                DualModeCommandSent = sent,
+                DualModeCommandSent = activated,
                 DualModeActive = active,
                 DualModeDetail = active
                     ? (wasActive ? "Dual mode already active" : "Dual mode active")
-                    : sent ? "Dual mode command sent; waiting for display" : "Dual mode command failed",
+                    : activated ? "Dual mode command sent; waiting for display" : "Dual mode command failed",
             });
-            if (sent && !wasActive && active)
+            if (activated && !wasActive && active)
             {
                 _dualModeActivatedForOsu = true;
             }
@@ -1266,6 +1908,23 @@ public partial class App : Application
     private void PublishCompanionStatus(Func<CompanionStatus, CompanionStatus> update)
     {
         _store?.Update(s => s with { Companions = update(s.Companions) });
+    }
+
+    private void FlushTrayState()
+    {
+        string status;
+        bool endSessionEnabled;
+        lock (_trayStateGate)
+        {
+            if (!_trayStateDirty)
+                return;
+            _trayStateDirty = false;
+            status = _pendingTrayStatus;
+            endSessionEnabled = _pendingTrayEndSessionEnabled;
+        }
+
+        _tray?.UpdateStatus(status);
+        _tray?.SetEndSessionEnabled(endSessionEnabled);
     }
 
     private void UpdateTrayDualModeToggle(bool enabled)
@@ -1292,7 +1951,23 @@ public partial class App : Application
         try
         {
             var wasActive = DualModeService.IsDualModeActive();
-            var sent = DualModeService.Toggle(settings.Current);
+            var sent = false;
+            if (_gameplayWork is { } coordinator
+                && !coordinator.TryExecuteGameplayExcludingTransition(
+                    _backgroundCts.Token,
+                    () => DualModeService.Toggle(settings.Current),
+                    out sent))
+            {
+                PublishCompanionStatus(c => c with
+                {
+                    DualModeDetail = "Manual display switch blocked during gameplay",
+                });
+                return;
+            }
+            else if (_gameplayWork is null)
+            {
+                sent = DualModeService.Toggle(settings.Current);
+            }
             await Task.Delay(750);
             var isActive = DualModeService.IsDualModeActive();
             PublishCompanionStatus(c => c with
@@ -1315,21 +1990,4 @@ public partial class App : Application
         }
     }
 
-    private void DeactivateDualModeIfRequested()
-    {
-        if (!_dualModeActivatedForOsu)
-        {
-            return;
-        }
-        try
-        {
-            var settings = new SettingsService();
-            settings.Load();
-            DualModeService.Deactivate(settings.Current);
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "LG dual-mode restore failed");
-        }
-    }
 }

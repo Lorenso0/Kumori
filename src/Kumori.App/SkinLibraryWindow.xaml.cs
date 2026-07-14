@@ -13,7 +13,6 @@ public partial class SkinLibraryWindow : Window
     public SkinLibraryWindow(SettingsService settings)
     {
         _settings = settings;
-        SkinLibraryService.EnsureValidSelection(_settings);
         InitializeComponent();
         Refresh();
     }
@@ -75,6 +74,11 @@ public partial class SkinLibraryWindow : Window
             StatusText.Text = "Select a skin first.";
             return;
         }
+        if (!row.IsAvailable)
+        {
+            StatusText.Text = "That skin source is unavailable. Kumori kept your selection and will use it again when the path returns.";
+            return;
+        }
         SkinLibraryService.Activate(_settings, row.Path);
         StatusText.Text = $"Active skin: {row.Name}";
     }
@@ -115,6 +119,7 @@ public partial class SkinLibraryWindow : Window
         var row = SkinList.SelectedItem as SkinRow;
         ActivePathText.Text = row?.DisplayPath ?? "";
         DeleteButton.IsEnabled = row?.CanDelete == true;
+        UseButton.IsEnabled = row?.IsAvailable == true;
         ActivePathText.ScrollToHorizontalOffset(0);
     }
 
@@ -128,7 +133,7 @@ public partial class SkinLibraryWindow : Window
 
     private void Refresh(string? selectPath = null)
     {
-        var rows = SkinLibraryService.List()
+        var rows = SkinLibraryService.List(_settings.Current.ReplayViewer.SkinPath)
             .Select(item => new SkinRow(item))
             .ToArray();
         SkinList.ItemsSource = rows;
@@ -137,6 +142,7 @@ public partial class SkinLibraryWindow : Window
         var selected = SkinList.SelectedItem as SkinRow;
         ActivePathText.Text = selected?.DisplayPath ?? "";
         DeleteButton.IsEnabled = selected?.CanDelete == true;
+        UseButton.IsEnabled = selected?.IsAvailable == true;
         if (string.IsNullOrWhiteSpace(StatusText.Text))
         {
             var importedCount = rows.Count(row => row.CanDelete);
@@ -152,10 +158,18 @@ public partial class SkinLibraryWindow : Window
         {
             Name = item.Name;
             Path = item.Path;
-            DisplayPath = item.IsBuiltIn ? "Included with osu!lazer" : item.Path;
-            TypeText = item.IsBuiltIn ? "Built-in" : item.IsFolder ? "Folder" : ".osk";
-            SizeText = item.IsBuiltIn ? "—" : $"{item.SizeBytes / 1_048_576.0:0.0} MB";
-            CanDelete = !item.IsBuiltIn;
+            IsAvailable = item.IsAvailable;
+            DisplayPath = item.IsBuiltIn
+                ? "Included with osu!lazer"
+                : item.IsAvailable ? item.Path : $"{item.Path} (unavailable)";
+            TypeText = item.IsBuiltIn ? "Built-in"
+                : !item.IsAvailable ? "Missing"
+                : !item.IsImported ? "External"
+                : item.IsFolder ? "Folder" : ".osk";
+            SizeText = item.IsBuiltIn || !item.IsAvailable
+                ? "—"
+                : $"{item.SizeBytes / 1_048_576.0:0.0} MB";
+            CanDelete = item.IsImported && item.IsAvailable;
         }
 
         public string Name { get; }
@@ -164,5 +178,6 @@ public partial class SkinLibraryWindow : Window
         public string TypeText { get; }
         public string SizeText { get; }
         public bool CanDelete { get; }
+        public bool IsAvailable { get; }
     }
 }

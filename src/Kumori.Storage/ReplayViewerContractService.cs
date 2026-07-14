@@ -23,6 +23,8 @@ public sealed class ReplayViewerContractService
     {
     }
 
+    public bool IsEnabled => _settings().ReplayViewer.Enabled;
+
     public ReplayViewerContractService(
         AttemptDetailsRepository details,
         MovementRepository movement,
@@ -57,6 +59,7 @@ public sealed class ReplayViewerContractService
             throw new FileNotFoundException("Recovered replay file not found.", replayPath);
         if (!File.Exists(beatmapPath))
             throw new FileNotFoundException("Replay beatmap file not found.", beatmapPath);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var details = _details.GetDetails(attemptId)
             ?? throw new InvalidOperationException($"Attempt {attemptId} was not found.");
@@ -115,9 +118,19 @@ public sealed class ReplayViewerContractService
             }).ToArray(),
         };
 
-        File.WriteAllText(contractPath, JsonSerializer.Serialize(payload, JsonOptions));
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
+            await using (var contract = new FileStream(
+                             contractPath,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.None,
+                             bufferSize: 64 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await JsonSerializer.SerializeAsync(contract, payload, JsonOptions, cancellationToken);
+            }
             await PrepareAnalysisAsync(contractPath, cancellationToken: cancellationToken);
             var prepared = JsonSerializer.Deserialize<PreparedRecoveryAnalysis>(
                 await File.ReadAllTextAsync(analysisPath, cancellationToken), JsonOptions)
@@ -296,6 +309,8 @@ public sealed class ReplayViewerContractService
 
     public Process LaunchViewer(string contractPath, string? viewerExecutable = null)
     {
+        if (!IsEnabled)
+            throw new InvalidOperationException("Replay Analyzer is disabled in Kumori settings.");
         viewerExecutable ??= ResolveViewerExecutable();
         if (!File.Exists(viewerExecutable))
         {
@@ -355,6 +370,8 @@ public sealed class ReplayViewerContractService
         AppendViewerLog($"Preparing analysis for {contractPath}");
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException("Replay analysis process did not start.");
+        try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
+        catch (Exception ex) { Log.Debug(ex, "Could not lower replay analysis process priority"); }
         Task<string> stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -363,15 +380,17 @@ public sealed class ReplayViewerContractService
         {
             await process.WaitForExitAsync(timeout.Token);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             try
             {
                 process.Kill(entireProcessTree: true);
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
             }
+            if (cancellationToken.IsCancellationRequested)
+                throw;
             throw new TimeoutException("Replay judgement simulation did not complete within 45 seconds.");
         }
         string output = await stdout;

@@ -29,23 +29,42 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference = 'Stop';" ^
   "$root = [IO.Path]::GetFullPath('%ROOT%').TrimEnd([IO.Path]::DirectorySeparatorChar);" ^
   "$before = (Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum;" ^
-  "$targets = @(Get-ChildItem -LiteralPath $root -Directory -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('bin','obj','TestResults') });" ^
-  "$targets += @('.vs','dist','artifacts') | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | ForEach-Object { Get-Item -LiteralPath $_ };" ^
-  "$targets = $targets | Sort-Object { $_.FullName.Length } | Select-Object -Unique;" ^
-  "foreach ($target in $targets) {" ^
-  "  $resolved = [IO.Path]::GetFullPath($target.FullName);" ^
+  "$candidatePaths = @(Get-ChildItem -LiteralPath $root -Directory -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('bin','obj','TestResults') } | ForEach-Object { $_.FullName });" ^
+  "$candidatePaths += @('.vs','dist','artifacts') | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Container };" ^
+  "$safePaths = @($candidatePaths | ForEach-Object {" ^
+  "  $resolved = [IO.Path]::GetFullPath($_).TrimEnd([IO.Path]::DirectorySeparatorChar);" ^
   "  if (-not $resolved.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw ('Refusing path outside workspace: ' + $resolved) };" ^
-  "  Write-Host ('Removing ' + $resolved);" ^
-  "  Remove-Item -LiteralPath $resolved -Recurse -Force;" ^
+  "  $resolved" ^
+  "} | Sort-Object Length, @{ Expression = { $_ } } -Unique);" ^
+  "$targets = New-Object System.Collections.Generic.List[string];" ^
+  "foreach ($path in $safePaths) {" ^
+  "  $nested = $false;" ^
+  "  foreach ($parent in $targets) {" ^
+  "    if ($path.StartsWith($parent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { $nested = $true; break }" ^
+  "  };" ^
+  "  if (-not $nested) { $targets.Add($path) }" ^
+  "};" ^
+  "$failures = New-Object System.Collections.Generic.List[string];" ^
+  "foreach ($target in $targets) {" ^
+  "  if (-not (Test-Path -LiteralPath $target)) { continue };" ^
+  "  Write-Host ('Removing ' + $target);" ^
+  "  try { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop }" ^
+  "  catch { $failures.Add($target + ' -- ' + $_.Exception.Message); Write-Warning ('Could not completely remove ' + $target) }" ^
   "};" ^
   "$after = (Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum;" ^
-  "$reclaimed = [Math]::Max(0, $before - $after);" ^
+  "$reclaimed = [Math]::Max([double]0, [double]($before - $after));" ^
   "Write-Host '';" ^
-  "Write-Host ('Cleanup complete. Reclaimed approximately {0:N2} GB.' -f ($reclaimed / 1GB));"
+  "Write-Host ('Cleanup complete. Reclaimed approximately {0:N2} GB.' -f ($reclaimed / 1GB));" ^
+  "if ($failures.Count -gt 0) {" ^
+  "  Write-Host '';" ^
+  "  Write-Warning ('Cleanup left ' + $failures.Count + ' locked or inaccessible target(s):');" ^
+  "  $failures | ForEach-Object { Write-Host ('  ' + $_) };" ^
+  "  exit 2" ^
+  "}"
 
 if errorlevel 1 (
     echo.
-    echo Cleanup failed. Close Kumori, Visual Studio, and any running build or test processes, then try again.
+    echo Cleanup completed with locked leftovers. Close Kumori, Visual Studio, and any running build or test processes, then run it once more.
     exit /b 1
 )
 

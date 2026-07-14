@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using Kumori.Core;
 
 namespace Kumori.App;
 
@@ -8,6 +9,7 @@ internal sealed record ChangelogRelease
 {
     public string Version { get; init; } = string.Empty;
     public string Date { get; init; } = string.Empty;
+    public string DisplayDate => DisplayDateTime.FormatCalendarDate(Date);
     public IReadOnlyList<string> Major { get; init; } = [];
     public IReadOnlyList<string> Features { get; init; } = [];
     public IReadOnlyList<string> Improvements { get; init; } = [];

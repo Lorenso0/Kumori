@@ -6,13 +6,14 @@ namespace Kumori.Core;
 /// <summary>Measures disk space owned by a cache without counting linked source files.</summary>
 public static class CacheStorageUsage
 {
-    public static long GetAdditionalBytes(string path)
+    public static long GetAdditionalBytes(string path, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(path)) return 0;
 
         long total = 0;
         foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 if (File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint)) continue;

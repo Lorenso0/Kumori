@@ -30,8 +30,10 @@ public sealed class SessionTracker
 
     public bool HasSession => _hasSession;
 
-    public sealed record Frame
+    public readonly record struct Frame
     {
+        public Frame() { }
+
         public double WallTime { get; init; }
         public double MonoTime { get; init; }
         public bool IsStandardMode { get; init; } = true;

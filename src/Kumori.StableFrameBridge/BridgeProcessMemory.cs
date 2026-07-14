@@ -26,6 +26,15 @@ public sealed class ProcessMemory : IDisposable
     public nint ReadIntPtr(nint address) => (nint)BitConverter.ToInt64(Read(address, 8));
     public byte[] ReadBytes(nint address, int count) => Read(address, count);
 
+    public void ReadBytes(nint address, byte[] buffer, int count)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        if ((uint)count > (uint)buffer.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        if (!ReadProcessMemory(_handle, address, buffer, count, out var bytesRead) || bytesRead != count)
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+    }
+
     public IEnumerable<MemoryRegion> Regions()
     {
         nint address = 0x10000;

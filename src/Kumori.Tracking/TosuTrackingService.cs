@@ -15,6 +15,10 @@ public sealed class TosuTrackingService : IAsyncDisposable
 {
     private static readonly TimeSpan StaleThreshold = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HealthTickInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan StatePublishInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan MediaIdleDelay = TimeSpan.FromSeconds(2);
+    private const int MaxPendingMediaMaps = 8;
+    private const int MaxRememberedMediaMaps = 512;
 
     private readonly AppStateStore _store;
     private readonly WebSocketPacketSource _source;
@@ -26,10 +30,23 @@ public sealed class TosuTrackingService : IAsyncDisposable
     private readonly IReadOnlyList<string> _fallbackMediaMirrors;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _trackingGate = new();
+    private readonly object _statePublishGate = new();
+    private readonly object _mediaGate = new();
     private Task? _runTask;
     private Task? _healthTask;
+    private Task? _statePublishTask;
+    private Task? _mediaCacheTask;
     private volatile bool _connected;
     private readonly HashSet<string> _cachedMediaKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _cachedMediaOrder = new();
+    private readonly Queue<string> _pendingMediaOrder = new();
+    private readonly Dictionary<string, TosuSnapshot> _pendingMedia = new(StringComparer.OrdinalIgnoreCase);
+    private TosuSnapshot? _pendingStateSnapshot;
+    private string? _mediaInFlightKey;
+    private CancellationTokenSource? _mediaWorkCts;
+    private volatile bool _gameplayActive;
+    private long _stateEpoch;
+    private OsuClientKind _lastObservedClientKind;
 
     public event Action<OsuClientKind>? ClientKindObserved;
 
@@ -61,51 +78,74 @@ public sealed class TosuTrackingService : IAsyncDisposable
     {
         _runTask = Task.Run(() => _client.RunAsync(_source, _cts.Token));
         _healthTask = Task.Run(HealthLoopAsync);
+        _statePublishTask = Task.Run(PublishStateLoopAsync);
     }
 
     private void OnConnected()
     {
-        _connected = true;
-        _store.Update(s => s with
+        long epoch;
+        lock (_statePublishGate)
         {
-            Tracking = s.Tracking with
+            _connected = true;
+            epoch = Interlocked.Increment(ref _stateEpoch);
+        }
+        _store.Update(s => Volatile.Read(ref _stateEpoch) == epoch && _connected
+            ? s with
             {
-                TosuConnected = true,
-                Health = HealthLevel.Ok,
-                Detail = null,
-            },
-        });
+                Tracking = s.Tracking with
+                {
+                    TosuConnected = true,
+                    Health = HealthLevel.Ok,
+                    Detail = null,
+                },
+            }
+            : s);
     }
 
     private void OnDisconnected(string? reason)
     {
-        _connected = false;
-        _store.Update(s => s with
+        long epoch;
+        lock (_statePublishGate)
         {
-            Tracking = s.Tracking with
+            _connected = false;
+            _pendingStateSnapshot = null;
+            epoch = Interlocked.Increment(ref _stateEpoch);
+        }
+        _store.Update(s => Volatile.Read(ref _stateEpoch) == epoch
+            ? s with
             {
-                TosuConnected = false,
-                CurrentBeatmap = null,
-                Health = HealthLevel.Error,
-                Detail = reason is null ? "tosu not reachable" : $"tosu: {reason}",
-            },
-        });
+                Tracking = s.Tracking with
+                {
+                    TosuConnected = false,
+                    CurrentBeatmap = null,
+                    Health = HealthLevel.Error,
+                    Detail = reason is null ? "tosu not reachable" : $"tosu: {reason}",
+                },
+            }
+            : s);
     }
 
     private void OnSnapshot(TosuSnapshot snapshot)
     {
+        // This must be the first snapshot-side action. Packet recording is
+        // developer-only, but even its below-normal worker must be excluded
+        // from gameplay before any persistence or UI consumer sees the frame.
+        _source.SetGameplayActive(snapshot.IsPlaying);
+
         try
         {
             // Profile data is independent of gameplay state. Persist it before
             // the attempt tracker opens an attempt so that it becomes its baseline.
             _profileTelemetry?.Ingest(snapshot);
-            if (snapshot.ClientKind != OsuClientKind.Unknown)
+            if (snapshot.ClientKind != OsuClientKind.Unknown
+                && snapshot.ClientKind != _lastObservedClientKind)
             {
                 ClientKindObserved?.Invoke(snapshot.ClientKind);
+                _lastObservedClientKind = snapshot.ClientKind;
             }
+            QueueMediaCache(snapshot);
             if (snapshot.IsStandardMode)
             {
-                CacheMedia(snapshot);
                 lock (_trackingGate)
                 {
                     _sessionTracker?.Ingest(TrackingFrameMapper.ToSessionFrame(snapshot));
@@ -116,29 +156,29 @@ public sealed class TosuTrackingService : IAsyncDisposable
         catch (Exception ex)
         {
             Log.Error(ex, "Tracking persistence failed for a tosu packet; continuing with later packets");
-            _store.Update(s => s with
+            long epoch;
+            lock (_statePublishGate)
             {
-                Tracking = s.Tracking with
+                _pendingStateSnapshot = null;
+                epoch = Interlocked.Increment(ref _stateEpoch);
+            }
+            _store.Update(s => Volatile.Read(ref _stateEpoch) == epoch
+                ? s with
                 {
-                    Health = HealthLevel.Error,
-                    Detail = $"tracking save failed: {ex.Message}",
-                },
-            });
+                    Tracking = s.Tracking with
+                    {
+                        Health = HealthLevel.Error,
+                        Detail = $"tracking save failed: {ex.Message}",
+                    },
+                }
+                : s);
             return;
         }
 
-        _store.Update(s => s with
+        lock (_statePublishGate)
         {
-            Tracking = s.Tracking with
-            {
-                TosuConnected = true,
-                CurrentBeatmap = snapshot.BeatmapDisplay,
-                LastPacketAgeSeconds = 0,
-                Health = HealthLevel.Ok,
-                Detail = snapshot.IsPlaying ? "playing" : snapshot.State,
-                LatestTelemetry = ToTelemetry(snapshot),
-            },
-        });
+            _pendingStateSnapshot = snapshot;
+        }
     }
 
     private static TosuTelemetry ToTelemetry(TosuSnapshot snapshot) => new()
@@ -183,34 +223,190 @@ public sealed class TosuTrackingService : IAsyncDisposable
         UnstableRate = snapshot.Play.UnstableRate,
     };
 
-    private void CacheMedia(TosuSnapshot snapshot)
+    private async Task PublishStateLoopAsync()
     {
-        if (snapshot.Media is not { } media)
+        using var timer = new PeriodicTimer(StatePublishInterval);
+        try
         {
-            return;
-        }
-        // Stable owns durable, directly-addressable files in its Songs folder.
-        // AttemptSqliteSink persists those paths for later replay analysis, so
-        // copying the map, audio, background and samples into Kumori is wasteful.
-        if (snapshot.ClientKind == OsuClientKind.Stable)
-        {
-            return;
-        }
-
-        var key = snapshot.Checksum ?? snapshot.BeatmapId?.ToString() ?? snapshot.BeatmapIdentity;
-        lock (_cachedMediaKeys)
-        {
-            if (!_cachedMediaKeys.Add(key))
+            while (await timer.WaitForNextTickAsync(_cts.Token))
             {
-                return;
+                TosuSnapshot snapshot;
+                long epoch;
+                lock (_statePublishGate)
+                {
+                    if (!_connected || _pendingStateSnapshot is not { } pending)
+                    {
+                        continue;
+                    }
+
+                    snapshot = pending;
+                    _pendingStateSnapshot = null;
+                    epoch = _stateEpoch;
+                }
+                // AppStateStore invokes subscribers synchronously. Keep those
+                // callbacks outside the service gate while the epoch check
+                // still prevents a stale publish from racing a disconnect.
+                _store.Update(s => Volatile.Read(ref _stateEpoch) == epoch && _connected
+                    ? s with
+                    {
+                        Tracking = s.Tracking with
+                        {
+                            TosuConnected = true,
+                            CurrentBeatmap = snapshot.BeatmapDisplay,
+                            LastPacketAgeSeconds = 0,
+                            Health = HealthLevel.Ok,
+                            Detail = snapshot.IsPlaying ? "playing" : snapshot.State,
+                            LatestTelemetry = ToTelemetry(snapshot),
+                        },
+                    }
+                    : s);
+            }
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+        {
+            // Normal service shutdown.
+        }
+    }
+
+    private void QueueMediaCache(TosuSnapshot snapshot)
+    {
+        // The transition packet already canceled any idle media worker and
+        // queued this map. Continuous gameplay packets need no media lock,
+        // dictionary lookup, or key construction at all.
+        if (snapshot.IsPlaying && _gameplayActive)
+            return;
+
+        CancellationTokenSource? mediaWorkToCancel = null;
+        string? droppedMediaKey = null;
+        lock (_mediaGate)
+        {
+            var wasPlaying = _gameplayActive;
+            _gameplayActive = snapshot.IsPlaying;
+            if (_gameplayActive && !wasPlaying)
+            {
+                // A retry or new map always wins over optional media work.
+                mediaWorkToCancel = _mediaWorkCts;
+            }
+
+            if (snapshot.IsStandardMode
+                && snapshot.ClientKind != OsuClientKind.Stable
+                && snapshot.Media is not null)
+            {
+                var key = MediaKey(snapshot);
+                if (!_cachedMediaKeys.Contains(key)
+                    && !string.Equals(_mediaInFlightKey, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (_pendingMedia.ContainsKey(key))
+                    {
+                        _pendingMedia[key] = snapshot;
+                    }
+                    else
+                    {
+                        while (_pendingMedia.Count >= MaxPendingMediaMaps
+                               && _pendingMediaOrder.TryDequeue(out var droppedKey))
+                        {
+                            if (_pendingMedia.Remove(droppedKey))
+                            {
+                                droppedMediaKey = droppedKey;
+                                break;
+                            }
+                        }
+
+                        _pendingMedia[key] = snapshot;
+                        _pendingMediaOrder.Enqueue(key);
+                    }
+                }
+            }
+
+            if (!_gameplayActive)
+            {
+                TryStartMediaCacheWorkerUnderLock();
             }
         }
 
-        _ = Task.Run(() =>
+        if (droppedMediaKey is not null)
+            Log.Warning("Dropping deferred media cache request for {CacheKey}; queue is full", droppedMediaKey);
+        if (mediaWorkToCancel is not null)
         {
-            try
+            // Never run cancellation callbacks synchronously on the packet
+            // thread (or while holding _mediaGate).
+            _ = CancelMediaWorkAsync(mediaWorkToCancel);
+        }
+    }
+
+    private void TryStartMediaCacheWorkerUnderLock()
+    {
+        if (_gameplayActive
+            || _mediaCacheTask is not null
+            || _pendingMedia.Count == 0
+            || _cts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var workerCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        _mediaWorkCts = workerCts;
+        _mediaCacheTask = Task.Run(() => MediaCacheLoopAsync(workerCts));
+    }
+
+    private async Task MediaCacheLoopAsync(CancellationTokenSource workerCts)
+    {
+        TosuSnapshot? inFlightSnapshot = null;
+        string? inFlightKey = null;
+        // Stable owns durable, directly-addressable files in its Songs folder.
+        // AttemptSqliteSink persists those paths for later replay analysis, so
+        // copying the map, audio, background and samples into Kumori is wasteful.
+        try
+        {
+            while (true)
             {
-                var cached = TosuMediaCache.Cache(media, _primaryMediaMirror, _fallbackMediaMirrors);
+                await Task.Delay(MediaIdleDelay, workerCts.Token);
+
+                lock (_mediaGate)
+                {
+                    if (_gameplayActive)
+                    {
+                        return;
+                    }
+
+                    while (_pendingMediaOrder.TryDequeue(out var key))
+                    {
+                        if (!_pendingMedia.Remove(key, out var candidate))
+                        {
+                            continue;
+                        }
+                        if (_cachedMediaKeys.Contains(key))
+                        {
+                            continue;
+                        }
+
+                        inFlightKey = key;
+                        inFlightSnapshot = candidate;
+                        _mediaInFlightKey = key;
+                        break;
+                    }
+                }
+
+                if (inFlightSnapshot?.Media is not { } media || inFlightKey is null)
+                {
+                    return;
+                }
+
+                var cached = TosuMediaCache.Cache(
+                    media,
+                    _primaryMediaMirror,
+                    _fallbackMediaMirrors,
+                    workerCts.Token);
+                workerCts.Token.ThrowIfCancellationRequested();
+
+                lock (_mediaGate)
+                {
+                    MarkMediaCachedUnderLock(inFlightKey);
+                    _mediaInFlightKey = null;
+                    inFlightKey = null;
+                    inFlightSnapshot = null;
+                }
+
                 if (cached is not null)
                 {
                     _store.Update(s => s with
@@ -226,19 +422,87 @@ public sealed class TosuTrackingService : IAsyncDisposable
                     });
                 }
             }
-            catch (Exception ex)
+        }
+        catch (OperationCanceledException) when (workerCts.IsCancellationRequested)
+        {
+            // Gameplay resumed or the service is shutting down. Requeue the
+            // interrupted map so a later idle window can finish it.
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Unexpected tosu media cache failure for {Beatmap}", inFlightSnapshot?.BeatmapDisplay);
+            _store.Update(s => s with
             {
-                Log.Warning(ex, "Unexpected tosu media cache failure for {Beatmap}", snapshot.BeatmapDisplay);
-                _store.Update(s => s with
+                Media = s.Media with
                 {
-                    Media = s.Media with
-                    {
-                        Mirror = _primaryMediaMirror,
-                        LastError = ex.Message,
-                    },
-                });
+                    Mirror = _primaryMediaMirror,
+                    LastError = ex.Message,
+                },
+            });
+        }
+        finally
+        {
+            var shouldRestart = false;
+            lock (_mediaGate)
+            {
+                if (inFlightKey is not null
+                    && inFlightSnapshot is not null
+                    && !_pendingMedia.ContainsKey(inFlightKey)
+                    && !_cachedMediaKeys.Contains(inFlightKey))
+                {
+                    _pendingMedia[inFlightKey] = inFlightSnapshot;
+                    _pendingMediaOrder.Enqueue(inFlightKey);
+                }
+
+                if (string.Equals(_mediaInFlightKey, inFlightKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    _mediaInFlightKey = null;
+                }
+                if (ReferenceEquals(_mediaWorkCts, workerCts))
+                {
+                    _mediaWorkCts = null;
+                    _mediaCacheTask = null;
+                }
+                shouldRestart = !_gameplayActive;
             }
-        });
+
+            workerCts.Dispose();
+            if (shouldRestart)
+            {
+                lock (_mediaGate)
+                {
+                    TryStartMediaCacheWorkerUnderLock();
+                }
+            }
+        }
+    }
+
+    private static async Task CancelMediaWorkAsync(CancellationTokenSource workerCts)
+    {
+        try
+        {
+            await workerCts.CancelAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The worker completed between capture and cancellation.
+        }
+    }
+
+    private static string MediaKey(TosuSnapshot snapshot) =>
+        snapshot.Checksum ?? snapshot.BeatmapIdentity;
+
+    private void MarkMediaCachedUnderLock(string key)
+    {
+        if (!_cachedMediaKeys.Add(key))
+            return;
+
+        _cachedMediaOrder.Enqueue(key);
+        while (_cachedMediaKeys.Count > MaxRememberedMediaMaps
+               && _cachedMediaOrder.TryDequeue(out var expired))
+        {
+            _cachedMediaKeys.Remove(expired);
+        }
     }
 
     /// <summary>Degrades health when packets stop arriving while connected.</summary>
@@ -254,7 +518,7 @@ public sealed class TosuTrackingService : IAsyncDisposable
             {
                 return;
             }
-            if (!_connected || _client.LastPacketMonoTime is not { } last)
+            if (_client.LastPacketMonoTime is not { } last)
             {
                 continue;
             }
@@ -262,9 +526,19 @@ public sealed class TosuTrackingService : IAsyncDisposable
             var age = now - last;
             if (age > StaleThreshold.TotalSeconds)
             {
-                _store.Update(s => s.Tracking.Health == HealthLevel.Degraded
-                    ? s // already degraded: keep snapshot identity, no notify
-                    : s with
+                long epoch;
+                lock (_statePublishGate)
+                {
+                    if (!_connected)
+                    {
+                        continue;
+                    }
+                    epoch = _stateEpoch;
+                }
+                _store.Update(s => Volatile.Read(ref _stateEpoch) == epoch
+                                   && _connected
+                                   && s.Tracking.Health != HealthLevel.Degraded
+                    ? s with
                     {
                         Tracking = s.Tracking with
                         {
@@ -272,7 +546,8 @@ public sealed class TosuTrackingService : IAsyncDisposable
                             Health = HealthLevel.Degraded,
                             Detail = $"no packets for {age:0}s",
                         },
-                    });
+                    }
+                    : s);
             }
         }
     }
@@ -288,7 +563,18 @@ public sealed class TosuTrackingService : IAsyncDisposable
                 _sessionTracker.EndClean(snapshot.WallTime, snapshot.MonoTime);
             }
         }
-        foreach (var task in new[] { _runTask, _healthTask })
+        Task? mediaTask;
+        CancellationTokenSource? mediaWorkCts;
+        lock (_mediaGate)
+        {
+            mediaWorkCts = _mediaWorkCts;
+            mediaTask = _mediaCacheTask;
+        }
+        if (mediaWorkCts is not null)
+        {
+            await CancelMediaWorkAsync(mediaWorkCts);
+        }
+        foreach (var task in new[] { _runTask, _healthTask, _statePublishTask, mediaTask })
         {
             if (task is not null)
             {

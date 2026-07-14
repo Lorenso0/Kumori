@@ -47,6 +47,7 @@ foreach (var fixture in files)
         var sink = new AttemptSqliteSink(new SqliteConnectionFactory(tempDb, readOnly: false));
         var runner = new TrackingReplayRunner(new AttemptTracker(sink), new SessionTracker(sink));
         await runner.RunAsync(new FixturePacketSource(fixture));
+        await sink.FlushPendingPersistenceAsync();
 
         var expected = AttemptRow.ReadWindow(realDb, window.StartWall, window.EndWall);
         var actual = AttemptRow.ReadAll(tempDb);

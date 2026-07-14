@@ -21,7 +21,14 @@ namespace Kumori.Tracking;
 /// </summary>
 public sealed class JudgementCapture
 {
-    private readonly Dictionary<string, double> _state = new();
+    private bool _hitCountersSeeded;
+    private double _hit300;
+    private double _hit100;
+    private double _hit50;
+    private double _miss;
+    private double _sliderBreak;
+    private double _combo;
+    private double _ppPeak;
 
     public sealed record CapturedEvent(string EventType, double Value, string DataJson);
 
@@ -51,100 +58,49 @@ public sealed class JudgementCapture
     }
 
     /// <summary>Reset per attempt, exactly like TosuTracker._event_state.</summary>
-    public void Reset() => _state.Clear();
-
-    public List<CapturedEvent> CaptureCritical(PlayValues current)
+    public void Reset()
     {
-        var events = new List<CapturedEvent>();
-        var values = new Dictionary<string, double>
-        {
-            ["hit_300"] = current.Hit300,
-            ["hit_100"] = current.Hit100,
-            ["hit_50"] = current.Hit50,
-            ["miss"] = current.Miss,
-            ["slider_break"] = current.SliderBreak,
-        };
+        _hitCountersSeeded = false;
+        _hit300 = _hit100 = _hit50 = _miss = _sliderBreak = _combo = _ppPeak = 0;
+    }
 
-        foreach (var eventType in new[] { "hit_100", "hit_50" })
+    public IReadOnlyList<CapturedEvent> CaptureCritical(PlayValues current)
+    {
+        if (!_hitCountersSeeded)
         {
-            var value = values[eventType];
-            var previous = _state.TryGetValue(eventType, out var p) ? p : value;
-            if (value > previous)
-            {
-                events.Add(new CapturedEvent(
-                    eventType,
-                    value,
-                    JsonSerializer.Serialize(new { delta = (int)(value - previous) })));
-            }
-            _state[eventType] = value;
+            SeedHitCounters(current);
+            return Array.Empty<CapturedEvent>();
         }
 
-        foreach (var eventType in new[] { "miss", "slider_break" })
-        {
-            var value = values[eventType];
-            var previous = _state.TryGetValue(eventType, out var p) ? p : value;
-            if (value > previous)
-            {
-                for (var count = 0; count < (int)(value - previous); count++)
-                {
-                    events.Add(new CapturedEvent(eventType, previous + count + 1, "{}"));
-                }
-            }
-            _state[eventType] = value;
-        }
+        List<CapturedEvent>? events = null;
+        AddCumulative(ref events, "hit_100", current.Hit100, _hit100);
+        AddCumulative(ref events, "hit_50", current.Hit50, _hit50);
+        AddPerIncrement(ref events, "miss", current.Miss, _miss);
+        AddPerIncrement(ref events, "slider_break", current.SliderBreak, _sliderBreak);
 
-        _state["hit_300"] = values["hit_300"];
-        return events;
+        SeedHitCounters(current);
+        return events is null ? Array.Empty<CapturedEvent>() : events;
     }
 
     public List<CapturedEvent> Capture(PlayValues current, bool includeCheckpoint = true)
     {
         var events = new List<CapturedEvent>();
-        var values = new Dictionary<string, double>
+        if (!_hitCountersSeeded)
         {
-            ["hit_300"] = current.Hit300,
-            ["hit_100"] = current.Hit100,
-            ["hit_50"] = current.Hit50,
-            ["miss"] = current.Miss,
-            ["slider_break"] = current.SliderBreak,
-            ["combo"] = current.Combo,
-            ["pp_peak"] = current.PpPeak,
-        };
-
-        foreach (var eventType in new[] { "hit_100", "hit_50" })
+            SeedHitCounters(current);
+        }
+        else
         {
-            // Python: previous = state.get(et, current[et]) â€” first sight seeds silently.
-            var previous = _state.TryGetValue(eventType, out var p) ? p : values[eventType];
-            if (values[eventType] > previous)
-            {
-                events.Add(new CapturedEvent(
-                    eventType,
-                    values[eventType],
-                    JsonSerializer.Serialize(new { delta = (int)(values[eventType] - previous) })));
-            }
+            AddCumulative(events, "hit_100", current.Hit100, _hit100);
+            AddCumulative(events, "hit_50", current.Hit50, _hit50);
+            AddPerIncrement(events, "miss", current.Miss, _miss);
+            AddPerIncrement(events, "slider_break", current.SliderBreak, _sliderBreak);
         }
 
-        foreach (var eventType in new[] { "miss", "slider_break" })
-        {
-            var previous = _state.TryGetValue(eventType, out var p) ? p : values[eventType];
-            if (values[eventType] > previous)
-            {
-                for (var count = 0; count < (int)(values[eventType] - previous); count++)
-                {
-                    events.Add(new CapturedEvent(eventType, previous + count + 1, "{}"));
-                }
-            }
-        }
-
-        foreach (var eventType in new[] { "combo", "pp_peak" })
-        {
-            // Python: previous = state.get(et, 0) â€” peaks seed at zero.
-            var previous = _state.TryGetValue(eventType, out var p) ? p : 0.0;
-            if (values[eventType] > previous)
-            {
-                events.Add(new CapturedEvent($"new_{eventType}", values[eventType], "{}"));
-            }
-        }
+        if (current.Combo > _combo)
+            events.Add(new CapturedEvent("new_combo", current.Combo, "{}"));
+        if (current.PpPeak > _ppPeak)
+            events.Add(new CapturedEvent("new_pp_peak", current.PpPeak, "{}"));
 
         if (includeCheckpoint)
         {
@@ -165,12 +121,64 @@ public sealed class JudgementCapture
                 })));
         }
 
-        // Python: self._event_state = current â€” full overwrite, including decreases.
-        _state.Clear();
-        foreach (var (key, value) in values)
-        {
-            _state[key] = value;
-        }
+        SeedHitCounters(current);
+        _combo = current.Combo;
+        _ppPeak = current.PpPeak;
         return events;
+    }
+
+    private void SeedHitCounters(PlayValues current)
+    {
+        _hitCountersSeeded = true;
+        _hit300 = current.Hit300;
+        _hit100 = current.Hit100;
+        _hit50 = current.Hit50;
+        _miss = current.Miss;
+        _sliderBreak = current.SliderBreak;
+    }
+
+    private static void AddCumulative(
+        ref List<CapturedEvent>? events,
+        string eventType,
+        double value,
+        double previous)
+    {
+        if (value <= previous)
+            return;
+        events ??= [];
+        AddCumulative(events, eventType, value, previous);
+    }
+
+    private static void AddCumulative(
+        List<CapturedEvent> events,
+        string eventType,
+        double value,
+        double previous)
+    {
+        if (value > previous)
+            events.Add(new CapturedEvent(eventType, value,
+                JsonSerializer.Serialize(new { delta = (int)(value - previous) })));
+    }
+
+    private static void AddPerIncrement(
+        ref List<CapturedEvent>? events,
+        string eventType,
+        double value,
+        double previous)
+    {
+        if (value <= previous)
+            return;
+        events ??= [];
+        AddPerIncrement(events, eventType, value, previous);
+    }
+
+    private static void AddPerIncrement(
+        List<CapturedEvent> events,
+        string eventType,
+        double value,
+        double previous)
+    {
+        for (var count = 0; count < (int)(value - previous); count++)
+            events.Add(new CapturedEvent(eventType, previous + count + 1, "{}"));
     }
 }

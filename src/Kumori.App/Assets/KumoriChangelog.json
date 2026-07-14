@@ -1,5 +1,44 @@
 [
   {
+    "version": "0.4.0",
+    "date": "2026-07-14",
+    "major": [
+      "Reworked Kumori's gameplay pipeline to keep blocking and unbounded work off gameplay-critical threads, targeting cursor freezes and latency spikes during play"
+    ],
+    "improvements": [
+      "tosu packet parsing and attempt tracking now use bounded queues, bounded caches, and allocation-light in-memory processing",
+      "osu!stable and osu!lazer replay discovery and capture now run on isolated low-priority workers, using bounded discovery and deferring nonessential work until gameplay is idle",
+      "Database writes, replay archiving, compression, backups, recovery, media loading, dashboard hydration, and diagnostics now run on cancellable background paths",
+      "Standardized every user-visible date to dd/MM/yyyy while retaining ISO timestamps for storage, logs, and serialized data",
+      "Update checks now follow canonical GitHub release redirects without relying on GitHub API requests",
+      "Cut GitHub release wait time by validating main once while the versioned Windows package builds in parallel",
+      "Moved the osu!stable accuracy notice into the Replay Analyzer timeline so skin accuracy HUDs remain unobstructed"
+    ],
+    "fixes": [
+      "Removed synchronous SQLite, file, process, display, and native memory-scan work from gameplay-critical threads",
+      "Made OpenTabletDriver start in the tray and follow Kumori's lifetime, automatically refreshing its cached monitor layout after resolution changes without overwriting saved OTD settings",
+      "Required tosu restarts after recovered results now wait until gameplay is safe, coalesce duplicate requests, and retry until tracking is restored",
+      "Made deferred attempt persistence ordered, retryable, and interruption-safe to avoid incomplete or duplicated play data",
+      "Hardened stable and lazer replay finalization, persistence, recovery, and cancellation against shutdown stalls, partial output, and ordering races",
+      "Preserved exact recovered accuracy and hit-result data when repairing incomplete attempts",
+      "Restored always-on osu!lazer replay pre-reading before tosu client detection, using vanilla tosu's current process and natively validated GameBase address with bounded low-priority discovery as a fallback",
+      "Cleared stale replay counters, process details, and persisted-replay diagnostics between runs and attempts so the capture window reports only current data",
+      "Reset late asynchronous replay-detection state after gameplay so it cannot suppress the next genuine play",
+      "Restored immediate database hydration and post-commit dashboard and inspector refreshes without repeated maintenance-queue delays",
+      "Kept tosu at normal process priority and capped localhost reconnect delays so live tracking resumes promptly after launch or a mandatory recovery restart",
+      "Made replay writes wait for their durable attempt row, retain captured frames across transient failures, and drain safely during shutdown",
+      "Reduced startup and automatic-refresh database work by loading visible history first and aggregating only the sessions shown on that page",
+      "Made workspace cleanup continue past locked outputs, safely collapse nested build targets, and report reclaimed sizes above 2 GB correctly",
+      "Made release publishing restore every project after a clean workspace, including the win-x86 stable replay bridge",
+      "Corrected recovered plays that retained tosu's placeholder 100% accuracy and added startup repair for already-saved affected attempts",
+      "Kept osu!stable's prewarmed memory bridge alive across empty pre-play discards and locked validated replay lists sooner so short or failed plays retain cursor data",
+      "Prevented osu!lazer's skin importer from consuming Kumori's library archives and stopped unavailable skin paths from silently changing the selected default",
+      "Moved the stable-result accuracy notice into a dedicated row beneath the Replay Analyzer seeker",
+      "Restored osu!stable memory capture by dynamically rediscovering the live replay list instead of relying on changing memory addresses or obfuscated type names",
+      "Limited osu!stable fallback heap discovery to active attempts in a non-suspending, below-normal-priority bridge, stopping discovery as soon as the actively growing replay list is locked"
+    ]
+  },
+  {
     "version": "0.3.1",
     "date": "2026-07-13",
     "major": [

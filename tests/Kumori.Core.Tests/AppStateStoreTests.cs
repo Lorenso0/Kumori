@@ -33,4 +33,16 @@ public class AppStateStoreTests
 
         Assert.False(notified);
     }
+
+    [Fact]
+    public void Update_StructurallyEqualSnapshot_DoesNotNotify()
+    {
+        var store = new AppStateStore();
+        var notified = false;
+        store.StateChanged += _ => notified = true;
+
+        store.Update(s => s with { Tracking = s.Tracking with { Health = HealthLevel.Unknown } });
+
+        Assert.False(notified);
+    }
 }

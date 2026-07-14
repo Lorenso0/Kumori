@@ -29,14 +29,20 @@ public sealed class SkinLibraryServiceTests : IDisposable
     }
 
     [Fact]
-    public void EnsureValidSelection_ClearsMissingCustomSkin()
+    public void List_PreservesAndShowsUnavailableConfiguredSelection()
     {
         var settings = CreateSettings();
-        settings.Update(value => value.ReplayViewer.SkinPath = Path.Combine(root, "missing.osk"));
+        string missing = Path.Combine(root, "missing.osk");
+        settings.Update(value => value.ReplayViewer.SkinPath = missing);
 
-        Assert.True(SkinLibraryService.EnsureValidSelection(settings));
-        Assert.Empty(settings.Current.ReplayViewer.SkinPath);
-        Assert.False(SkinLibraryService.EnsureValidSelection(settings));
+        var items = SkinLibraryService.ListFromDirectory(
+            Path.Combine(root, "library"),
+            settings.Current.ReplayViewer.SkinPath);
+
+        var selected = Assert.Single(items, item => item.Path == missing);
+        Assert.False(selected.IsAvailable);
+        Assert.False(selected.IsImported);
+        Assert.Equal(missing, settings.Current.ReplayViewer.SkinPath);
     }
 
     private SettingsService CreateSettings()

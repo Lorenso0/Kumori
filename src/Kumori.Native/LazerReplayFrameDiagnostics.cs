@@ -6,6 +6,22 @@ namespace Kumori.Native;
 public static class LazerReplayFrameDiagnostics
 {
     private static readonly object Gate = new();
+    private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(1);
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly System.Threading.Timer FlushTimer;
+    private static LazerReplayFrameStatus current = LoadFromDisk();
+    private static bool dirty;
+    private static int flushActive;
+
+    static LazerReplayFrameDiagnostics()
+    {
+        FlushTimer = new System.Threading.Timer(
+            static _ => FlushPending(force: false),
+            null,
+            FlushInterval,
+            FlushInterval);
+        AppDomain.CurrentDomain.ProcessExit += static (_, _) => FlushPending(force: true);
+    }
 
     public static string StatusPath => AppPaths.LazerReplayFrameStatusFile;
 
@@ -13,14 +29,23 @@ public static class LazerReplayFrameDiagnostics
     {
         lock (Gate)
         {
-            var status = Load();
-            mutate(status);
-            status.UpdatedAt = DateTimeOffset.UtcNow;
-            Save(status);
+            mutate(current);
+            current.UpdatedAt = DateTimeOffset.UtcNow;
+            dirty = true;
         }
     }
 
     public static LazerReplayFrameStatus Load()
+    {
+        lock (Gate)
+        {
+            // The status object is mutable. Never let a caller mutate the
+            // process-wide snapshot without going through Update().
+            return current with { };
+        }
+    }
+
+    private static LazerReplayFrameStatus LoadFromDisk()
     {
         try
         {
@@ -36,23 +61,55 @@ public static class LazerReplayFrameDiagnostics
         return new LazerReplayFrameStatus();
     }
 
-    private static void Save(LazerReplayFrameStatus status)
+    private static void FlushPending(bool force)
+    {
+        if (Interlocked.Exchange(ref flushActive, 1) != 0)
+            return;
+
+        try
+        {
+            LazerReplayFrameStatus snapshot;
+            lock (Gate)
+            {
+                if (!dirty)
+                    return;
+                if (!force && current.ActiveAttemptId is not null)
+                    return;
+                snapshot = current with { };
+                dirty = false;
+            }
+
+            if (!Save(snapshot))
+            {
+                lock (Gate)
+                    dirty = true;
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref flushActive, 0);
+        }
+    }
+
+    private static bool Save(LazerReplayFrameStatus status)
     {
         string? tmp = null;
         try
         {
             Directory.CreateDirectory(AppPaths.StatusDir);
-            var json = JsonSerializer.Serialize(status, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(status, JsonOptions);
             tmp = Path.Combine(
                 AppPaths.StatusDir,
-                $"{Path.GetFileName(StatusPath)}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
+                $"{Path.GetFileName(StatusPath)}.{Environment.ProcessId}.tmp");
 
             File.WriteAllText(tmp, json);
             File.Move(tmp, StatusPath, overwrite: true);
+            return true;
         }
         catch
         {
             // Diagnostics must never stop capture. The debug window can tolerate a stale file.
+            return false;
         }
         finally
         {

@@ -131,6 +131,17 @@ public sealed class AttemptRepository
     public List<AttemptSummary> GetAttemptsForSession(long sessionId, int limit = 100_000) =>
         GetRecentAttempts(limit: limit, sessionId: sessionId);
 
+    public AttemptSummary? GetAttempt(long attemptId)
+    {
+        if (attemptId < 1 || attemptId == long.MaxValue)
+        {
+            return null;
+        }
+
+        var candidate = GetRecentAttempts(beforeId: attemptId + 1, limit: 1).FirstOrDefault();
+        return candidate?.Id == attemptId ? candidate : null;
+    }
+
     public List<AttemptSummary> GetAttemptsForMap(string mapKey, long? beforeId = null, int limit = 1000) =>
         GetRecentAttempts(beforeId, limit, mapKey: mapKey);
 

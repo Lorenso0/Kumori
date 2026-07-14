@@ -30,9 +30,10 @@ internal partial class KumoriSeekBar : CompositeDrawable
     private static Color4 meh_colour => AdvancedAnalyzerColours.Meh;
     private static Color4 ok_colour => AdvancedAnalyzerColours.Ok;
 
-    private const float bar_height = 46;
+    private const float bar_height = 70;
     private const float bottom_offset = 22;
     private const float track_height = 8;
+    private const float track_bottom_inset = 24;
     private const float marker_lane_height = 16;
 
     /// <summary>Per-kind marker visibility; bind these to persisted config.</summary>
@@ -68,6 +69,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     private FinalHitsContract? finalHits;
     private double? actualAccuracy;
+    private double? stableAccuracyNotice;
     private double? captureEndTime;
     private int framesSeen;
     private bool geometryLogged;
@@ -121,7 +123,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
             Origin = Anchor.BottomLeft,
             RelativeSizeAxes = Axes.X,
             Height = marker_lane_height,
-            Y = -(track_height + 3),
+            Y = -(track_height + 3 + track_bottom_inset),
         };
 
         static Container makeActualLane() => new Container
@@ -130,7 +132,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
             Origin = Anchor.TopLeft,
             RelativeSizeAxes = Axes.X,
             Height = marker_lane_height,
-            Y = -(track_height - 1),
+            Y = -(track_height - 1 + track_bottom_inset),
         };
 
         InternalChildren = new Drawable[]
@@ -156,6 +158,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
                         Origin = Anchor.BottomLeft,
                         RelativeSizeAxes = Axes.X,
                         Height = track_height,
+                        Y = -track_bottom_inset,
                         Masking = true,
                         CornerRadius = track_height / 2,
                         Children = new Drawable[]
@@ -186,7 +189,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
                         Origin = Anchor.Centre,
                         RelativePositionAxes = Axes.X,
                         Size = new Vector2(14),
-                        Y = -track_height / 2,
+                        Y = -track_height / 2 - track_bottom_inset,
                         Colour = Color4.White,
                     },
                     statusText = new SpriteText
@@ -194,8 +197,8 @@ internal partial class KumoriSeekBar : CompositeDrawable
                         Anchor = Anchor.BottomRight,
                         Origin = Anchor.BottomRight,
                         X = -4,
-                        Y = -track_height - 9,
-                        Font = FontUsage.Default.With(size: 13),
+                        Y = -1,
+                        Font = FontUsage.Default.With(size: 12),
                         Alpha = 0,
                     },
                 },
@@ -213,6 +216,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
         ShowMehs.BindValueChanged(v => mehLane.Alpha = v.NewValue ? 1 : 0, true);
         ShowOks.BindValueChanged(v => okLane.Alpha = v.NewValue ? 1 : 0, true);
         ShowSliderBreaks.BindValueChanged(v => sliderBreakLane.Alpha = v.NewValue ? 1 : 0, true);
+        showStableAccuracyNotice();
     }
 
     /// <summary>
@@ -263,6 +267,12 @@ internal partial class KumoriSeekBar : CompositeDrawable
     public void SetFinalHits(FinalHitsContract? hits) => finalHits = hits;
 
     public void SetActualAccuracy(double accuracy) => actualAccuracy = accuracy;
+
+    public void SetStableAccuracyNotice(double accuracy)
+    {
+        stableAccuracyNotice = accuracy;
+        Schedule(showStableAccuracyNotice);
+    }
 
     public void SetCaptureEnd(double? time)
     {
@@ -500,6 +510,17 @@ internal partial class KumoriSeekBar : CompositeDrawable
 
     public static KumoriTimelineMarkerKind? MarkerKindFromHitResult(osu.Game.Rulesets.Scoring.HitResult result)
         => KumoriTimelineMarkers.KindFromHitResult(result);
+
+    private void showStableAccuracyNotice()
+    {
+        if (stableAccuracyNotice is not { } accuracy || statusText == null)
+            return;
+
+        double truncated = Math.Floor(accuracy * 100) / 100;
+        statusText.Text = $"stable result {truncated:0.00}%  |  lazer simulation may differ";
+        statusText.Colour = Color4.White.Opacity(0.72f);
+        statusText.Alpha = 0.85f;
+    }
 
     private void updateComparisonStatus()
     {

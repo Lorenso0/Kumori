@@ -7,4 +7,10 @@ namespace Kumori.Tracking;
 public interface IReplayPlaybackDetector
 {
     bool IsWatchingReplay(OsuClientKind clientKind);
+
+    /// <summary>
+    /// Invalidates a result from the completed gameplay generation. The default
+    /// keeps lightweight/custom detectors source-compatible.
+    /// </summary>
+    void ResetAfterGameplay(OsuClientKind clientKind) { }
 }

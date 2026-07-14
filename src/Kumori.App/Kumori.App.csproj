@@ -18,7 +18,8 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageReference Include="AutoMapper" Version="15.1.1" />
-    <PackageReference Include="Serilog" Version="4.0.1" />
+    <PackageReference Include="Serilog" Version="4.1.0" />
+    <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <!-- Security floors for older transitive references in the osu! dependency graph. -->
     <PackageReference Include="System.Net.Http" Version="4.3.4" />
