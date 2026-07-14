@@ -183,7 +183,7 @@ public sealed class WebSocketPacketSourceTests
         // test runs can briefly starve it while other test hosts compile and
         // execute, so this completion wait must not double as a latency bound.
         // The bounded in-flight gameplay transition is asserted separately.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(1);
         while (DateTime.UtcNow < deadline)
         {
             var path = Directory.Exists(directory)
