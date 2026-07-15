@@ -12,6 +12,7 @@ namespace Kumori.App;
 public partial class DeveloperSettingsWindow : Window
 {
     private readonly SettingsService settings;
+    private string? selectedStartupExecutablePath;
 
     public DeveloperSettingsWindow(SettingsService settings)
     {
@@ -42,13 +43,83 @@ public partial class DeveloperSettingsWindow : Window
             value.Tracking.PacketRecordingEnabled = PacketRecordingEnabled.IsChecked == true;
             value.Developer.ForceReplayRecoveryNextPlay = ForceReplayRecoveryNextPlay.IsChecked == true;
             value.Developer.LogRetentionDays = LogRetentionPolicy.NormalizeDays(retentionDays);
+            if (selectedStartupExecutablePath is not null)
+                value.Startup.ExecutablePath = selectedStartupExecutablePath;
         });
+
+        if (selectedStartupExecutablePath is not null)
+        {
+            try
+            {
+                StartupRegistration.SetEnabled(
+                    settings.Current.Startup.RunAtLogin,
+                    settings.Current.Startup.StartMinimized,
+                    settings.Current.Startup.ExecutablePath);
+            }
+            catch (Exception ex)
+            {
+                ErrorText.Text = $"Could not update Windows startup registration: {ex.Message}";
+                return;
+            }
+        }
+
         CacheActivityLog.ConfigureRotationDays(settings.Current.Developer.LogRetentionDays);
         AppDataOrganizer.PruneLogs(retentionDays: settings.Current.Developer.LogRetentionDays);
         Close();
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void ShowStartupExecutable_Click(object sender, RoutedEventArgs e)
+    {
+        if (selectedStartupExecutablePath is not null)
+        {
+            StartupExecutablePath.Text = selectedStartupExecutablePath;
+            StartupExecutablePath.Visibility = Visibility.Visible;
+            ErrorText.Text = string.Empty;
+            return;
+        }
+
+        try
+        {
+            StartupExecutablePath.Text = StartupRegistration.GetExecutablePath()
+                ?? "Automatic startup is not currently registered.";
+            StartupExecutablePath.Visibility = Visibility.Visible;
+            ErrorText.Text = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            StartupExecutablePath.Visibility = Visibility.Collapsed;
+            ErrorText.Text = $"Could not read Windows startup registration: {ex.Message}";
+        }
+    }
+
+    private void SelectStartupExecutable_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Select the executable to start with Windows",
+                FileName = "Kumori.exe",
+                Filter = "Programs (*.exe)|*.exe",
+                CheckFileExists = true,
+            };
+            // Developer settings is hosted inside MainWindow's workspace and
+            // therefore has no native Window handle of its own to use as owner.
+            if (dialog.ShowDialog() != true)
+                return;
+
+            selectedStartupExecutablePath = dialog.FileName;
+            StartupExecutablePath.Text = dialog.FileName;
+            StartupExecutablePath.Visibility = Visibility.Visible;
+            ErrorText.Text = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            ErrorText.Text = $"Could not open the executable picker: {ex.Message}";
+        }
+    }
 
     private void RefreshCacheLog_Click(object sender, RoutedEventArgs e) => RefreshCacheActivity();
 

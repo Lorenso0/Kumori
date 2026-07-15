@@ -135,6 +135,16 @@ public partial class App : Application
         Themes = new ThemeManager(settings);
         Themes.ApplyCurrent();
         SyncStartupRegistration(settings.Current);
+        var showChangelogRequested = e.Args.Any(argument =>
+            string.Equals(argument, "--show-changelog", StringComparison.Ordinal));
+        var startMinimizedToTray = settings.Current.FirstRunCompleted
+            && settings.Current.Startup.RunAtLogin
+            && settings.Current.Startup.StartMinimized
+            && !showChangelogRequested
+            && e.Args.Any(argument => string.Equals(
+                argument,
+                StartupRegistration.StartMinimizedArgument,
+                StringComparison.Ordinal));
 
         var store = new AppStateStore();
         _store = store;
@@ -154,7 +164,24 @@ public partial class App : Application
         _mainWindow = new MainWindow(viewModel, settings);
         _mainWindow.StateChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         _mainWindow.IsVisibleChanged += (_, _) => ScheduleAvailableUpdatePrompt();
-        _mainWindow.Show();
+        if (startMinimizedToTray)
+        {
+            // Initialize the WPF shell without activating it or flashing a
+            // taskbar button, then leave the running app accessible by tray.
+            _mainWindow.ShowActivated = false;
+            _mainWindow.ShowInTaskbar = false;
+            _mainWindow.WindowState = WindowState.Minimized;
+            _mainWindow.Show();
+            _mainWindow.Hide();
+            _mainWindow.WindowState = WindowState.Normal;
+            _mainWindow.ShowInTaskbar = true;
+            _mainWindow.ShowActivated = true;
+            Log.Information("Kumori started minimized to the system tray");
+        }
+        else
+        {
+            _mainWindow.Show();
+        }
         await Dispatcher.Yield(DispatcherPriority.Loaded);
         TrackBackground(
             RunBelowNormalAsync(
@@ -254,7 +281,7 @@ public partial class App : Application
                 _mainWindow.OpenOnboarding(new WelcomeWindow(settings, store));
             }, DispatcherPriority.ContextIdle);
         }
-        if (e.Args.Any(argument => string.Equals(argument, "--show-changelog", StringComparison.Ordinal)))
+        if (showChangelogRequested)
         {
             _ = Dispatcher.InvokeAsync(
                 () => _mainWindow.OpenWorkspaceTab(new ChangelogWindow(), "Changelog"),
@@ -1367,9 +1394,15 @@ public partial class App : Application
     {
         try
         {
-            if (StartupRegistration.IsEnabled() != settings.Startup.RunAtLogin)
+            if (!StartupRegistration.IsConfigured(
+                    settings.Startup.RunAtLogin,
+                    settings.Startup.StartMinimized,
+                    settings.Startup.ExecutablePath))
             {
-                StartupRegistration.SetEnabled(settings.Startup.RunAtLogin);
+                StartupRegistration.SetEnabled(
+                    settings.Startup.RunAtLogin,
+                    settings.Startup.StartMinimized,
+                    settings.Startup.ExecutablePath);
             }
         }
         catch (Exception ex)

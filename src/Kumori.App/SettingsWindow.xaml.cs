@@ -71,6 +71,7 @@ public partial class SettingsWindow : Window
         SkinPath.Text = s.ReplayViewer.SkinPath;
         PrimaryMirror.Text = s.Media.PrimaryMirror;
         RunAtLogin.IsChecked = s.Startup.RunAtLogin;
+        StartMinimized.IsChecked = s.Startup.StartMinimized;
         DualModeEnabled.IsChecked = s.Display.AutoSwitchDualMode;
         SuspendOsuDuringDualModeSwitch.IsChecked = s.Display.SuspendOsuDuringDualModeSwitch;
         AutomaticBackups.IsChecked = s.Backup.AutomaticEnabled;
@@ -135,6 +136,7 @@ public partial class SettingsWindow : Window
             s.ReplayViewer.SkinPath = SkinPath.Text.Trim();
             s.Media.PrimaryMirror = PrimaryMirror.Text.Trim();
             s.Startup.RunAtLogin = RunAtLogin.IsChecked == true;
+            s.Startup.StartMinimized = StartMinimized.IsChecked == true;
             s.Display.AutoSwitchDualMode = DualModeEnabled.IsChecked == true;
             s.Display.SuspendOsuDuringDualModeSwitch = SuspendOsuDuringDualModeSwitch.IsChecked == true;
             s.Appearance.ThemeId = SelectedThemeId;
@@ -148,7 +150,10 @@ public partial class SettingsWindow : Window
         _themes?.Apply(SelectedThemeId, persist: false);
         try
         {
-            StartupRegistration.SetEnabled(RunAtLogin.IsChecked == true);
+            StartupRegistration.SetEnabled(
+                RunAtLogin.IsChecked == true,
+                StartMinimized.IsChecked == true,
+                _settings.Current.Startup.ExecutablePath);
         }
         catch (Exception ex)
         {
