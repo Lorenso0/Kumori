@@ -91,6 +91,8 @@ public sealed class AttemptTracker
 {
     public const double WriteIntervalSeconds = 1.0;
     public const double MinimumAttemptSeconds = 3.0;
+    public const int MinimumConfigurableAttemptSeconds = 1;
+    public const int MaximumConfigurableAttemptSeconds = 300;
 
     private static readonly HashSet<string> PromotableOutcomes = new()
     {
@@ -100,6 +102,7 @@ public sealed class AttemptTracker
     private readonly IAttemptSink _sink;
     private readonly AttemptStateMachine _machine;
     private readonly JudgementCapture _judgements;
+    private readonly Func<int> _minimumAttemptSecondsProvider;
 
     private Frame? _lastFrame;
     private Frame? _pendingQuitFrame;
@@ -110,15 +113,20 @@ public sealed class AttemptTracker
     private AttemptSnapshot? _latestSnapshot;
     private IReadOnlyList<AttemptMod> _attemptMods = Array.Empty<AttemptMod>();
     private string _attemptModsKey = "NM";
+    private int _attemptMinimumSeconds = (int)MinimumAttemptSeconds;
+    private double? _lastTrustedAccuracy;
+    private bool _placeholderAccuracyDetected;
 
     public AttemptTracker(
         IAttemptSink sink,
         AttemptStateMachine? machine = null,
-        JudgementCapture? judgements = null)
+        JudgementCapture? judgements = null,
+        Func<int>? minimumAttemptSecondsProvider = null)
     {
         _sink = sink;
         _machine = machine ?? new AttemptStateMachine();
         _judgements = judgements ?? new JudgementCapture();
+        _minimumAttemptSecondsProvider = minimumAttemptSecondsProvider ?? (() => (int)MinimumAttemptSeconds);
     }
 
     public readonly record struct Frame
@@ -315,6 +323,12 @@ public sealed class AttemptTracker
     private void StartAttempt(Frame frame)
     {
         _attemptOrdinal++;
+        _attemptMinimumSeconds = Math.Clamp(
+            _minimumAttemptSecondsProvider(),
+            MinimumConfigurableAttemptSeconds,
+            MaximumConfigurableAttemptSeconds);
+        _lastTrustedAccuracy = null;
+        _placeholderAccuracyDetected = false;
         _attemptStartedMonoTime = frame.Packet.MonoTime;
         // Tracking can attach after a play has already started (for example,
         // after startup or a websocket reconnect). Treat the map clock as
@@ -393,7 +407,7 @@ public sealed class AttemptTracker
         // is recovering, which previously turned real plays into
         // `invalid_final_attempt` records. The short-attempt guard and the
         // retry/pre-play discard path still filter spurious transitions.
-        if (snapshot.DurationSeconds < MinimumAttemptSeconds)
+        if (snapshot.DurationSeconds < _attemptMinimumSeconds)
         {
             Log.Information(
                 "Discarding attempt {Ordinal}: {Reason}; duration={DurationSeconds:0.00}s score={Score} hits={N300}/{N100}/{N50}/{Misses} progress={Progress:P1} outcome={Outcome} evidence={Evidence}",
@@ -420,6 +434,9 @@ public sealed class AttemptTracker
             snapshot = snapshot with { Progress = 1 };
             _latestSnapshot = snapshot;
         }
+
+        if (_placeholderAccuracyDetected && !evidence.Contains("accuracy_placeholder_guard", StringComparison.Ordinal))
+            evidence = $"{evidence}:accuracy_placeholder_guard";
 
         if (string.IsNullOrWhiteSpace(snapshot.Grade) &&
             OsuGradeCalculator.Calculate(snapshot, outcome) is { } calculatedGrade)
@@ -468,7 +485,7 @@ public sealed class AttemptTracker
             LiveTimeMs = frame.Packet.LiveTimeMs,
             DurationSeconds = duration,
             Score = frame.Score,
-            Accuracy = frame.Play.Accuracy,
+            Accuracy = TrustedAccuracy(frame),
             Grade = frame.Grade ?? frame.Packet.Grade,
             Pp = frame.Pp,
             FcPp = frame.FcPp,
@@ -497,6 +514,39 @@ public sealed class AttemptTracker
         _latestSnapshot = snapshot;
         return snapshot;
     }
+
+    private double TrustedAccuracy(Frame frame)
+    {
+        var accuracy = frame.Play.Accuracy;
+        if (!double.IsFinite(accuracy))
+        {
+            _placeholderAccuracyDetected = true;
+            return LastTrustedAccuracyOrZero();
+        }
+        accuracy = Math.Clamp(accuracy, 0, 100);
+        var impossiblePerfect = accuracy >= 99.999999
+            && (frame.Play.Hit100 > 0 || frame.Play.Hit50 > 0 || frame.Play.Miss > 0);
+        if (impossiblePerfect)
+        {
+            if (!_placeholderAccuracyDetected)
+            {
+                Log.Warning(
+                    "Ignoring placeholder 100% accuracy for attempt {Ordinal}; hits={N100}/{N50}/{Misses}",
+                    _attemptOrdinal,
+                    frame.Play.Hit100,
+                    frame.Play.Hit50,
+                    frame.Play.Miss);
+            }
+            _placeholderAccuracyDetected = true;
+            return LastTrustedAccuracyOrZero();
+        }
+        if (accuracy > 0)
+            _lastTrustedAccuracy = accuracy;
+        return accuracy;
+    }
+
+    private double LastTrustedAccuracyOrZero() =>
+        _lastTrustedAccuracy is >= 0 and < 99.999999 ? _lastTrustedAccuracy.Value : 0;
 
     private void ClearAttempt(bool decrementOrdinal)
     {

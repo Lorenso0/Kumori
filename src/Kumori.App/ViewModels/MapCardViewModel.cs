@@ -18,7 +18,11 @@ public sealed class MapCardViewModel
         ArtworkSource = row.ArtworkSource;
         PlayCount = ordered.Length;
         BestPp = ordered.Max(attempt => attempt.Pp);
-        BestAccuracy = ordered.Max(attempt => attempt.Accuracy);
+        BestAccuracy = ordered
+            .Where(attempt => string.Equals(attempt.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
+            .Select(attempt => attempt.Accuracy)
+            .DefaultIfEmpty(0)
+            .Max();
         BestCombo = ordered.Max(attempt => attempt.Combo);
         AverageAccuracy = ordered.Average(attempt => attempt.Accuracy);
         AveragePp = ordered.Average(attempt => attempt.Pp);

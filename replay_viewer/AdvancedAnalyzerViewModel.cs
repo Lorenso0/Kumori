@@ -3,11 +3,12 @@ using osu.Framework.Graphics;
 
 namespace Kumori.ReplayViewer;
 
-internal sealed class AdvancedAnalyzerViewModel
+internal sealed class AdvancedAnalyzerViewModel : IDisposable
 {
     private MissAnalysisModel model;
     private readonly KumoriViewerConfig config;
     private int selectedIndex;
+    private readonly List<Action> unbindActions = [];
 
     public BindableBool ShowMisses { get; } = new();
     public BindableBool ShowMehs { get; } = new();
@@ -171,14 +172,60 @@ internal sealed class AdvancedAnalyzerViewModel
 
     private void initialise(BindableBool bindable, KumoriViewerSetting setting)
     {
-        config.BindWith(setting, bindable);
-        bindable.ValueChanged += _ => config.Save();
+        var persisted = config.GetBindable<bool>(setting);
+        bindable.Value = persisted.Value;
+        bool syncing = false;
+        Action<ValueChangedEvent<bool>> persistedChanged = change =>
+        {
+            if (syncing) return;
+            syncing = true;
+            bindable.Value = change.NewValue;
+            syncing = false;
+        };
+        Action<ValueChangedEvent<bool>> localChanged = change =>
+        {
+            if (syncing) return;
+            syncing = true;
+            persisted.Value = change.NewValue;
+            syncing = false;
+            config.Save();
+        };
+        persisted.ValueChanged += persistedChanged;
+        bindable.ValueChanged += localChanged;
+        unbindActions.Add(() =>
+        {
+            persisted.ValueChanged -= persistedChanged;
+            bindable.ValueChanged -= localChanged;
+        });
     }
 
     private void initialise(Bindable<Colour4> bindable, KumoriViewerSetting setting)
     {
-        config.BindWith(setting, bindable);
-        bindable.ValueChanged += _ => config.Save();
+        var persisted = config.GetBindable<Colour4>(setting);
+        bindable.Value = persisted.Value;
+        bool syncing = false;
+        Action<ValueChangedEvent<Colour4>> persistedChanged = change =>
+        {
+            if (syncing) return;
+            syncing = true;
+            bindable.Value = change.NewValue;
+            syncing = false;
+        };
+        Action<ValueChangedEvent<Colour4>> localChanged = change =>
+        {
+            if (syncing) return;
+            syncing = true;
+            persisted.Value = change.NewValue;
+            syncing = false;
+            config.Save();
+        };
+        persisted.ValueChanged += persistedChanged;
+        bindable.ValueChanged += localChanged;
+        unbindActions.Add(() =>
+        {
+            persisted.ValueChanged -= persistedChanged;
+            bindable.ValueChanged -= localChanged;
+        });
     }
 
     private void initialise(BindableDouble bindable, KumoriViewerSetting setting, double min, double max, double precision)
@@ -186,7 +233,37 @@ internal sealed class AdvancedAnalyzerViewModel
         bindable.MinValue = min;
         bindable.MaxValue = max;
         bindable.Precision = precision;
-        config.BindWith(setting, bindable);
-        bindable.ValueChanged += _ => config.Save();
+        var persisted = config.GetBindable<double>(setting);
+        bindable.Value = persisted.Value;
+        bool syncing = false;
+        Action<ValueChangedEvent<double>> persistedChanged = change =>
+        {
+            if (syncing) return;
+            syncing = true;
+            bindable.Value = change.NewValue;
+            syncing = false;
+        };
+        Action<ValueChangedEvent<double>> localChanged = change =>
+        {
+            if (syncing) return;
+            syncing = true;
+            persisted.Value = change.NewValue;
+            syncing = false;
+            config.Save();
+        };
+        persisted.ValueChanged += persistedChanged;
+        bindable.ValueChanged += localChanged;
+        unbindActions.Add(() =>
+        {
+            persisted.ValueChanged -= persistedChanged;
+            bindable.ValueChanged -= localChanged;
+        });
+    }
+
+    public void Dispose()
+    {
+        foreach (var unbind in unbindActions)
+            unbind();
+        unbindActions.Clear();
     }
 }

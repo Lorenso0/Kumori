@@ -42,7 +42,7 @@ public sealed class ModAcronymToIconSourceConverter : IValueConverter
         var image = new BitmapImage();
         image.BeginInit();
         image.CacheOption = BitmapCacheOption.OnLoad;
-        image.UriSource = new Uri($"pack://application:,,,/Assets/ModIcons/{fileName}", UriKind.Absolute);
+        image.UriSource = new Uri($"pack://application:,,,/Kumori;component/Assets/ModIcons/{fileName}", UriKind.Absolute);
         image.EndInit();
 
         var formatted = new FormatConvertedBitmap(image, PixelFormats.Pbgra32, null, 0);

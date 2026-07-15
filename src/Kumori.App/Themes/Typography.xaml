@@ -3,6 +3,7 @@
     <FontFamily x:Key="Font.App">Segoe UI</FontFamily>
 
     <Style TargetType="Window">
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="FontFamily" Value="{StaticResource Font.App}" />
         <Setter Property="Background" Value="{DynamicResource Brush.AppBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
@@ -57,7 +58,7 @@
     </Style>
 
     <Style x:Key="Text.Body" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="12" />
     </Style>
 
     <Style x:Key="Text.RowTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">

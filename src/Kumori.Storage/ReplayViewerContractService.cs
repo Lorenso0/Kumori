@@ -685,6 +685,10 @@ public sealed class ReplayViewerContractService
         {
             Log.Warning(ex, "Could not capture Replay Analyzer output.");
         }
+        finally
+        {
+            process.Dispose();
+        }
     }
 
     private static string ViewerLogPath => AppPaths.ViewerLogFile;

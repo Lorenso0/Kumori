@@ -1,5 +1,31 @@
 [
   {
+    "version": "0.4.1",
+    "date": "2026-07-15",
+    "major": [
+      "Added live tracking reconfiguration and configurable minimum play duration without interrupting an active play"
+    ],
+    "features": [
+      "Added a 1–300 second minimum-play setting to onboarding and Tracking & Capture settings",
+      "Added maintenance preview and cleanup for plays shorter than a chosen duration"
+    ],
+    "improvements": [
+      "Redesigned history score cards with stable sections, osu! mod icons, immediate tooltips, and osu!-web display ordering",
+      "Added detailed Difficulty Adjust tooltips showing the recorded AR, CS, OD, and HP values",
+      "Improved text sizing, keyboard focus outlines, title-bar accessibility, and empty states for Performance and Maps",
+      "Standardized dashboard database and cache size formatting",
+      "Removed release signing while retaining SHA-256 checksums and replay-viewer compatibility validation"
+    ],
+    "fixes": [
+      "Prevented tracking setting changes and maintenance operations from racing active sessions or persistence",
+      "Corrected impossible placeholder accuracy values and limited map-best accuracy to completed plays",
+      "Clarified unfinished-play accuracy in score details without cluttering history rows",
+      "Stopped replay-viewer subscriptions, analyzers, cancellation sources, and child processes from accumulating across reloads and long sessions",
+      "Restored comparison match and drift status evaluation after seeking and replay completion",
+      "Prevented compact interface text from clipping at supported window sizes and display scales"
+    ]
+  },
+  {
     "version": "0.4.0",
     "date": "2026-07-14",
     "major": [

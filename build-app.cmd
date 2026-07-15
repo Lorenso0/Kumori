@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not defined KUMORI_VERSION set KUMORI_VERSION=0.4.0
+if not defined KUMORI_VERSION set KUMORI_VERSION=0.4.1
 
 REM ============================================================
 REM  Kumori WPF app (new .NET solution) build script.
@@ -58,11 +58,6 @@ dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Release -r win-x64 -p
   -o artifacts\viewer-release
 if errorlevel 1 exit /b %errorlevel%
 
-if defined KUMORI_SIGN_CERTIFICATE_BASE64 (
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\Sign-Artifact.ps1 artifacts\viewer-release\Kumori.ReplayViewer.exe
-  if errorlevel 1 exit /b %errorlevel%
-)
-
 powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path 'artifacts\viewer-release').Path, (Join-Path (Resolve-Path 'artifacts').Path 'Kumori.ReplayViewer.zip'), [System.IO.Compression.CompressionLevel]::Optimal, $false)"
 if errorlevel 1 exit /b %errorlevel%
 
@@ -85,11 +80,6 @@ if errorlevel 1 exit /b %errorlevel%
 mkdir dist\app
 copy /Y artifacts\app-publish\Kumori.exe dist\app\Kumori.exe >nul
 if errorlevel 1 exit /b %errorlevel%
-
-if defined KUMORI_SIGN_CERTIFICATE_BASE64 (
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\Sign-Artifact.ps1 dist\app\Kumori.exe
-  if errorlevel 1 exit /b %errorlevel%
-)
 
 echo.
 echo Published to dist\app\Kumori.exe

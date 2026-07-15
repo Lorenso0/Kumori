@@ -510,22 +510,10 @@ public sealed class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
         if (accuracy < 99.999999 || (n100 == 0 && n50 == 0 && misses == 0))
             return false;
 
-        if (!source.TryGetProperty("result_recovery", out var recovery)
-            || recovery.ValueKind != JsonValueKind.Object
-            || !recovery.TryGetProperty("reason", out var reason)
-            || !string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal))
-            return false;
-
-        if (recovery.TryGetProperty("accuracy_source", out var accuracySource)
-            && accuracySource.ValueKind == JsonValueKind.String
-            && string.Equals(accuracySource.GetString(), "replay_or_tosu", StringComparison.Ordinal))
-            return false;
-
-        return recovery.TryGetProperty("fields", out var fields)
-               && fields.ValueKind == JsonValueKind.Array
-               && fields.EnumerateArray().Any(field =>
-                   field.ValueKind == JsonValueKind.String
-                   && field.GetString() is "100" or "50" or "misses");
+        // A perfect value cannot coexist with an explicitly imperfect core
+        // judgement. A checksum-matched replay is the safe authority regardless
+        // of which older persistence path wrote the row.
+        return true;
     }
 
     private static void ReplaceRecoveredJudgementEvents(

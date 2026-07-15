@@ -27,6 +27,7 @@ public sealed class KumoriSettings
     public sealed class TrackingSettings
     {
         public bool Enabled { get; set; } = true;
+        public int MinimumAttemptSeconds { get; set; } = 3;
         public int RetentionDays { get; set; } = 0;
         public bool PacketRecordingEnabled { get; set; } = false;
     }

@@ -1,4 +1,5 @@
 using osu.Framework.Graphics;
+using osu.Framework.Bindables;
 using osu.Game.Overlays.Settings;
 using osu.Game.Screens.Play.PlayerSettings;
 
@@ -10,6 +11,9 @@ namespace Kumori.ReplayViewer;
 /// </summary>
 internal partial class KumoriSeekBarSettings : PlayerSettingsGroup
 {
+    private readonly Bindable<bool> hidden;
+    private readonly Action<ValueChangedEvent<bool>> hiddenChangedHandler;
+
     public KumoriSeekBarSettings(
         KumoriViewerConfig config,
         Action? hiddenChanged = null,
@@ -18,12 +22,13 @@ internal partial class KumoriSeekBarSettings : PlayerSettingsGroup
         Action? openComparisonMenu = null)
         : base("Kumori")
     {
-        var hidden = config.GetBindable<bool>(KumoriViewerSetting.DisableHidden);
-        hidden.ValueChanged += _ =>
+        hidden = config.GetBindable<bool>(KumoriViewerSetting.DisableHidden);
+        hiddenChangedHandler = _ =>
         {
             config.Save();
             hiddenChanged?.Invoke();
         };
+        hidden.ValueChanged += hiddenChangedHandler;
 
         Children = new Drawable[]
         {
@@ -63,5 +68,11 @@ internal partial class KumoriSeekBarSettings : PlayerSettingsGroup
                 Action = openComparisonMenu,
             },
         };
+    }
+
+    protected override void Dispose(bool isDisposing)
+    {
+        hidden.ValueChanged -= hiddenChangedHandler;
+        base.Dispose(isDisposing);
     }
 }

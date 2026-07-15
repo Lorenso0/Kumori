@@ -147,7 +147,7 @@ public partial class MainViewModel : ObservableObject
         _store.StateChanged += OnStateChanged;
     }
 
-    public void SetEndLiveSessionHandler(Func<Task<bool>> handler) => _endLiveSession = handler;
+    public void SetEndLiveSessionHandler(Func<Task<bool>>? handler) => _endLiveSession = handler;
 
     public void SetDashboardRefreshHandler(Action handler) =>
         _dashboardRefreshRequested = handler;
@@ -155,9 +155,12 @@ public partial class MainViewModel : ObservableObject
     public bool IsThumbnailArtwork => SelectedArtworkMode == "Thumbnail cards";
     public string ResultsText => $"{Attempts.Count:N0} results";
     public string ResultsShortText => $"{Attempts.Count:N0}";
+    public bool HasNoPerformanceData => PerformanceDays.Count == 0;
+    public bool HasNoMapData => MapCards.Count == 0;
     public bool CanLaunchTosu => CanStartTosu && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.0"}";
+    private bool CanMaintainTrackingData() => !HasActiveSession;
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.1"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -362,6 +365,7 @@ public partial class MainViewModel : ObservableObject
             {
                 MapCards.Add(new MapCardViewModel(map));
             }
+            OnPropertyChanged(nameof(HasNoMapData));
             _dbBytes = secondary.DbBytes;
             _cacheBytes = secondary.CacheBytes;
             _currentAnalytics = secondary.Analytics;
@@ -406,8 +410,8 @@ public partial class MainViewModel : ObservableObject
         GlobalScoreMetric = analytics.TotalScore.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         var synced = FormatLocalProfileSyncTime(analytics.LastSyncedAt);
         var mediaStatus = _usingLazerRealm
-            ? $"Using Realm ({cacheBytes / 1_048_576.0:0.00} MB Kumori cache)"
-            : $"Cache {cacheBytes / 1_048_576.0:0.00} MB";
+            ? Invariant($"Using Realm ({cacheBytes / 1_048_576.0:0.0} MB Kumori cache)")
+            : Invariant($"Cache {cacheBytes / 1_048_576.0:0.0} MB");
         SyncLine = Invariant($"Profile synced {synced}  ·  DB {dbBytes / 1_048_576.0:0.0} MB  ·  {mediaStatus}");
 
         var first = page.FirstOrDefault();
@@ -424,6 +428,7 @@ public partial class MainViewModel : ObservableObject
         {
             PerformanceDays.Add(new PerformanceDayViewModel(trend));
         }
+        OnPropertyChanged(nameof(HasNoPerformanceData));
     }
 
     private static string FormatPlaytime(double seconds)
@@ -721,7 +726,7 @@ public partial class MainViewModel : ObservableObject
         HistoryStatus = "Beatmap cache cleared";
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMaintainTrackingData))]
     private async Task DeleteEntriesBeforeAsync()
     {
         var value = KumoriDialog.Input(
@@ -752,7 +757,7 @@ public partial class MainViewModel : ObservableObject
         await ReloadFirstPageAsync();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMaintainTrackingData))]
     private async Task DeleteAllTrackingDataAsync()
     {
         if (!KumoriDialog.Confirm(ActiveOwner(), "Delete all tracking data? This cannot be undone.", "Kumori", MessageBoxImage.Warning))
@@ -765,15 +770,56 @@ public partial class MainViewModel : ObservableObject
         await ReloadFirstPageAsync();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMaintainTrackingData))]
     private async Task CleanupInvalidAttemptsAsync()
     {
         if (!KumoriDialog.Confirm(ActiveOwner(), "Cleanup invalid/empty finalized attempts and rebuild personal bests?", "Kumori", MessageBoxImage.Warning))
         {
             return;
         }
-        var result = await Task.Run(() => _maintenance.CleanupInvalidAttempts());
+        var minimumSeconds = Math.Clamp(_settings.Current.Tracking.MinimumAttemptSeconds, 1, 300);
+        var result = await Task.Run(() => _maintenance.CleanupInvalidAttempts(minimumSeconds));
         HistoryStatus = $"Cleanup removed {result.InvalidAttempts} attempt(s), {result.EmptySessions} empty session(s), reclassified {result.ReclassifiedCompleted}";
+        await ReloadFirstPageAsync();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanMaintainTrackingData))]
+    private async Task DeleteShortPlaysAsync()
+    {
+        var defaultSeconds = Math.Clamp(_settings.Current.Tracking.MinimumAttemptSeconds, 1, 300)
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var value = KumoriDialog.Input(
+            ActiveOwner(),
+            "Delete finalized plays shorter than this many seconds (1–300):",
+            "Delete Short Plays",
+            defaultSeconds);
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+        if (!int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+            || seconds is < 1 or > 300)
+        {
+            KumoriDialog.Show(ActiveOwner(), "Enter a whole number from 1 to 300.", "Invalid duration",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var count = await Task.Run(() => _maintenance.PreviewAttemptsShorterThan(seconds));
+        if (count == 0)
+        {
+            KumoriDialog.Show(ActiveOwner(), $"No finalized plays are shorter than {seconds} seconds.",
+                "Delete Short Plays", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (!KumoriDialog.Confirm(
+                ActiveOwner(),
+                $"Permanently delete {count} finalized play(s) shorter than {seconds} seconds? Empty ended sessions will also be removed. This cannot be undone.",
+                "Delete Short Plays",
+                MessageBoxImage.Warning))
+            return;
+
+        var result = await Task.Run(() => _maintenance.DeleteAttemptsShorterThan(seconds));
+        HistoryStatus = $"Deleted {result.Attempts} short play(s) and {result.EmptySessions} empty session(s)";
         await ReloadFirstPageAsync();
     }
 
@@ -896,6 +942,8 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Confirm + delete a single attempt, then reload.</summary>
     public async Task DeleteAttemptAsync(AttemptRowViewModel row)
     {
+        if (!EnsureMaintenanceAvailable())
+            return;
         if (!KumoriDialog.Confirm(ActiveOwner(), "Permanently delete this attempt?", "Delete attempt", MessageBoxImage.Warning))
         {
             return;
@@ -912,6 +960,8 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Confirm + delete a whole session and its attempts, then reload.</summary>
     public async Task DeleteSessionAsync(long sessionId)
     {
+        if (!EnsureMaintenanceAvailable())
+            return;
         if (!KumoriDialog.Confirm(ActiveOwner(), "Permanently delete this session and all its attempts?", "Delete session", MessageBoxImage.Warning))
         {
             return;
@@ -923,6 +973,19 @@ public partial class MainViewModel : ObservableObject
             SelectedAttempt = null;
         }
         await ReloadFirstPageAsync();
+    }
+
+    private bool EnsureMaintenanceAvailable()
+    {
+        if (!HasActiveSession)
+            return true;
+        KumoriDialog.Show(
+            ActiveOwner(),
+            "Finish or end the active session before changing tracking history.",
+            "Tracking is active",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        return false;
     }
 
     /// <summary>Filter the list to every loaded attempt on the same beatmap.</summary>
@@ -987,7 +1050,7 @@ public partial class MainViewModel : ObservableObject
                     return;
                 }
 
-                if (Inspector.LastReplayInspectorProcess is { } process && owner is not null)
+                if (Inspector.TakeLastReplayInspectorProcess() is { } process && owner is not null)
                 {
                     ReplayAnalyzerLoadingText = "Opening replay analyzer...";
                     _ = await ReplayAnalyzerWindowPlacement.CenterNearOwnerAsync(process, owner);
@@ -1149,6 +1212,10 @@ public partial class MainViewModel : ObservableObject
         {
             _activeSessionId = activeSessionId;
             OnPropertyChanged(nameof(HasActiveSession));
+            DeleteEntriesBeforeCommand.NotifyCanExecuteChanged();
+            DeleteAllTrackingDataCommand.NotifyCanExecuteChanged();
+            CleanupInvalidAttemptsCommand.NotifyCanExecuteChanged();
+            DeleteShortPlaysCommand.NotifyCanExecuteChanged();
             ApplyVisibleAttempts(selectFirst: false);
         }
 

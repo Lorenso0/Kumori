@@ -2,8 +2,10 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Polygon = System.Windows.Shapes.Polygon;
 using Kumori.App.Controls;
 using Kumori.App.ViewModels;
 using Kumori.Core.Settings;
@@ -51,6 +53,56 @@ public sealed class ResponsiveWindowLayoutTests
                         AverageAccuracy = 96.25,
                         BestPp = 180.5,
                     }));
+                    var stressAttempt = new AttemptRowViewModel(new AttemptSummary
+                    {
+                        Id = 1,
+                        Artist = "A deliberately long artist name",
+                        Title = "A deliberately long beatmap title used to exercise compact history layout",
+                        Difficulty = "Extraordinarily Long Difficulty Name",
+                        Mapper = "A mapper with a long display name",
+                        StartedAt = DateTimeOffset.Now.AddHours(-10).ToString("O"),
+                        Outcome = "abandoned",
+                        Progress = 0.42,
+                        Accuracy = 100,
+                        Combo = 9_999,
+                        BeatmapMaxCombo = 9_999,
+                        Pp = 9_876.5,
+                        Grade = "S",
+                        ModsKey = "HDDTHRFLDASDNFEZNCPFRXAPSOHT",
+                        Mods =
+                        [
+                            new ModEntry("HD", "{}"), new ModEntry("DT", "{}"), new ModEntry("HR", "{}"),
+                            new ModEntry("FL", "{}"),
+                            new ModEntry("DA", "{\"approach_rate\":10,\"circle_size\":6,\"overall_difficulty\":10,\"drain_rate\":0}"),
+                            new ModEntry("SD", "{}"), new ModEntry("NF", "{}"), new ModEntry("EZ", "{}"),
+                            new ModEntry("NC", "{}"), new ModEntry("PF", "{}"), new ModEntry("RX", "{}"),
+                            new ModEntry("AP", "{}"), new ModEntry("SO", "{}"), new ModEntry("HT", "{}"),
+                        ],
+                    });
+                    vm.Rows.Add(stressAttempt);
+                    var noModAttempt = new AttemptRowViewModel(new AttemptSummary
+                    {
+                        Id = 2,
+                        Artist = "No-mod artist",
+                        Title = "No-mod alignment fixture",
+                        Difficulty = "Normal",
+                        Mapper = "Layout tester",
+                        StartedAt = DateTimeOffset.Now.AddHours(-9).ToString("O"),
+                        Outcome = "completed",
+                        Progress = 1,
+                        Accuracy = 98.5,
+                        Combo = 500,
+                        BeatmapMaxCombo = 600,
+                        Pp = 120,
+                        Grade = "A",
+                        ModsKey = "NM",
+                    });
+                    vm.Rows.Add(noModAttempt);
+                    vm.Inspector.Details = new AttemptDetails
+                    {
+                        Summary = stressAttempt.Model,
+                        Mods = stressAttempt.ModEntries,
+                    };
                     var window = new MainWindow(vm, settings);
                     window.ShowInTaskbar = false;
                     window.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -81,6 +133,17 @@ public sealed class ResponsiveWindowLayoutTests
                         Assert.True(root.DesiredSize.Width <= root.ActualWidth + 0.5);
                         Assert.True(root.DesiredSize.Height <= root.ActualHeight + 0.5);
 
+                        var metrics = Assert.IsType<UniformGrid>(window.FindName("MetricsGrid"));
+                        foreach (var text in Descendants<TextBlock>(metrics).Where(text => text.IsVisible))
+                        {
+                            var cell = Ancestors<Border>(text)
+                                .First(border => ReferenceEquals(VisualTreeHelper.GetParent(border), metrics));
+                            var bounds = text.TransformToAncestor(cell)
+                                .TransformBounds(new Rect(new Point(), text.RenderSize));
+                            Assert.True(bounds.Top >= -0.5 && bounds.Bottom <= cell.ActualHeight + 0.5,
+                                $"Metric text '{text.Text}' is vertically clipped at {size.Width}x{size.Height}: bounds {bounds}, cell height {cell.ActualHeight}.");
+                        }
+
                         var navigation = Assert.IsType<AdaptiveNavigationRail>(window.FindName("NavigationView"));
                         var dashboardLabel = Descendants<TextBlock>(navigation).Single(text => text.Text == "Dashboard");
                         var navigationButtons = Descendants<Button>(navigation).ToArray();
@@ -110,6 +173,97 @@ public sealed class ResponsiveWindowLayoutTests
                         Assert.IsType<Button>(navigation.FindName("DashboardButton"))
                             .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                         window.UpdateLayout();
+
+                        var history = Assert.IsType<ListBox>(window.FindName("HistoryList"));
+                        history.ScrollIntoView(noModAttempt);
+                        window.UpdateLayout();
+                        var noModTitle = Descendants<TextBlock>(history)
+                            .Single(text => text.IsVisible
+                                            && ReferenceEquals(text.DataContext, noModAttempt)
+                                            && text.Text == noModAttempt.Title);
+                        var noModRow = Ancestors<ListBoxItem>(noModTitle).First();
+                        var noModTitleTop = noModTitle.TransformToAncestor(noModRow).Transform(new Point()).Y;
+
+                        history.ScrollIntoView(stressAttempt);
+                        window.UpdateLayout();
+                        var importantCardText = Descendants<TextBlock>(history)
+                            .Where(text => text.IsVisible && ReferenceEquals(text.DataContext, stressAttempt))
+                            .Where(text => text.Text == stressAttempt.AccuracyText
+                                           || text.Text == stressAttempt.Title
+                                           || text.Text == stressAttempt.Artist
+                                           || text.Text == stressAttempt.DifficultyLine
+                                           || text.Text == stressAttempt.PerformanceLine
+                                           || text.Text == stressAttempt.OutcomeWithProgress
+                                           || text.Text == stressAttempt.WhenRelative)
+                            .Distinct()
+                            .ToArray();
+                        Assert.Equal(vm.IsWideHistoryLayout ? 8 : 7, importantCardText.Length);
+                        Assert.All(importantCardText, text =>
+                        {
+                            var desiredTextWidth = Math.Max(0, text.DesiredSize.Width - text.Margin.Left - text.Margin.Right);
+                            var desiredTextHeight = Math.Max(0, text.DesiredSize.Height - text.Margin.Top - text.Margin.Bottom);
+                            Assert.True(desiredTextWidth <= text.ActualWidth + 0.5,
+                                $"'{text.Text}' is horizontally clipped at {size.Width}x{size.Height}: desired text {desiredTextWidth}, actual {text.ActualWidth}.");
+                            Assert.True(desiredTextHeight <= text.ActualHeight + 0.5,
+                                $"'{text.Text}' is vertically clipped at {size.Width}x{size.Height}: desired text {desiredTextHeight}, actual {text.ActualHeight}.");
+                        });
+
+                        var modIcons = Descendants<Polygon>(history)
+                            .Where(icon => icon.IsVisible
+                                           && icon.DataContext is ModEntry mod
+                                           && stressAttempt.ModEntries.Contains(mod))
+                            .ToArray();
+                        Assert.Equal(stressAttempt.ModEntries.Count, modIcons.Length);
+                        Assert.All(modIcons, icon => Assert.NotNull(icon.Fill));
+
+                        var modIconHosts = Descendants<Grid>(history)
+                            .Where(host => host.IsVisible
+                                           && host.DataContext is ModEntry mod
+                                           && stressAttempt.ModEntries.Contains(mod)
+                                           && host.ToolTip is string)
+                            .ToArray();
+                        Assert.Equal(stressAttempt.ModEntries.Count, modIconHosts.Length);
+                        Assert.All(modIconHosts, host =>
+                        {
+                            Assert.Equal(0, ToolTipService.GetInitialShowDelay(host));
+                            Assert.Equal(0, ToolTipService.GetBetweenShowDelay(host));
+                            Assert.Equal(PlacementMode.Top, ToolTipService.GetPlacement(host));
+                            Assert.False(string.IsNullOrWhiteSpace(Assert.IsType<string>(host.ToolTip)));
+                        });
+                        var historyDaToolTip = Assert.IsType<string>(
+                            modIconHosts.Single(host => ((ModEntry)host.DataContext).Acronym == "DA").ToolTip);
+                        Assert.Contains("AR: 10", historyDaToolTip);
+                        Assert.Contains("CS: 6", historyDaToolTip);
+
+                        if (size.Width > ResponsiveLayoutResolver.CompactMaximumWidth)
+                        {
+                            var detailDaHost = Descendants<Grid>(root)
+                                .Single(host => host.IsVisible
+                                                && host.Width == 34
+                                                && host.DataContext is ModEntry { Acronym: "DA" });
+                            Assert.Equal(0, ToolTipService.GetInitialShowDelay(detailDaHost));
+                            Assert.Equal(PlacementMode.Top, ToolTipService.GetPlacement(detailDaHost));
+                            Assert.Contains("OD: 10", Assert.IsType<string>(detailDaHost.ToolTip));
+                            Assert.Contains("HP: 0", Assert.IsType<string>(detailDaHost.ToolTip));
+                        }
+
+                        var moddedTitle = importantCardText.Single(text => text.Text == stressAttempt.Title);
+                        var moddedRow = Ancestors<ListBoxItem>(moddedTitle).First();
+                        var moddedTitleTop = moddedTitle.TransformToAncestor(moddedRow).Transform(new Point()).Y;
+                        Assert.InRange(Math.Abs(noModTitleTop - moddedTitleTop), 0, 0.5);
+
+                        if (size.Width == 720
+                            && Environment.GetEnvironmentVariable("KUMORI_UI_SCALE_SNAPSHOT_DIR") is { Length: > 0 } scaleSnapshotDirectory)
+                        {
+                            Directory.CreateDirectory(scaleSnapshotDirectory);
+                            foreach (var scale in new[] { 1d, 1.25d, 1.5d })
+                            {
+                                SaveSnapshot(
+                                    root,
+                                    Path.Combine(scaleSnapshotDirectory, $"history-720x480-{scale * 100:0}.png"),
+                                    scale);
+                            }
+                        }
 
                         if (size.Width == 1920 && Environment.GetEnvironmentVariable("KUMORI_UI_SNAPSHOT") is { Length: > 0 } snapshot)
                         {
@@ -183,5 +337,29 @@ public sealed class ResponsiveWindowLayoutTests
             if (child is T match) yield return match;
             foreach (var nested in Descendants<T>(child)) yield return nested;
         }
+    }
+
+    private static IEnumerable<T> Ancestors<T>(DependencyObject child) where T : DependencyObject
+    {
+        for (var current = VisualTreeHelper.GetParent(child); current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is T match)
+                yield return match;
+        }
+    }
+
+    private static void SaveSnapshot(FrameworkElement root, string path, double scale)
+    {
+        var bitmap = new RenderTargetBitmap(
+            (int)Math.Ceiling(root.ActualWidth * scale),
+            (int)Math.Ceiling(root.ActualHeight * scale),
+            96 * scale,
+            96 * scale,
+            PixelFormats.Pbgra32);
+        bitmap.Render(root);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
     }
 }

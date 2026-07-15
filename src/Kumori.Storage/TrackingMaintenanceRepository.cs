@@ -38,6 +38,14 @@ public sealed class TrackingMaintenanceRepository
     public int DeleteAttempt(long attemptId)
     {
         using var con = OpenWriteConnection();
+        EnsureNoActiveTracking(con);
+        if (ScalarCount(con, null, """
+                SELECT COUNT(*)
+                FROM attempts a
+                JOIN sessions s ON s.id=a.session_id
+                WHERE a.id=@id AND s.ended_at IS NULL
+                """, ("@id", attemptId)) > 0)
+            throw new InvalidOperationException("An attempt in the active session cannot be deleted.");
         using var cmd = con.CreateCommand();
         cmd.CommandText = "DELETE FROM attempts WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", attemptId);
@@ -50,6 +58,11 @@ public sealed class TrackingMaintenanceRepository
     public int DeleteSession(long sessionId)
     {
         using var con = OpenWriteConnection();
+        EnsureNoActiveTracking(con);
+        if (ScalarCount(con, null,
+                "SELECT COUNT(*) FROM sessions WHERE id=@id AND ended_at IS NULL",
+                ("@id", sessionId)) > 0)
+            throw new InvalidOperationException("The active session cannot be deleted.");
         using var cmd = con.CreateCommand();
         cmd.CommandText = "DELETE FROM sessions WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", sessionId);
@@ -62,10 +75,11 @@ public sealed class TrackingMaintenanceRepository
     public int DeleteBefore(string isoTimestamp)
     {
         using var con = OpenWriteConnection();
+        EnsureNoActiveTracking(con);
         using var tx = con.BeginTransaction();
         using var cmd = con.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "DELETE FROM sessions WHERE started_at < @before";
+        cmd.CommandText = "DELETE FROM sessions WHERE ended_at IS NOT NULL AND started_at < @before";
         cmd.Parameters.AddWithValue("@before", isoTimestamp);
         var deleted = cmd.ExecuteNonQuery();
         DeleteIfExists(con, tx, "profile_snapshots", "captured_at < @before", ("@before", isoTimestamp));
@@ -78,6 +92,7 @@ public sealed class TrackingMaintenanceRepository
     public int DeleteAll()
     {
         using var con = OpenWriteConnection();
+        EnsureNoActiveTracking(con);
         using var tx = con.BeginTransaction();
         var deleted = DeleteAllFrom(con, tx, "sessions");
         DeleteAllFrom(con, tx, "profile_snapshots");
@@ -102,6 +117,7 @@ public sealed class TrackingMaintenanceRepository
     public (int InvalidAttempts, int EmptySessions, int ReclassifiedCompleted) CleanupInvalidAttempts(double minimumSeconds = 3.0)
     {
         using var con = OpenWriteConnection();
+        EnsureNoActiveTracking(con);
         using var tx = con.BeginTransaction();
         var reclassified = ScalarCount(con, tx, """
             SELECT COUNT(*) FROM attempts
@@ -149,6 +165,63 @@ public sealed class TrackingMaintenanceRepository
         RebuildPersonalBests(con);
         PruneUnusedBeatmaps(con);
         return (invalid, emptySessions, reclassified);
+    }
+
+    public int PreviewAttemptsShorterThan(int seconds)
+    {
+        if (!_factory.DatabaseExists)
+            return 0;
+        seconds = Math.Clamp(seconds, 1, 300);
+        using var con = _factory.Open();
+        return ScalarCount(con, null, """
+            SELECT COUNT(*)
+            FROM attempts a
+            JOIN sessions s ON s.id=a.session_id
+            WHERE a.outcome <> 'active'
+              AND s.ended_at IS NOT NULL
+              AND a.duration_seconds < @seconds
+            """, ("@seconds", seconds));
+    }
+
+    public (int Attempts, int EmptySessions) DeleteAttemptsShorterThan(int seconds)
+    {
+        seconds = Math.Clamp(seconds, 1, 300);
+        using var con = OpenWriteConnection();
+        EnsureNoActiveTracking(con);
+        using var tx = con.BeginTransaction();
+        var attempts = ScalarCount(con, tx, """
+            SELECT COUNT(*)
+            FROM attempts a
+            JOIN sessions s ON s.id=a.session_id
+            WHERE a.outcome <> 'active'
+              AND s.ended_at IS NOT NULL
+              AND a.duration_seconds < @seconds
+            """, ("@seconds", seconds));
+        Execute(con, tx, """
+            DELETE FROM attempts
+            WHERE id IN (
+                SELECT a.id
+                FROM attempts a
+                JOIN sessions s ON s.id=a.session_id
+                WHERE a.outcome <> 'active'
+                  AND s.ended_at IS NOT NULL
+                  AND a.duration_seconds < @seconds
+            )
+            """, ("@seconds", seconds));
+        var emptySessions = ScalarCount(con, tx, """
+            SELECT COUNT(*) FROM sessions s
+            WHERE s.ended_at IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.session_id=s.id)
+            """);
+        Execute(con, tx, """
+            DELETE FROM sessions
+            WHERE ended_at IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.session_id=sessions.id)
+            """);
+        tx.Commit();
+        RebuildPersonalBests(con);
+        PruneUnusedBeatmaps(con);
+        return (attempts, emptySessions);
     }
 
     public (int InvalidAttempts, int EmptySessions, int ReclassifiableCompleted, int ModBackfillCandidates) PreviewCleanup(double minimumSeconds = 3.0)
@@ -427,6 +500,13 @@ public sealed class TrackingMaintenanceRepository
         cmd.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
         cmd.ExecuteNonQuery();
         return con;
+    }
+
+    private static void EnsureNoActiveTracking(SqliteConnection con)
+    {
+        if (ScalarCount(con, null, "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL") > 0
+            || ScalarCount(con, null, "SELECT COUNT(*) FROM attempts WHERE outcome='active'") > 0)
+            throw new InvalidOperationException("Tracking data cannot be changed while a session is active.");
     }
 
     private static void RebuildPersonalBests(SqliteConnection con)

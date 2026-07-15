@@ -16,7 +16,7 @@ internal static class ModDisplayText
     ];
 
     public static string FromKey(string? modsKey)
-        => string.Concat(AcronymsFromKey(modsKey));
+        => string.Concat(ModDisplayOrder.Sort(AcronymsFromKey(modsKey)));
 
     public static IReadOnlyList<string> AcronymsFromKey(string? modsKey)
     {

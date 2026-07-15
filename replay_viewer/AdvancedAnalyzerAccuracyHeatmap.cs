@@ -4,6 +4,7 @@ using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Lines;
 using osu.Framework.Graphics.Shapes;
 using osu.Framework.Graphics.Sprites;
+using osu.Framework.Bindables;
 using osuTK;
 using osuTK.Graphics;
 
@@ -15,6 +16,8 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
     private readonly AdvancedAnalyzerViewModel viewModel;
     private MissAnalysisEntry? entry;
     private float renderedWidth;
+    private readonly Action<ValueChangedEvent<bool>> booleanSettingChanged;
+    private readonly Action<ValueChangedEvent<Colour4>> colourSettingChanged;
 
     public AdvancedAnalyzerAccuracyHeatmap(AdvancedAnalyzerViewModel viewModel)
     {
@@ -23,16 +26,27 @@ internal partial class AdvancedAnalyzerAccuracyHeatmap : CompositeDrawable
         Height = 0;
         Alpha = 0;
         Masking = true;
+        booleanSettingChanged = _ => rebuild();
+        colourSettingChanged = _ => rebuild();
     }
 
     protected override void LoadComplete()
     {
         base.LoadComplete();
-        viewModel.ShowInputMarkers.ValueChanged += _ => rebuild();
-        viewModel.ShowMovementSamples.ValueChanged += _ => rebuild();
-        viewModel.ShowHeldSamples.ValueChanged += _ => rebuild();
-        viewModel.ComparisonCursorColour.ValueChanged += _ => rebuild();
+        viewModel.ShowInputMarkers.ValueChanged += booleanSettingChanged;
+        viewModel.ShowMovementSamples.ValueChanged += booleanSettingChanged;
+        viewModel.ShowHeldSamples.ValueChanged += booleanSettingChanged;
+        viewModel.ComparisonCursorColour.ValueChanged += colourSettingChanged;
         rebuild();
+    }
+
+    protected override void Dispose(bool isDisposing)
+    {
+        viewModel.ShowInputMarkers.ValueChanged -= booleanSettingChanged;
+        viewModel.ShowMovementSamples.ValueChanged -= booleanSettingChanged;
+        viewModel.ShowHeldSamples.ValueChanged -= booleanSettingChanged;
+        viewModel.ComparisonCursorColour.ValueChanged -= colourSettingChanged;
+        base.Dispose(isDisposing);
     }
 
     protected override void Update()

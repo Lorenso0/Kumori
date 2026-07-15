@@ -11,7 +11,6 @@
         <Setter Property="Padding" Value="0" />
         <Setter Property="Margin" Value="0,0,6,4" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="MinHeight" Value="62" />
         <Setter Property="Template">
             <Setter.Value>
@@ -32,6 +31,10 @@
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="Root" Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}" />
                             <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
+                            <Setter TargetName="Root" Property="BorderThickness" Value="2" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

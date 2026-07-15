@@ -76,8 +76,6 @@ jobs:
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
-      KUMORI_SIGN_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-      KUMORI_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
 
     steps:
       - name: Check out source
@@ -116,17 +114,6 @@ jobs:
           $probe = & 'artifacts/viewer-release/Kumori.ReplayViewer.exe' --probe | ConvertFrom-Json
           if ($probe.status -ne 'ok' -or $probe.contract_version -ne 1 -or $probe.automapper_compatible -ne $true) {
             throw "Replay viewer probe failed"
-          }
-
-      - name: Verify signatures
-        if: env.KUMORI_SIGN_CERTIFICATE_BASE64 != '' && env.KUMORI_SIGN_CERTIFICATE_PASSWORD != ''
-        shell: pwsh
-        run: |
-          foreach ($path in @('dist/app/Kumori.exe', 'artifacts/viewer-release/Kumori.ReplayViewer.exe')) {
-            $signature = Get-AuthenticodeSignature $path
-            if ($signature.Status -ne 'Valid') {
-              throw "Invalid Authenticode signature for $path`: $($signature.StatusMessage)"
-            }
           }
 
       - name: Create checksum

@@ -95,7 +95,8 @@ public partial class HealthDashboardWindow : Window
             command.CommandText = "PRAGMA quick_check";
             integrity = command.ExecuteScalar() as string ?? "Unknown";
         }
-        var cleanup = new TrackingMaintenanceRepository(factory).PreviewCleanup();
+        var cleanup = new TrackingMaintenanceRepository(factory).PreviewCleanup(
+            Math.Clamp(snapshot.Tracking.MinimumAttemptSeconds, 1, 300));
         return new HealthData(
             OpenTabletDriverService.Detect(snapshot.OpenTabletDriver.InstallPath),
             new BackupService().List(snapshot.Backup).Count,

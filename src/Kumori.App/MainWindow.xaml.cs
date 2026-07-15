@@ -201,7 +201,7 @@ public partial class MainWindow : Window
         replay.Click += async (_, _) => await vm.OpenReplayInspectorAsync(row);
         var showAll = new MenuItem { Header = "Show all plays for this map" };
         showAll.Click += async (_, _) => await vm.ShowAllPlaysForMapAsync(row);
-        var delete = new MenuItem { Header = "Delete this attempt" };
+        var delete = new MenuItem { Header = "Delete this attempt", IsEnabled = !vm.HasActiveSession };
         delete.Click += async (_, _) => await vm.DeleteAttemptAsync(row);
         menu.Items.Add(replay);
         menu.Items.Add(new Separator());
@@ -220,7 +220,7 @@ public partial class MainWindow : Window
             return;
         }
         var menu = new ContextMenu();
-        var delete = new MenuItem { Header = "Delete this session" };
+        var delete = new MenuItem { Header = "Delete this session", IsEnabled = !vm.HasActiveSession };
         delete.Click += async (_, _) => await vm.DeleteSessionAsync(row.Model.Id);
         menu.Items.Add(delete);
         menu.PlacementTarget = button;
@@ -549,7 +549,7 @@ public partial class MainWindow : Window
         WorkspacePage.Margin = pageMargin;
 
         MetricsGrid.Columns = _layoutState.IsCompact ? 3 : 6;
-        MetricsRow.Height = new GridLength(_layoutState.IsCompact ? 122 : 88);
+        MetricsRow.Height = new GridLength(_layoutState.IsCompact ? 136 : 88);
         TopBarRow.Height = new GridLength(_layoutState.IsShort ? 54 : 72);
         var showDashboardHeading = ActualWidth >= 900;
         DashboardTitleText.Visibility = showDashboardHeading ? Visibility.Visible : Visibility.Collapsed;

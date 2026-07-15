@@ -35,4 +35,39 @@ public sealed class DateDisplayViewModelTests
         Assert.Equal(DisplayDateTime.UnknownDate, attempt.WhenExact);
         Assert.Equal(DisplayDateTime.UnknownDate, day.DateText);
     }
+
+    [Theory]
+    [InlineData("completed", false, "")]
+    [InlineData("failed", true, "PARTIAL")]
+    [InlineData("retried", true, "PARTIAL")]
+    [InlineData("quit", true, "PARTIAL")]
+    [InlineData("abandoned", true, "PARTIAL")]
+    public void AccuracyPresentationMarksEveryUnfinishedOutcomeAsPartial(
+        string outcome,
+        bool expectedPartial,
+        string expectedQualifier)
+    {
+        var attempt = new AttemptRowViewModel(new AttemptSummary
+        {
+            Outcome = outcome,
+            Accuracy = 100,
+        });
+
+        Assert.Equal(expectedPartial, attempt.IsPartialAccuracy);
+        Assert.Equal(expectedQualifier, attempt.AccuracyQualifier);
+        Assert.Equal("100.00%", attempt.AccuracyText);
+    }
+
+    [Fact]
+    public void InMemoryMapBestAccuracyIgnoresUnfinishedPerfectPlay()
+    {
+        var card = new MapCardViewModel("map", new[]
+        {
+            new AttemptSummary { Id = 2, Outcome = "quit", Accuracy = 100 },
+            new AttemptSummary { Id = 1, Outcome = "completed", Accuracy = 98.5 },
+        });
+
+        Assert.Equal(98.5, card.BestAccuracy);
+        Assert.Equal(99.25, card.AverageAccuracy);
+    }
 }

@@ -321,6 +321,7 @@ internal partial class KumoriSeekBar : CompositeDrawable
         fill.Width = progress;
         playhead.X = progress;
         updateTimelineHover();
+        updateComparisonStatus();
         updateCaptureEndStatus();
 
         // One-shot geometry diagnostic around 2 s in, so runtime.log can

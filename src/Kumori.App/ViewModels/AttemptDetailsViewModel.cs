@@ -64,6 +64,13 @@ public partial class AttemptDetailsViewModel : ObservableObject
 
     public Process? LastReplayInspectorProcess { get; private set; }
 
+    public Process? TakeLastReplayInspectorProcess()
+    {
+        var process = LastReplayInspectorProcess;
+        LastReplayInspectorProcess = null;
+        return process;
+    }
+
     public AttemptDetailsViewModel(
         AttemptDetailsRepository repository,
         ReplayViewerContractService? replayViewer = null)
@@ -107,6 +114,12 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string AccuracyValue => Details is { } d
         ? Invariant($"{Math.Truncate(d.Summary.Accuracy * 100d) / 100d:0.00}%")
         : "";
+    public bool IsPartialAccuracy => Details is { } d
+        && !string.Equals(d.Summary.Outcome, "completed", StringComparison.OrdinalIgnoreCase);
+    public string AccuracyQualifier => IsPartialAccuracy ? "PARTIAL" : "";
+    public string AccuracyToolTip => IsPartialAccuracy
+        ? "Accuracy for the played portion only. Partial plays are not eligible for best map accuracy."
+        : "Completed-play accuracy.";
     public string ScoreValue => Details is { } d ? d.Summary.Score.ToString("N0", CultureInfo.InvariantCulture) : "";
     public string ComboValue => Details is { } d ? Invariant($"{d.Summary.Combo:N0} / {d.BeatmapMaxCombo:N0}") : "";
     public string PpValue => Details is { } d ? Invariant($"{d.Summary.Pp:0.0}  ({d.FcPp:0.0} FC)") : "";
@@ -327,6 +340,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string PpLine => Details is { } d
         ? Invariant($"{d.Summary.Pp:0.0}pp  (FC {d.FcPp:0.0} / SS {d.MaxPp:0.0})") : "";
     public string ModsDisplay => Details is { } d ? ModDisplayText.FromKey(d.Summary.ModsKey) : "";
+    public IReadOnlyList<ModEntry> DisplayMods => ModDisplayOrder.Sort(Details?.Mods ?? Array.Empty<ModEntry>());
     public string? ArtworkSource => Details is { } d ? BeatmapArtworkResolver.Resolve(d.Summary) : null;
     public IReadOnlyList<double> TimingOffsets => Details?.Timing?.Offsets ?? Array.Empty<double>();
     public string TimingLine => Details?.Timing is { } t
@@ -389,6 +403,9 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(OutcomeUpper));
         OnPropertyChanged(nameof(OutcomeDisplay));
         OnPropertyChanged(nameof(AccuracyValue));
+        OnPropertyChanged(nameof(IsPartialAccuracy));
+        OnPropertyChanged(nameof(AccuracyQualifier));
+        OnPropertyChanged(nameof(AccuracyToolTip));
         OnPropertyChanged(nameof(ScoreValue));
         OnPropertyChanged(nameof(ComboValue));
         OnPropertyChanged(nameof(PpValue));
@@ -475,6 +492,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(UrText));
         OnPropertyChanged(nameof(PpLine));
         OnPropertyChanged(nameof(ModsDisplay));
+        OnPropertyChanged(nameof(DisplayMods));
         OnPropertyChanged(nameof(ArtworkSource));
         OnPropertyChanged(nameof(TimingLine));
         OnPropertyChanged(nameof(TimingOffsets));
@@ -699,7 +717,10 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public async Task LoadAsync(long? attemptId, CancellationToken cancellationToken = default)
     {
         _requestedAttemptId = attemptId;
-        _loadCts?.Cancel();
+        var previousLoad = _loadCts;
+        _loadCts = null;
+        previousLoad?.Cancel();
+        previousLoad?.Dispose();
         if (attemptId is null)
         {
             Details = null;
@@ -762,9 +783,10 @@ public partial class AttemptDetailsViewModel : ObservableObject
         {
             if (ReferenceEquals(_loadCts, cts))
             {
+                _loadCts = null;
                 IsLoading = false;
             }
-            if (!ReferenceEquals(_loadCts, cts)) cts.Dispose();
+            cts.Dispose();
         }
     }
 
@@ -781,7 +803,10 @@ public partial class AttemptDetailsViewModel : ObservableObject
         if (Details?.Summary.Id == attemptId || _requestedAttemptId == attemptId)
         {
             _requestedAttemptId = null;
-            _loadCts?.Cancel();
+            var load = _loadCts;
+            _loadCts = null;
+            load?.Cancel();
+            load?.Dispose();
             Details = null;
             IsLoading = false;
             LoadError = null;

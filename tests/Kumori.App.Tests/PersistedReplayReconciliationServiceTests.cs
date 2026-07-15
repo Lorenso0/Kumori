@@ -42,7 +42,7 @@ public sealed class PersistedReplayReconciliationServiceTests
 
     [Theory]
     [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"fields\":[\"300\",\"100\",\"misses\"]}}", 100, 13, 0, 9, true)]
-    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"fields\":[\"100\"],\"accuracy_source\":\"replay_or_tosu\"}}", 100, 13, 0, 0, false)]
+    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"fields\":[\"100\"],\"accuracy_source\":\"replay_or_tosu\"}}", 100, 13, 0, 0, true)]
     [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"fields\":[\"100\"]}}", 97.1, 13, 0, 0, false)]
     public void Detects_perfect_placeholder_from_earlier_replay_recovery(
         string json, double accuracy, int n100, int n50, int misses, bool expected)

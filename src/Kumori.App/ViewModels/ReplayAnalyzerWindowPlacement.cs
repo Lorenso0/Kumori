@@ -16,34 +16,42 @@ internal static class ReplayAnalyzerWindowPlacement
     public static async Task<bool> CenterNearOwnerAsync(Process process, Window owner, CancellationToken cancellationToken = default)
     {
         var target = TargetBounds(owner);
-        for (var attempt = 0; attempt < 90; attempt++)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (process.HasExited)
+            for (var attempt = 0; attempt < 90; attempt++)
             {
-                return false;
-            }
-
-            process.Refresh();
-            var handle = process.MainWindowHandle;
-            if (handle != IntPtr.Zero)
-            {
-                var ok = SetWindowPos(
-                    handle,
-                    IntPtr.Zero,
-                    target.X,
-                    target.Y,
-                    target.Width,
-                    target.Height,
-                    SwpNoZOrder | SwpNoActivate | SwpShowWindow);
-                if (!ok)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (process.HasExited)
                 {
-                    Log.Debug("Could not position Replay Analyzer window. Win32 error {Error}", Marshal.GetLastWin32Error());
+                    return false;
                 }
-                return ok;
-            }
 
-            await Task.Delay(100, cancellationToken);
+                process.Refresh();
+                var handle = process.MainWindowHandle;
+                if (handle != IntPtr.Zero)
+                {
+                    var ok = SetWindowPos(
+                        handle,
+                        IntPtr.Zero,
+                        target.X,
+                        target.Y,
+                        target.Width,
+                        target.Height,
+                        SwpNoZOrder | SwpNoActivate | SwpShowWindow);
+                    if (!ok)
+                    {
+                        Log.Debug("Could not position Replay Analyzer window. Win32 error {Error}", Marshal.GetLastWin32Error());
+                    }
+                    return ok;
+                }
+
+                await Task.Delay(100, cancellationToken);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Output capture owns and disposes the process after it exits.
+            return false;
         }
 
         return false;

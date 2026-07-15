@@ -55,9 +55,29 @@ public class SettingsMigrationTests
     {
         var s = SettingsService.ImportLegacy("{}");
         Assert.True(s.Tracking.Enabled);
+        Assert.Equal(3, s.Tracking.MinimumAttemptSeconds);
         Assert.Equal(0.8, s.ReplayViewer.MasterVolume);
         Assert.True(s.Capture.LazerReplayFrameEnabled);
         Assert.Equal("https://api.rai.moe", s.Media.PrimaryMirror);
+    }
+
+    [Fact]
+    public void ExistingV2SettingsWithoutMinimumDurationKeepThreeSecondDefault()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.v2.json");
+            File.WriteAllText(path, """{"tracking":{"enabled":true}}""");
+
+            var loaded = new SettingsService(path, Path.Combine(dir.FullName, "missing.json")).Load();
+
+            Assert.Equal(3, loaded.Tracking.MinimumAttemptSeconds);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 
     [Fact]

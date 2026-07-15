@@ -16,6 +16,10 @@ internal partial class KumoriBackgroundSettings : PlayerSettingsGroup
     private readonly PlayerSliderBar<double> opacitySlider;
     private readonly PlayerSliderBar<double> blurSlider;
     private readonly KumoriViewerConfig viewerConfig;
+    private Bindable<double>? dimLevel;
+    private Bindable<double>? backgroundOpacity;
+    private Action<ValueChangedEvent<double>>? dimLevelChanged;
+    private Action<ValueChangedEvent<double>>? backgroundOpacityChanged;
 
     private bool syncingOpacity;
 
@@ -42,26 +46,37 @@ internal partial class KumoriBackgroundSettings : PlayerSettingsGroup
     [BackgroundDependencyLoader]
     private void load(OsuConfigManager config)
     {
-        var dimLevel = config.GetBindable<double>(OsuSetting.DimLevel);
-        var backgroundOpacity = viewerConfig.GetBindable<double>(KumoriViewerSetting.BackgroundOpacity);
+        dimLevel = config.GetBindable<double>(OsuSetting.DimLevel);
+        backgroundOpacity = viewerConfig.GetBindable<double>(KumoriViewerSetting.BackgroundOpacity);
 
         dimLevel.Value = 1 - backgroundOpacity.Value;
         opacitySlider.Current = backgroundOpacity;
 
-        dimLevel.ValueChanged += value =>
+        dimLevelChanged = value =>
         {
             if (syncingOpacity)
                 return;
 
             backgroundOpacity.Value = 1 - value.NewValue;
         };
-        backgroundOpacity.ValueChanged += value =>
+        backgroundOpacityChanged = value =>
         {
             syncingOpacity = true;
             dimLevel.Value = 1 - value.NewValue;
             syncingOpacity = false;
         };
+        dimLevel.ValueChanged += dimLevelChanged;
+        backgroundOpacity.ValueChanged += backgroundOpacityChanged;
 
         blurSlider.Current = config.GetBindable<double>(OsuSetting.BlurLevel);
+    }
+
+    protected override void Dispose(bool isDisposing)
+    {
+        if (dimLevel != null && dimLevelChanged != null)
+            dimLevel.ValueChanged -= dimLevelChanged;
+        if (backgroundOpacity != null && backgroundOpacityChanged != null)
+            backgroundOpacity.ValueChanged -= backgroundOpacityChanged;
+        base.Dispose(isDisposing);
     }
 }

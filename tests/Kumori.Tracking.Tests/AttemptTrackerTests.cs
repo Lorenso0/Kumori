@@ -350,6 +350,81 @@ public class AttemptTrackerTests
         Assert.Equal("app_closed", final.Evidence);
     }
 
+    [Fact]
+    public void MinimumDurationRetainsExactBoundaryAndDiscardsShorterPlay()
+    {
+        var sink = new RecordingAttemptSink();
+        var tracker = new AttemptTracker(sink, minimumAttemptSecondsProvider: () => 3);
+
+        tracker.Ingest(Play(0));
+        tracker.Ingest(Results(3, score: 10_000, n300: 10));
+        tracker.Ingest(Play(4, id: "mapB"));
+        tracker.Ingest(Results(6.9, id: "mapB", score: 10_000, n300: 10));
+
+        Assert.Single(sink.Finals);
+        Assert.Equal(3, sink.Finals[0].Snapshot.DurationSeconds);
+        Assert.Contains(sink.Discards, discard => discard.Reason == "invalid_final_attempt");
+    }
+
+    [Fact]
+    public void MinimumDurationIsSnapshottedAtAttemptStart()
+    {
+        var minimum = 3;
+        var sink = new RecordingAttemptSink();
+        var tracker = new AttemptTracker(sink, minimumAttemptSecondsProvider: () => minimum);
+
+        tracker.Ingest(Play(0));
+        minimum = 5;
+        tracker.Ingest(Results(3.5, score: 10_000, n300: 10));
+        tracker.Ingest(Play(4, id: "mapB"));
+        tracker.Ingest(Results(8, id: "mapB", score: 10_000, n300: 10));
+
+        Assert.Single(sink.Finals);
+        Assert.Equal("mapA", sink.Finals[0].Snapshot.Identity);
+        Assert.Contains(sink.Discards, discard => discard.Snapshot.Identity == "mapB");
+    }
+
+    [Fact]
+    public void PartialPerfectAccuracyRemainsLegitimate()
+    {
+        _tracker.Ingest(WithAccuracy(Play(0), 100));
+        _tracker.Ingest(WithAccuracy(Play(4, live: 4_000, score: 20_000, n300: 100, progress: 0.5), 100));
+        _tracker.Ingest(Menu(4.1));
+        _tracker.Ingest(Menu(6.2));
+
+        var final = Assert.Single(_sink.Finals);
+        Assert.Equal("quit", final.Outcome);
+        Assert.Equal(100, final.Snapshot.Accuracy);
+        Assert.DoesNotContain("accuracy_placeholder_guard", final.Evidence);
+    }
+
+    [Fact]
+    public void ImpossiblePerfectAccuracyFallsBackToLastTrustedValue()
+    {
+        _tracker.Ingest(WithAccuracy(Play(0), 97.5));
+        _tracker.Ingest(WithAccuracy(Play(4, live: 4_000, score: 20_000, n300: 90, n100: 10, progress: 0.5), 100));
+        _tracker.Ingest(Menu(4.1));
+        _tracker.Ingest(Menu(6.2));
+
+        var final = Assert.Single(_sink.Finals);
+        Assert.Equal(97.5, final.Snapshot.Accuracy);
+        Assert.Contains("accuracy_placeholder_guard", final.Evidence);
+    }
+
+    [Fact]
+    public void ImpossiblePerfectAccuracyWithoutTrustedValueStoresZero()
+    {
+        _tracker.Ingest(WithAccuracy(Play(0), 100));
+        _tracker.Ingest(WithAccuracy(Play(4, live: 4_000, score: 20_000, n300: 90, n100: 10, progress: 0.5), 100));
+        _tracker.Ingest(Menu(4.1));
+        _tracker.Ingest(Menu(6.2));
+
+        Assert.Equal(0, Assert.Single(_sink.Finals).Snapshot.Accuracy);
+    }
+
+    private static AttemptTracker.Frame WithAccuracy(AttemptTracker.Frame frame, double accuracy) =>
+        frame with { Play = frame.Play with { Accuracy = accuracy } };
+
     private static AttemptTracker.Frame Play(
         double t,
         string id = "mapA",

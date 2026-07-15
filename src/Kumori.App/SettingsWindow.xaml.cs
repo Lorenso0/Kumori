@@ -62,6 +62,7 @@ public partial class SettingsWindow : Window
     {
         var s = _settings.Current;
         TrackingEnabled.IsChecked = s.Tracking.Enabled;
+        MinimumAttemptSeconds.Text = s.Tracking.MinimumAttemptSeconds.ToString(CultureInfo.InvariantCulture);
         RetentionDays.Text = s.Tracking.RetentionDays.ToString(CultureInfo.InvariantCulture);
         LazerReplayFrameEnabled.IsChecked = s.Capture.LazerReplayFrameEnabled;
         OtdPath.Text = s.OpenTabletDriver.InstallPath;
@@ -112,11 +113,13 @@ public partial class SettingsWindow : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(RetentionDays.Text, out var retention)
+        if (!int.TryParse(MinimumAttemptSeconds.Text, out var minimumAttemptSeconds)
+            || minimumAttemptSeconds is < 1 or > 300
+            || !int.TryParse(RetentionDays.Text, out var retention)
             || !int.TryParse(BackupInterval.Text, out var backupInterval)
             || !int.TryParse(BackupRetention.Text, out var backupRetention))
         {
-            ErrorText.Text = "Check numeric values.";
+            ErrorText.Text = "Check numeric values. Minimum play duration must be a whole number from 1 to 300 seconds.";
             return;
         }
 
@@ -127,6 +130,7 @@ public partial class SettingsWindow : Window
         _settings.Update(s =>
         {
             s.Tracking.Enabled = TrackingEnabled.IsChecked == true;
+            s.Tracking.MinimumAttemptSeconds = minimumAttemptSeconds;
             s.Tracking.RetentionDays = Math.Max(0, retention);
             s.Capture.LazerReplayFrameEnabled = LazerReplayFrameEnabled.IsChecked == true;
             s.OpenTabletDriver.InstallPath = OtdPath.Text.Trim();

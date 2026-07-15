@@ -31,6 +31,7 @@ public partial class WelcomeWindow : Window
         var saved = settings.Current.FirstRunCompleted ? 0 : settings.Current.OnboardingProgressStep;
         _step = Math.Clamp(saved, 0, StepCount - 1);
         TrackingEnabled.IsChecked = settings.Current.Tracking.Enabled;
+        MinimumAttemptSeconds.Text = settings.Current.Tracking.MinimumAttemptSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         CaptureEnabled.IsChecked = settings.Current.Capture.LazerReplayFrameEnabled;
         RunAtLogin.IsChecked = settings.Current.Startup.RunAtLogin;
         StartMinimized.IsChecked = settings.Current.Startup.StartMinimized;
@@ -72,6 +73,11 @@ public partial class WelcomeWindow : Window
             FooterStatus.Text = "Install managed tosu before continuing, or disable play tracking.";
             return;
         }
+        if (_step == 2 && !TryReadMinimumAttemptSeconds(out _))
+        {
+            FooterStatus.Text = "Minimum play duration must be a whole number from 1 to 300 seconds.";
+            return;
+        }
         SaveDraft();
         _step = Math.Min(StepCount - 1, _step + 1);
         PersistProgress();
@@ -100,6 +106,8 @@ public partial class WelcomeWindow : Window
         {
             s.OnboardingProgressStep = _step;
             s.Tracking.Enabled = TrackingEnabled.IsChecked == true;
+            if (TryReadMinimumAttemptSeconds(out var minimumAttemptSeconds))
+                s.Tracking.MinimumAttemptSeconds = minimumAttemptSeconds;
             s.Capture.LazerReplayFrameEnabled = CaptureEnabled.IsChecked == true;
             s.Startup.RunAtLogin = RunAtLogin.IsChecked == true;
             s.Startup.StartMinimized = StartMinimized.IsChecked == true;
@@ -116,6 +124,11 @@ public partial class WelcomeWindow : Window
 
     private void Done_Click(object sender, RoutedEventArgs e)
     {
+        if (!TryReadMinimumAttemptSeconds(out _))
+        {
+            FooterStatus.Text = "Minimum play duration must be a whole number from 1 to 300 seconds.";
+            return;
+        }
         try
         {
             StartupRegistration.SetEnabled(
@@ -138,6 +151,14 @@ public partial class WelcomeWindow : Window
         });
         DismissRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    private bool TryReadMinimumAttemptSeconds(out int value)
+        => int.TryParse(
+               MinimumAttemptSeconds.Text,
+               System.Globalization.NumberStyles.Integer,
+               System.Globalization.CultureInfo.InvariantCulture,
+               out value)
+           && value is >= 1 and <= 300;
 
     public void ReleaseFromHost()
     {
@@ -210,15 +231,16 @@ public partial class WelcomeWindow : Window
     private void UpdateSummary()
     {
         SummaryTracking.Text = TrackingEnabled.IsChecked == true ? "Enabled" : "Disabled";
+        SummaryMinimumDuration.Text = TryReadMinimumAttemptSeconds(out var minimumAttemptSeconds)
+            ? $"{minimumAttemptSeconds} seconds"
+            : "Invalid";
         SummaryCapture.Text = CaptureEnabled.IsChecked == true ? "Enabled" : "Disabled";
         SummaryOtd.Text = AutoLaunchOtd.IsChecked == true ? "Enabled" : "Disabled";
         SummaryStartup.Text = RunAtLogin.IsChecked == true
             ? StartMinimized.IsChecked == true ? "Enabled (minimized)" : "Enabled"
             : "Disabled";
         if (TrackingEnabled.IsChecked != _initialTracking || CaptureEnabled.IsChecked != _initialCapture)
-        {
-            FooterStatus.Text = "Restart Kumori after setup to apply tracking or capture service changes.";
-        }
+            FooterStatus.Text = "Tracking changes are applied automatically; an active play is allowed to finish first.";
     }
 
     private void Skin_Click(object sender, RoutedEventArgs e)

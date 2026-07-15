@@ -43,6 +43,7 @@ public partial class App : Application
     private AppStateStore? _store;
     private GameplayWorkCoordinator? _gameplayWork;
     private AttemptSqliteSink? _attemptPersistence;
+    private TrackingRuntimeController? _trackingRuntime;
     private CancellationTokenSource? _companionMonitorCts;
     private Task? _companionMonitorTask;
     private DispatcherTimer? _trayUpdateTimer;
@@ -378,8 +379,10 @@ public partial class App : Application
 
         // Background services start only after the shell is visible
         // (no-flicker startup plan: shell first, services second).
-        if (settings.Current.Tracking.Enabled)
+        Task StartTrackingRuntimeAsync(KumoriSettings runtimeSettings)
         {
+            if (!runtimeSettings.Tracking.Enabled || _tracking is not null)
+                return Task.CompletedTask;
             var profileTelemetry = new ProfileTelemetryStore(
                 factory,
                 (key, work) => gameplayWork.Enqueue(key, work));
@@ -546,7 +549,7 @@ public partial class App : Application
                 QueueMovementUiRefresh(recovery.AttemptId);
                 await Task.CompletedTask;
             }
-            if (settings.Current.Capture.LazerReplayFrameEnabled)
+            if (runtimeSettings.Capture.LazerReplayFrameEnabled)
             {
                 var lazerFrameSource = new LazerMemoryReplayFrameSource();
                 TrackBackground(
@@ -679,7 +682,9 @@ public partial class App : Application
             attemptSink = new GameplayActivityAttemptSink(attemptSink, gameplayWork);
             _tracking = new TosuTrackingService(
                 store,
-                attemptTracker: new AttemptTracker(attemptSink),
+                attemptTracker: new AttemptTracker(
+                    attemptSink,
+                    minimumAttemptSecondsProvider: () => settings.Current.Tracking.MinimumAttemptSeconds),
                 sessionTracker: new SessionTracker(new StatePublishingSessionSink(trackingSink, store)),
                 profileTelemetry: profileTelemetry,
                 primaryMediaMirror: settings.Current.Media.PrimaryMirror,
@@ -688,7 +693,7 @@ public partial class App : Application
                 replayPlaybackDetector: replayPlaybackDetector);
             _tracking.ClientKindObserved += StartReplayCaptureFor;
             _tracking.Start();
-            if (settings.Current.Capture.LazerReplayFrameEnabled)
+            if (runtimeSettings.Capture.LazerReplayFrameEnabled)
             {
                 var reconciliation = new PersistedReplayReconciliationService(
                     factory,
@@ -700,7 +705,46 @@ public partial class App : Application
                     "persisted replay reconciliation");
             }
             viewModel.SetEndLiveSessionHandler(() => Task.Run(() => _tracking?.EndSession() ?? false));
+            EnsureTosuForOsu(store);
+            return Task.CompletedTask;
         }
+
+        async Task StopTrackingRuntimeAsync()
+        {
+            var tracking = _tracking;
+            _tracking = null;
+            if (tracking is not null)
+            {
+                tracking.ClientKindObserved -= StartReplayCaptureFor;
+                await tracking.DisposeAsync();
+            }
+
+            var captureTasks = new List<Task>(2);
+            if (_lazerReplayFrames is not null)
+                captureTasks.Add(_lazerReplayFrames.DisposeAsync().AsTask());
+            if (_stableReplayFrames is not null)
+                captureTasks.Add(_stableReplayFrames.DisposeAsync().AsTask());
+            if (captureTasks.Count > 0)
+                await Task.WhenAll(captureTasks);
+            _lazerReplayFrames = null;
+            _stableReplayFrames = null;
+            _lazerReplayCaptureStarted = false;
+            _stableReplayCaptureStarted = false;
+            if (_attemptPersistence is not null)
+                await _attemptPersistence.FlushPendingPersistenceAsync();
+            TosuManager.CloseOwned();
+            lock (_osuCompanionGate)
+                _tosuStartedForOsu = false;
+            viewModel.SetEndLiveSessionHandler(null);
+        }
+
+        _trackingRuntime = new TrackingRuntimeController(
+            store,
+            StartTrackingRuntimeAsync,
+            StopTrackingRuntimeAsync,
+            (task, operation) => TrackBackground(task, operation),
+            status => Dispatcher.InvokeAsync(() => viewModel.HistoryStatus = status));
+        await _trackingRuntime.ApplyAsync(settings.Current);
 
     }
 
@@ -980,6 +1024,7 @@ public partial class App : Application
     {
         try
         {
+            _trackingRuntime?.Dispose();
             statusWindow.UpdateStatus("Stopping live tracking...");
             if (_tracking is not null)
             {
@@ -1103,6 +1148,7 @@ public partial class App : Application
 
     private void CleanupSynchronously()
     {
+        _trackingRuntime?.Dispose();
         if (_tracking is not null)
         {
             try { _tracking.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3)); } catch { }
@@ -1728,6 +1774,9 @@ public partial class App : Application
 
     private void HandleSettingsChanged(KumoriSettings settings)
     {
+        if (_trackingRuntime is not null && !_backgroundCts.IsCancellationRequested)
+            TrackBackground(_trackingRuntime.ApplyAsync(settings), "apply saved tracking settings");
+
         var synchronizeOtd = false;
         lock (_otdLifetimeGate)
         {

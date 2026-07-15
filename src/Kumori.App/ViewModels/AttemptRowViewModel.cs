@@ -29,6 +29,11 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
     public string Grade => Model.Grade ?? "-";
     public double GradeProgress => Math.Clamp(Model.Accuracy / 100d, 0d, 1d);
     public string AccuracyText => Invariant($"{Model.Accuracy:0.00}%");
+    public bool IsPartialAccuracy => !string.Equals(Model.Outcome, "completed", StringComparison.OrdinalIgnoreCase);
+    public string AccuracyQualifier => IsPartialAccuracy ? "PARTIAL" : "";
+    public string AccuracyToolTip => IsPartialAccuracy
+        ? "Accuracy for the played portion only. Partial plays are not eligible for best map accuracy."
+        : "Completed-play accuracy.";
     public string ScoreText => Model.Score.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
     public string ProgressText => Invariant($"{Math.Clamp(Model.Progress, 0, 1) * 100:0}%");
     public string MissesText => Model.Misses.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
@@ -38,8 +43,12 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
             ? $"{Model.Combo}/{Model.BeatmapMaxCombo}x"
             : $"{Model.Combo}x"
         : "";
+    public string PerformanceLine => string.Join("  ·  ", new[] { ComboText, PpText }.Where(value => !string.IsNullOrWhiteSpace(value)));
     public string ModsText => ModDisplayText.FromKey(Model.ModsKey);
-    public IReadOnlyList<string> ModAcronyms => ModDisplayText.AcronymsFromKey(Model.ModsKey);
+    public IReadOnlyList<string> ModAcronyms => ModDisplayOrder.Sort(ModDisplayText.AcronymsFromKey(Model.ModsKey));
+    public IReadOnlyList<ModEntry> ModEntries => ModDisplayOrder.Sort(Model.Mods.Count > 0
+        ? Model.Mods
+        : ModAcronyms.Select(acronym => new ModEntry(acronym, "{}")));
     public string Outcome => Model.Outcome.ToUpperInvariant();
     public string OutcomeWithProgress => string.Equals(Model.Outcome, "completed", StringComparison.OrdinalIgnoreCase)
         ? Outcome

@@ -67,6 +67,48 @@ public sealed class AttemptDetailsViewModelTests
     }
 
     [Fact]
+    public void Difficulty_adjust_tooltip_lists_effective_settings_in_stat_order()
+    {
+        var tooltip = Assert.IsType<string>(ModEntryToToolTipConverter.Instance.Convert(
+            new ModEntry(
+                "DA",
+                "{\"circle_size\":6,\"approach_rate\":10,\"drain_rate\":0,\"overall_difficulty\":10}"),
+            typeof(string),
+            null,
+            System.Globalization.CultureInfo.InvariantCulture));
+
+        Assert.Equal(
+            "Difficulty Adjust (DA)" + Environment.NewLine + "AR: 10  |  CS: 6  |  OD: 10  |  HP: 0",
+            tooltip);
+    }
+
+    [Fact]
+    public void Mod_display_order_matches_osu_web_without_mutating_storage_order()
+    {
+        ModEntry[] captured =
+        [
+            new("HR", "{}"), new("SO", "{}"), new("10K", "{}"), new("DA", "{}"),
+            new("HD", "{}"), new("NF", "{}"), new("2K", "{}"), new("AC", "{}"),
+            new("EZ", "{}"), new("RX", "{}"), new("AS", "{}"), new("TD", "{}"),
+        ];
+        var row = new AttemptRowViewModel(new AttemptSummary
+        {
+            ModsKey = "HRHD",
+            Mods = captured,
+        });
+        var details = new AttemptDetailsViewModel(null!)
+        {
+            Details = new AttemptDetails { Mods = captured },
+        };
+
+        string[] expected = ["EZ", "NF", "AC", "HD", "HR", "2K", "10K", "DA", "RX", "SO", "AS", "TD"];
+        Assert.Equal(expected, row.ModEntries.Select(mod => mod.Acronym));
+        Assert.Equal(expected, details.DisplayMods.Select(mod => mod.Acronym));
+        Assert.Equal("HDHR", row.ModsText);
+        Assert.Equal("HR", captured[0].Acronym);
+    }
+
+    [Fact]
     public async Task Movement_refresh_reloads_metadata_cached_before_deferred_persistence()
     {
         var databasePath = Path.Combine(

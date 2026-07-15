@@ -56,6 +56,7 @@ public partial class ReplayViewerGame : OsuGameBase
     private ComparisonContract? activeComparison;
     private ComparisonContract? importedComparison;
     private readonly Bindable<string> comparisonImportStatus = new(string.Empty);
+    private readonly List<Action> replayScreenUnbindActions = [];
     private bool osrPickerOpen;
 
     internal ReplayViewerGame(ViewerContract contract, BeatmapAnalysis analysis, PreparedReplayAnalysis? preparedAnalysis = null)
@@ -273,9 +274,12 @@ public partial class ReplayViewerGame : OsuGameBase
         Schedule(() =>
         {
             advancedAnalyzerOverlay?.Close();
+            var previousViewModel = advancedAnalyzerViewModel;
             advancedAnalyzerOverlay = null;
             advancedAnalyzerViewModel = null;
             comparisonOverlay = null;
+            unbindReplayScreenSettings();
+            previousViewModel?.Dispose();
             Clear();
             screenStack = new OsuScreenStack
             {
@@ -436,7 +440,7 @@ public partial class ReplayViewerGame : OsuGameBase
         var persisted = viewerConfig!.GetBindable<bool>(setting);
         target.Value = persisted.Value;
 
-        persisted.ValueChanged += value =>
+        Action<ValueChangedEvent<bool>> persistedChanged = value =>
         {
             if (target.Value != value.NewValue)
                 target.Value = value.NewValue;
@@ -444,13 +448,35 @@ public partial class ReplayViewerGame : OsuGameBase
             viewerConfig!.Save();
         };
 
-        target.ValueChanged += value =>
+        Action<ValueChangedEvent<bool>> targetChanged = value =>
         {
             if (persisted.Value != value.NewValue)
                 persisted.Value = value.NewValue;
 
             viewerConfig!.Save();
         };
+        persisted.ValueChanged += persistedChanged;
+        target.ValueChanged += targetChanged;
+        replayScreenUnbindActions.Add(() =>
+        {
+            persisted.ValueChanged -= persistedChanged;
+            target.ValueChanged -= targetChanged;
+        });
+    }
+
+    private void unbindReplayScreenSettings()
+    {
+        foreach (var unbind in replayScreenUnbindActions)
+            unbind();
+        replayScreenUnbindActions.Clear();
+    }
+
+    protected override void Dispose(bool isDisposing)
+    {
+        unbindReplayScreenSettings();
+        advancedAnalyzerViewModel?.Dispose();
+        advancedAnalyzerViewModel = null;
+        base.Dispose(isDisposing);
     }
 
     private void seedViewerSettingsFromContract()

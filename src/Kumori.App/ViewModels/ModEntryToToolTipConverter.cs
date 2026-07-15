@@ -20,10 +20,17 @@ public sealed class ModEntryToToolTipConverter : IValueConverter
             using var document = JsonDocument.Parse(mod.SettingsJson);
             if (document.RootElement.ValueKind != JsonValueKind.Object) return title;
             var settings = document.RootElement.EnumerateObject()
-                .Select(property => Format(property.Name, property.Value))
-                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Select(property => new Setting(property.Name, Format(property.Name, property.Value)))
+                .Where(setting => !string.IsNullOrWhiteSpace(setting.Text))
                 .ToArray();
-            return settings.Length == 0 ? title : title + Environment.NewLine + string.Join(Environment.NewLine, settings);
+            if (settings.Length == 0) return title;
+
+            var details = mod.Acronym.Equals("DA", StringComparison.OrdinalIgnoreCase)
+                ? string.Join("  |  ", settings
+                    .OrderBy(setting => DifficultyAdjustOrder(setting.Key))
+                    .Select(setting => setting.Text))
+                : string.Join(Environment.NewLine, settings.Select(setting => setting.Text));
+            return title + Environment.NewLine + details;
         }
         catch (JsonException)
         {
@@ -57,4 +64,15 @@ public sealed class ModEntryToToolTipConverter : IValueConverter
         };
         return string.IsNullOrWhiteSpace(rendered) ? "" : $"{label}: {rendered}";
     }
+
+    private static int DifficultyAdjustOrder(string key) => key.ToLowerInvariant() switch
+    {
+        "approach_rate" or "ar" => 0,
+        "circle_size" or "cs" => 1,
+        "overall_difficulty" or "od" => 2,
+        "drain_rate" or "hp" => 3,
+        _ => 4,
+    };
+
+    private sealed record Setting(string Key, string Text);
 }

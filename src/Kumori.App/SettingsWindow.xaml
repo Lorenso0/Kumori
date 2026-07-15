@@ -250,9 +250,9 @@
                                                             <StackPanel>
                                                                 <TextBlock x:Name="PreviewSecondaryText" Text="Selected play" Foreground="{DynamicResource Brush.TextSecondary}" />
                                                                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                                                    <Border x:Name="PreviewSuccess" Background="{DynamicResource Brush.Success}" CornerRadius="3" Padding="5,2" Margin="0,0,4,0"><TextBlock Text="300" FontSize="9" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
-                                                                    <Border x:Name="PreviewWarning" Background="{DynamicResource Brush.Warning}" CornerRadius="3" Padding="5,2" Margin="0,0,4,0"><TextBlock Text="50" FontSize="9" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
-                                                                    <Border x:Name="PreviewDanger" Background="{DynamicResource Brush.Danger}" CornerRadius="3" Padding="5,2"><TextBlock Text="MISS" FontSize="9" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
+                                                                    <Border x:Name="PreviewSuccess" Background="{DynamicResource Brush.Success}" CornerRadius="3" Padding="5,2" Margin="0,0,4,0"><TextBlock Text="300" FontSize="10" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
+                                                                    <Border x:Name="PreviewWarning" Background="{DynamicResource Brush.Warning}" CornerRadius="3" Padding="5,2" Margin="0,0,4,0"><TextBlock Text="50" FontSize="10" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
+                                                                    <Border x:Name="PreviewDanger" Background="{DynamicResource Brush.Danger}" CornerRadius="3" Padding="5,2"><TextBlock Text="MISS" FontSize="10" Foreground="{DynamicResource Brush.AppBackground}"/></Border>
                                                                 </StackPanel>
                                                             </StackPanel>
                                                         </Border>
@@ -311,7 +311,7 @@
                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/><ColumnDefinition Width="108"/></Grid.ColumnDefinitions>
                                                     <StackPanel VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Label}" Foreground="{DynamicResource Brush.TextPrimary}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource Brush.TextMuted}" FontSize="9" TextWrapping="Wrap" Margin="0,2,8,0" />
+                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,2,8,0" />
                                                     </StackPanel>
                                                     <Button Grid.Column="1" Width="26" Height="26" Padding="0" Background="{Binding Swatch}" BorderBrush="{DynamicResource Brush.StrongBorder}" Click="CustomSwatch_Click" ToolTip="Open in-app color picker" />
                                                     <TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" TextChanged="CustomColor_TextChanged" Margin="6,0,0,0" VerticalAlignment="Center" PreviewMouseDown="CustomHex_PreviewMouseDown" />
@@ -396,6 +396,8 @@
                                       Content="Start minimized to tray"
                                       IsEnabled="{Binding IsChecked, ElementName=RunAtLogin}" />
                         </UniformGrid>
+                        <TextBlock Text="Minimum play duration (seconds)" Style="{StaticResource SettingsLabel}" />
+                        <TextBox x:Name="MinimumAttemptSeconds" Width="120" HorizontalAlignment="Left" ToolTip="Whole seconds from 1 to 300. Shorter plays are not saved." />
                         <TextBlock Text="Retention days" Style="{StaticResource SettingsLabel}" />
                         <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" />
                     </StackPanel>
