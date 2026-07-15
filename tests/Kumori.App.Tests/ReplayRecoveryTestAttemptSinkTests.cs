@@ -29,7 +29,8 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
         Assert.NotNull(capture.LastStart);
         Assert.Null(capture.LastStart!.BeatmapStats.Stars);
         Assert.NotNull(capture.LastCheckpoint);
-        AssertMissing(capture.LastCheckpoint!.Snapshot);
+        Assert.Equal(snapshot.Score, capture.LastCheckpoint!.Snapshot.Score);
+        Assert.Equal(snapshot.N300, capture.LastCheckpoint.Snapshot.N300);
         Assert.NotNull(capture.LastFinalization);
         AssertMissing(capture.LastFinalization!.Snapshot);
         Assert.Equal(snapshot.DurationSeconds, capture.LastFinalization.Snapshot.DurationSeconds);
@@ -112,6 +113,9 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
             broken with { Snapshot = broken.Snapshot with { N300 = 3 } }));
         Assert.False(LazerReplayFrameRecoverySink.HasMissingTosuResult(
             broken with { Snapshot = broken.Snapshot with { TimingOffsets = [] } }));
+        Assert.True(LazerReplayFrameRecoverySink.HasMissingTosuResult(
+            broken with { Snapshot = broken.Snapshot with { TimingOffsets = [] } },
+            priorGameplayResult: true));
         Assert.True(LazerReplayFrameRecoverySink.HasMissingTosuResult(
             broken with { Outcome = "quit" }));
         Assert.False(LazerReplayFrameRecoverySink.HasMissingTosuResult(

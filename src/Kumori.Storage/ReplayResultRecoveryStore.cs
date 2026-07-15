@@ -234,8 +234,11 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
 
             var fields = new List<string>();
             bool replayRecovery = IsReplayRecovery(sourceJson);
+            bool checkpointOwnsCoreResult = CheckpointOwnsCoreResult(sourceJson);
             int simulatedCoreTotal = simulation.N300 + simulation.N100 + simulation.N50 + simulation.Misses;
-            if ((replayRecovery || simulationOwnsCoreResult) && simulatedCoreTotal > 0)
+            if ((replayRecovery || simulationOwnsCoreResult)
+                && !checkpointOwnsCoreResult
+                && simulatedCoreTotal > 0)
             {
                 Replace(ref n300, simulation.N300, "300");
                 Replace(ref n100, simulation.N100, "100");
@@ -249,6 +252,15 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 else
                     accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
                 score = FillLong(score, simulation.Score, "score");
+                combo = FillInt(combo, simulation.AchievedCombo, "combo");
+            }
+            else if (tosuResultWasMissing && simulatedCoreTotal > 0)
+            {
+                // A retained tosu checkpoint is stronger core-result evidence
+                // than a ruleset re-simulation, but simulation can still fill
+                // fields the broken final packet omitted entirely.
+                score = FillLong(score, simulation.Score, "score");
+                accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
                 combo = FillInt(combo, simulation.AchievedCombo, "combo");
             }
             sliderBreaks = FillInt(sliderBreaks, simulation.SliderBreaks, "slider breaks");

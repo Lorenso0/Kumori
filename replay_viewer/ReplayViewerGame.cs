@@ -145,6 +145,8 @@ public partial class ReplayViewerGame : OsuGameBase
             workingBeatmap,
             viewerConfig.GetBindable<bool>(KumoriViewerSetting.DisableHidden).Value);
         (double firstHitTime, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
+        double? analysisCoverageEnd = contract.ResolveAnalysisCoverageEnd(lastHitTime);
+        double? playbackEndTime = contract.ResolveReplayPlaybackEnd(lastHitTime);
         SelectedMods.Value = score.ScoreInfo.Mods;
         var player = new KumoriReplayPlayer(score)
         {
@@ -153,7 +155,7 @@ public partial class ReplayViewerGame : OsuGameBase
             ViewerConfig = viewerConfig,
             RequestReload = reloadReplayScreen,
             RequestWindowClose = () => gameHost?.Exit(),
-            PlaybackEndTime = contract.ReplayPlaybackEnd,
+            PlaybackEndTime = playbackEndTime,
             PlaybackRestartTime = firstHitTime,
             RecordedAccuracyOverride = usesAuthoritativeStableJudgements() ? contract.Attempt.Accuracy : null,
             Comparison = activeComparison,
@@ -166,6 +168,8 @@ public partial class ReplayViewerGame : OsuGameBase
         // player attaches it at positive depth so it renders underneath the
         // gameplay/HUD layers. Marker visibility binds to persisted settings
         // that the in-player "Kumori" settings group also edits.
+        if (playbackEndTime is { } playbackEnd)
+            lastHitTime = Math.Clamp(playbackEnd, firstHitTime + 1, lastHitTime);
         var seekBar = new KumoriSeekBar(
             firstHitTime,
             lastHitTime,
@@ -186,7 +190,7 @@ public partial class ReplayViewerGame : OsuGameBase
 
         seekBar.SetFinalHits(contract.FinalHits);
         seekBar.SetActualAccuracy(contract.Attempt.Accuracy);
-        seekBar.SetCaptureEnd(contract.ReplayPlaybackEnd);
+        seekBar.SetCaptureEnd(playbackEndTime);
         seekBar.AddMarkers(KumoriTimelineMarkers.FromContract(contract.JudgementEvents));
         Logger.Log("Kumori: prefilled seek bar from captured judgement events; runtime replay judgements will merge in as playback runs.");
 
@@ -203,7 +207,7 @@ public partial class ReplayViewerGame : OsuGameBase
                 analysisFrames,
                 preparedAnalysis.Judgements,
                 preparedAnalysis.Frames,
-                contract.AnalysisCoverageEnd);
+                analysisCoverageEnd);
             initialModel = MissAnalysisBuilder.MergeAuthoritative(
                 capturedModel,
                 simulatedModel,
@@ -258,7 +262,7 @@ public partial class ReplayViewerGame : OsuGameBase
                 workingBeatmap.Beatmap.HitObjects,
                 analysisFrames,
                 snapshots,
-                contract.AnalysisCoverageEnd);
+                analysisCoverageEnd);
             MissAnalysisModel mergedModel = MissAnalysisBuilder.MergeAuthoritative(
                 capturedModel,
                 simulatedModel,

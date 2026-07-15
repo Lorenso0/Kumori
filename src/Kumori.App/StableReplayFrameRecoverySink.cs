@@ -39,6 +39,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
     private readonly GameplayWorkCoordinator? workCoordinator;
     private readonly ConcurrentDictionary<long, byte> activeRecoveries = new();
     private AttemptStart? _start;
+    private bool sawGameplayResult;
     private DateTime _startedUtc;
 
     public StableReplayFrameRecoverySink(
@@ -73,6 +74,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
 
     public void StartAttempt(AttemptStart start)
     {
+        sawGameplayResult = false;
         _start = start.ClientKind == OsuClientKind.Stable ? start : null;
         _startedUtc = DateTime.UtcNow;
         if (_start is not null && recoverMovement)
@@ -97,7 +99,8 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         }
     }
 
-    public void Checkpoint(AttemptCheckpoint checkpoint) { }
+    public void Checkpoint(AttemptCheckpoint checkpoint)
+        => sawGameplayResult |= LazerReplayFrameRecoverySink.HasGameplayResult(checkpoint);
 
     public void DiscardIfEmpty(AttemptDiscard discard)
     {
@@ -109,6 +112,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
                 status.ActiveAttemptId = null;
             });
         _start = null;
+        sawGameplayResult = false;
     }
 
     public void Finalize(AttemptFinalization finalization)
@@ -116,10 +120,14 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         var start = _start;
         var attemptId = _attemptId();
         var startedUtc = _startedUtc;
+        bool capturedGameplayResult = sawGameplayResult;
         _start = null;
+        sawGameplayResult = false;
         if (start is null || attemptId is null)
             return;
-        bool tosuResultWasMissing = LazerReplayFrameRecoverySink.HasMissingTosuResult(finalization);
+        bool tosuResultWasMissing = LazerReplayFrameRecoverySink.HasMissingTosuResult(
+            finalization,
+            capturedGameplayResult);
         if (tosuResultWasMissing)
             resultTelemetryMissing?.Invoke(attemptId.Value);
         bool requiresRetainedSimulation = LazerReplayFrameRecoverySink.IsPartialOutcome(finalization.Outcome)
@@ -135,7 +143,11 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
                         : $"Attempt {attemptId} was partial; retained stable memory frames without matching a later saved score.";
                     status.ActiveAttemptId = null;
                 });
-            StartRetainedSimulationRecovery(start, attemptId.Value, tosuResultWasMissing);
+            StartRetainedSimulationRecovery(
+                start,
+                attemptId.Value,
+                tosuResultWasMissing,
+                simulationOwnsCoreResult: tosuResultWasMissing && !capturedGameplayResult);
             return;
         }
 
@@ -163,7 +175,11 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         }, CancellationToken.None);
     }
 
-    private void StartRetainedSimulationRecovery(AttemptStart start, long attemptId, bool tosuResultWasMissing)
+    private void StartRetainedSimulationRecovery(
+        AttemptStart start,
+        long attemptId,
+        bool tosuResultWasMissing,
+        bool simulationOwnsCoreResult)
     {
         if (!activeRecoveries.TryAdd(attemptId, 0))
             return;
@@ -198,7 +214,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
                         samples,
                         RequiresSimulation: true,
                         RequiresTosuRestart: false,
-                        SimulationOwnsCoreResult: tosuResultWasMissing,
+                        SimulationOwnsCoreResult: simulationOwnsCoreResult,
                         TosuResultWasMissing: tosuResultWasMissing));
                     Log.Information(
                         "Queued retained-frame stable ruleset simulation from {Count} frames for attempt {AttemptId}",

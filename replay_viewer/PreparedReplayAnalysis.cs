@@ -9,9 +9,10 @@ internal sealed record PreparedReplayAnalysis(
     IReadOnlyList<PreparedReplayFrame> Frames,
     PreparedReplaySimulationSummary? Summary = null)
 {
-    // Version 6 is produced by the scoring-safe simulation rate. Older files
-    // may have silently skipped short replay inputs while running at 100x.
-    public const int CurrentVersion = 6;
+    // Version 7 verifies completed replay-frame coverage against the beatmap
+    // before simulation. Version 6 could score a truncated completed capture
+    // through the uncaptured remainder and fill it with synthetic misses.
+    public const int CurrentVersion = 7;
 
     public static string PathFor(string contractPath) => contractPath + ".analysis.json";
 

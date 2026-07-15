@@ -102,6 +102,7 @@ public sealed class TrackingMaintenanceRepository
 
         using var con = OpenWriteConnection();
         using var tx = con.BeginTransaction();
+        int restoredFromCheckpoints = RestoreMissingResultsFromCheckpoints(con, tx);
         using var repair = con.CreateCommand();
         repair.Transaction = tx;
         repair.CommandText = """
@@ -121,6 +122,10 @@ public sealed class TrackingMaintenanceRepository
               AND EXISTS (
                   SELECT 1 FROM attempt_timing t
                   WHERE t.attempt_id = attempts.id AND t.hit_count > 0
+                  UNION ALL
+                  SELECT 1 FROM attempt_events e
+                  WHERE e.attempt_id = attempts.id
+                    AND e.event_type = 'checkpoint'
               )
               AND (
                   ABS(accuracy) > 0.000001
@@ -128,13 +133,117 @@ public sealed class TrackingMaintenanceRepository
                   OR instr(COALESCE(termination_evidence, ''), 'tosu_result_missing') = 0
               )
             """;
-        var repaired = repair.ExecuteNonQuery();
+        var neutralized = repair.ExecuteNonQuery();
+        int repaired = restoredFromCheckpoints + neutralized;
         if (repaired > 0)
         {
             RebuildPersonalBests(con, tx);
         }
         tx.Commit();
         return repaired;
+    }
+
+    private static int RestoreMissingResultsFromCheckpoints(
+        SqliteConnection con,
+        SqliteTransaction tx)
+    {
+        var candidates = new List<(long AttemptId, string SourceJson, string ScoreJson)>();
+        using (var read = con.CreateCommand())
+        {
+            read.Transaction = tx;
+            read.CommandText = """
+                SELECT a.id, COALESCE(c.source_json, '{}'), COALESCE(c.score_json, '{}')
+                FROM attempts a
+                LEFT JOIN attempt_context c ON c.attempt_id=a.id
+                WHERE a.outcome <> 'active'
+                  AND a.score = 0
+                  AND a.n300 + a.n100 + a.n50 + a.misses = 0
+                  AND EXISTS (
+                      SELECT 1 FROM attempt_events e
+                      WHERE e.attempt_id=a.id AND e.event_type='checkpoint'
+                  )
+                """;
+            using var reader = read.ExecuteReader();
+            while (reader.Read())
+            {
+                candidates.Add((
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    reader.GetString(2)));
+            }
+        }
+
+        int restored = 0;
+        foreach ((long attemptId, string sourceJson, string scoreJson) in candidates)
+        {
+            List<RecoveryCheckpoint> checkpoints = ReadRecoveryCheckpoints(con, tx, attemptId);
+            RecoveryCheckpoint? final = checkpoints.LastOrDefault(checkpoint => checkpoint.CoreTotal > 0);
+            if (final is null)
+                continue;
+
+            using (var update = con.CreateCommand())
+            {
+                update.Transaction = tx;
+                update.CommandText = """
+                    UPDATE attempts
+                    SET outcome=CASE
+                            WHEN outcome='completed' AND @progress < 0.98 THEN 'quit'
+                            ELSE outcome
+                        END,
+                        grade=CASE
+                            WHEN outcome='completed' AND @progress < 0.98 THEN NULL
+                            ELSE grade
+                        END,
+                        n300=@n300, n100=@n100, n50=@n50, misses=@misses,
+                        accuracy=@accuracy, combo=@combo, pp=@pp,
+                        progress=@progress, unstable_rate=@unstable_rate,
+                        termination_evidence=CASE
+                            WHEN instr(COALESCE(termination_evidence, ''), 'tosu_result_missing') > 0
+                                THEN termination_evidence
+                            WHEN termination_evidence IS NULL OR termination_evidence = ''
+                                THEN 'tosu_result_missing'
+                            ELSE termination_evidence || ':tosu_result_missing'
+                        END
+                    WHERE id=@id AND score=0 AND n300+n100+n50+misses=0
+                    """;
+                update.Parameters.AddWithValue("@n300", final.N300);
+                update.Parameters.AddWithValue("@n100", final.N100);
+                update.Parameters.AddWithValue("@n50", final.N50);
+                update.Parameters.AddWithValue("@misses", final.Misses);
+                update.Parameters.AddWithValue("@accuracy", final.Accuracy);
+                update.Parameters.AddWithValue("@combo", final.Combo);
+                update.Parameters.AddWithValue("@pp", final.Pp);
+                update.Parameters.AddWithValue("@progress", final.Progress);
+                update.Parameters.AddWithValue("@unstable_rate", final.UnstableRate);
+                update.Parameters.AddWithValue("@id", attemptId);
+                if (update.ExecuteNonQuery() == 0)
+                    continue;
+            }
+
+            string repairedSourceJson = MarkMissingResultCheckpointRepair(sourceJson);
+            string repairedScoreJson = RestoreScoreJsonCore(scoreJson, final);
+            using (var context = con.CreateCommand())
+            {
+                context.Transaction = tx;
+                context.CommandText = """
+                    INSERT INTO attempt_context(
+                        attempt_id, source_json, pp_json, beatmap_json,
+                        score_json, session_json, multiplayer_json)
+                    VALUES(@id, @source, '{}', '{}', @score, '{}', '{}')
+                    ON CONFLICT(attempt_id) DO UPDATE SET
+                        source_json=excluded.source_json,
+                        score_json=excluded.score_json
+                    """;
+                context.Parameters.AddWithValue("@id", attemptId);
+                context.Parameters.AddWithValue("@source", repairedSourceJson);
+                context.Parameters.AddWithValue("@score", repairedScoreJson);
+                context.ExecuteNonQuery();
+            }
+
+            RebuildCheckpointJudgementEvents(con, tx, attemptId, checkpoints);
+            restored++;
+        }
+        return restored;
     }
 
     /// <summary>
@@ -278,7 +387,12 @@ public sealed class TrackingMaintenanceRepository
                     Count(root, "n100"),
                     Count(root, "n50"),
                     Count(root, "misses"),
-                    Count(root, "slider_breaks")));
+                    Count(root, "slider_breaks"),
+                    Number(root, "accuracy"),
+                    Count(root, "combo"),
+                    Number(root, "pp"),
+                    Math.Clamp(Number(root, "progress"), 0, 1),
+                    Number(root, "unstable_rate")));
             }
             catch (JsonException)
             {
@@ -290,6 +404,11 @@ public sealed class TrackingMaintenanceRepository
         static int Count(JsonElement root, string name)
             => root.TryGetProperty(name, out var value) && value.TryGetDouble(out double number)
                 ? Math.Max(0, (int)Math.Round(number))
+                : 0;
+
+        static double Number(JsonElement root, string name)
+            => root.TryGetProperty(name, out var value) && value.TryGetDouble(out double number)
+                ? Math.Max(0, number)
                 : 0;
     }
 
@@ -327,6 +446,19 @@ public sealed class TrackingMaintenanceRepository
         }
         recovery["core_result_source"] = "tosu_checkpoint";
         recovery["core_result_repaired_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
+        root["result_recovery"] = recovery;
+        return root.ToJsonString();
+    }
+
+    private static string MarkMissingResultCheckpointRepair(string sourceJson)
+    {
+        JsonObject root;
+        try { root = JsonNode.Parse(sourceJson) as JsonObject ?? []; }
+        catch (JsonException) { root = []; }
+        var recovery = root["result_recovery"] as JsonObject ?? [];
+        recovery["reason"] = "tosu_gameplay_values_missing";
+        recovery["core_result_source"] = "tosu_checkpoint";
+        recovery["checkpoint_repaired_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
         root["result_recovery"] = recovery;
         return root.ToJsonString();
     }
@@ -400,7 +532,12 @@ public sealed class TrackingMaintenanceRepository
         int N100,
         int N50,
         int Misses,
-        int SliderBreaks)
+        int SliderBreaks,
+        double Accuracy,
+        int Combo,
+        double Pp,
+        double Progress,
+        double UnstableRate)
     {
         public int CoreTotal => N300 + N100 + N50 + Misses;
     }

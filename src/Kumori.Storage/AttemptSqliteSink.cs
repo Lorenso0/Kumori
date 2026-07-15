@@ -631,23 +631,30 @@ public sealed partial class AttemptSqliteSink : IAttemptSink, ISessionSink
         cancellationToken.ThrowIfCancellationRequested();
         if (attempt.Snapshot is { } snapshot)
         {
+            bool preserveExistingResult = attempt.Finalization is not null
+                                          && IsZeroResult(snapshot)
+                                          && HasStoredGameplayResult(con, tx, attempt.Id);
             if (attempt.Finalization is not null
                 && snapshot.TimingOffsets.Count > 0
-                && snapshot.Score == 0
-                && snapshot.N300 + snapshot.N100 + snapshot.N50 + snapshot.Misses <= 0)
+                && IsZeroResult(snapshot))
             {
                 // Timing data proves gameplay occurred, while the zero result is
                 // a broken-tosu placeholder. Persist neutral display values until
                 // the checksum-matched replay supplies the authoritative result.
                 snapshot = snapshot with { Accuracy = 0, Grade = null };
             }
-            UpdateAttempt(con, tx, attempt.Id, snapshot);
+            UpdateAttempt(con, tx, attempt.Id, snapshot, preserveExistingResult);
             if (snapshot.Mods.Count > 0 || !snapshot.ModsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
                 ReplaceMods(con, tx, attempt.Id, snapshot.ModsKey, snapshot.Mods);
             if (attempt.PersistRichSnapshot)
             {
-                UpsertTiming(con, tx, attempt.Id, snapshot);
-                UpsertContext(con, tx, attempt.Id, snapshot);
+                // Never let the same broken final packet overwrite coherent
+                // timing and JSON context after the scalar result was kept.
+                if (!preserveExistingResult)
+                {
+                    UpsertTiming(con, tx, attempt.Id, snapshot);
+                    UpsertContext(con, tx, attempt.Id, snapshot);
+                }
             }
         }
         foreach (var pending in attempt.Events)
@@ -658,22 +665,46 @@ public sealed partial class AttemptSqliteSink : IAttemptSink, ISessionSink
 
         if (attempt.Finalization is { } finalization)
         {
+            bool preserveExistingResult = attempt.Snapshot is { } finalSnapshot
+                                          && IsZeroResult(finalSnapshot)
+                                          && HasStoredGameplayResult(con, tx, attempt.Id);
             using var cmd = con.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = """
                 UPDATE attempts
-                SET outcome = @outcome,
+                SET outcome = CASE
+                        WHEN @preserve_existing_result = 1
+                             AND @outcome = 'completed'
+                             AND progress < 0.98
+                            THEN 'quit'
+                        ELSE @outcome
+                    END,
+                    grade = CASE
+                        WHEN @preserve_existing_result = 1
+                             AND @outcome = 'completed'
+                             AND progress < 0.98
+                            THEN NULL
+                        ELSE grade
+                    END,
                     termination_evidence = @evidence,
                     ended_at = @ended_at,
                     ended_at_utc_ms = @ended_at_utc_ms,
-                    progress = CASE WHEN @outcome = 'completed' THEN 1 ELSE progress END
+                    progress = CASE
+                        WHEN @outcome = 'completed' AND @preserve_existing_result = 0 THEN 1
+                        ELSE progress
+                    END
                 WHERE id = @id
                 """;
             cmd.Parameters.AddWithValue("@outcome", finalization.Outcome);
-            cmd.Parameters.AddWithValue("@evidence", finalization.Evidence);
+            string evidence = preserveExistingResult
+                && !finalization.Evidence.Contains("tosu_result_missing", StringComparison.Ordinal)
+                    ? $"{finalization.Evidence}:tosu_result_missing"
+                    : finalization.Evidence;
+            cmd.Parameters.AddWithValue("@evidence", evidence);
             cmd.Parameters.AddWithValue("@ended_at", IsoFromUnixSeconds(finalization.Snapshot.WallTime));
             cmd.Parameters.AddWithValue("@ended_at_utc_ms", UnixMilliseconds(finalization.Snapshot.WallTime));
             cmd.Parameters.AddWithValue("@id", attempt.Id);
+            cmd.Parameters.AddWithValue("@preserve_existing_result", preserveExistingResult ? 1 : 0);
             cmd.ExecuteNonQuery();
         }
 
@@ -681,6 +712,29 @@ public sealed partial class AttemptSqliteSink : IAttemptSink, ISessionSink
             UpsertInputSummary(con, tx, attempt.Id);
         if (attempt.Finalization?.Outcome is "completed" or "failed")
             UpdatePersonalBests(con, tx, attempt.Id);
+    }
+
+    private static bool IsZeroResult(AttemptSnapshot snapshot)
+        => snapshot.Score == 0
+           && snapshot.Combo <= 0
+           && snapshot.N300 + snapshot.N100 + snapshot.N50 + snapshot.Misses <= 0;
+
+    private static bool HasStoredGameplayResult(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId)
+    {
+        using var command = con.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = """
+            SELECT EXISTS(
+                SELECT 1 FROM attempts
+                WHERE id=@id
+                  AND (score > 0 OR combo > 0 OR n300 + n100 + n50 + misses > 0)
+            )
+            """;
+        command.Parameters.AddWithValue("@id", attemptId);
+        return Convert.ToInt32(command.ExecuteScalar()) != 0;
     }
 
     private static void DeleteAttempt(

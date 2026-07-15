@@ -63,11 +63,12 @@ internal partial class ReplayAnalysisGame : OsuGameBase
             Score score = ReplayScoreFactory.Create(contract, ruleset, workingBeatmap, disableHidden: false);
             sourceScore = score;
             SelectedMods.Value = score.ScoreInfo.Mods;
+            (_, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
             var player = new ReplaySimulationPlayer(
                 score,
                 ruleset,
                 workingBeatmap,
-                contract.AnalysisCoverageEnd,
+                contract.ResolveAnalysisCoverageEnd(lastHitTime),
                 complete,
                 fail)
             {

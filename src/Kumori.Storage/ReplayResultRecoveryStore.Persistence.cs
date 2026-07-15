@@ -262,6 +262,23 @@ public sealed partial class ReplayResultRecoveryStore
         update.ExecuteNonQuery();
     }
 
+    private static bool CheckpointOwnsCoreResult(string sourceJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(sourceJson);
+            return document.RootElement.TryGetProperty("result_recovery", out var recovery)
+                   && recovery.ValueKind == JsonValueKind.Object
+                   && recovery.TryGetProperty("core_result_source", out var source)
+                   && source.ValueKind == JsonValueKind.String
+                   && source.GetString()?.Equals("tosu_checkpoint", StringComparison.Ordinal) == true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static bool IsCoreResultField(string field)
         => field is "score" or "accuracy" or "grade" or "combo"
             or "300" or "100" or "50" or "misses";

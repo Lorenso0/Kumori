@@ -474,6 +474,61 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     }
 
     [Fact]
+    public void ApplySimulation_MissingFinalResultFillsHeaderWithoutOverwritingCheckpointCore()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        AttemptFinalization final = Final(score: 0, accuracy: 86.04, combo: 150, n300: 187, n100: 15);
+        sink.Finalize(final with
+        {
+            Outcome = "completed",
+            Snapshot = final.Snapshot with { N50 = 2, Misses = 21, Progress = 0.523 },
+        });
+        using (var seed = factory.Open())
+        using (var source = seed.CreateCommand())
+        {
+            source.CommandText = """
+                UPDATE attempt_context
+                SET source_json='{"result_recovery":{"reason":"tosu_gameplay_values_missing","core_result_source":"tosu_checkpoint"}}'
+                WHERE attempt_id=@id
+                """;
+            source.Parameters.AddWithValue("@id", id);
+            source.ExecuteNonQuery();
+        }
+
+        new ReplayResultRecoveryStore(factory).ApplySimulation(
+            id,
+            new ReplaySimulationResult
+            {
+                N300 = 187,
+                N100 = 15,
+                N50 = 2,
+                Misses = 25,
+                Accuracy = 84,
+                Score = 456_789,
+                AchievedCombo = 120,
+            },
+            simulationOwnsCoreResult: false,
+            tosuResultWasMissing: true);
+
+        using var con = factory.Open();
+        using var values = con.CreateCommand();
+        values.CommandText = "SELECT score, accuracy, combo, n300, n100, n50, misses FROM attempts WHERE id=@id";
+        values.Parameters.AddWithValue("@id", id);
+        using var reader = values.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(456_789, reader.GetInt64(0));
+        Assert.Equal(86.04, reader.GetDouble(1), precision: 4);
+        Assert.Equal(150, reader.GetInt32(2));
+        Assert.Equal(187, reader.GetInt32(3));
+        Assert.Equal(15, reader.GetInt32(4));
+        Assert.Equal(2, reader.GetInt32(5));
+        Assert.Equal(21, reader.GetInt32(6));
+    }
+
+    [Fact]
     public void ApplySimulation_FillsRichJudgementsAndTimingAndMarksProvenance()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);

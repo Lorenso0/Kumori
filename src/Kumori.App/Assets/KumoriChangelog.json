@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.4.4",
+    "date": "2026-07-16",
+    "improvements": [
+      "Stopped partial replay analysis at the last captured gameplay frame, reducing analysis time and keeping the seek bar within the recorded portion"
+    ],
+    "fixes": [
+      "Prevented incomplete replays marked as completed from simulating the uncaptured remainder of the map as misses",
+      "Prevented empty final telemetry from overwriting valid hit counts, accuracy, combo, performance, and timing captured during gameplay",
+      "Kept replay simulation and captured results under one consistent authority so grades, accuracy, hit counts, and judgements cannot contradict each other",
+      "Restored affected plays from their last coherent gameplay checkpoint during startup and classified truncated completed plays as unfinished"
+    ]
+  },
+  {
     "version": "0.4.3",
     "date": "2026-07-15",
     "major": [

@@ -30,9 +30,9 @@ internal sealed class ReplayRecoveryTestAttemptSink(
     }
 
     public void Checkpoint(AttemptCheckpoint checkpoint)
-        => inner.Checkpoint(forceCurrentAttempt
-            ? checkpoint with { Snapshot = WithoutResultTelemetry(checkpoint.Snapshot) }
-            : checkpoint);
+        // Gameplay checkpoints are the fallback authority when the final tosu
+        // result is missing. The diagnostic removes only the final result.
+        => inner.Checkpoint(checkpoint);
 
     public void DiscardIfEmpty(AttemptDiscard discard)
     {

@@ -96,41 +96,43 @@ public sealed partial class AttemptSqliteSink
         SqliteConnection con,
         SqliteTransaction tx,
         long attemptId,
-        AttemptSnapshot snapshot)
+        AttemptSnapshot snapshot,
+        bool preserveExistingResult = false)
     {
         using var cmd = con.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = """
             UPDATE attempts
-            SET progress = @progress,
+            SET progress = CASE WHEN @preserve_existing_result = 1 THEN progress ELSE @progress END,
                 duration_seconds = @duration,
-                score = @score,
-                accuracy = @accuracy,
-                grade = @grade,
-                pp = @pp,
-                fc_pp = @fc_pp,
-                max_pp = @max_pp,
-                combo = @combo,
-                n300 = @n300,
-                n100 = @n100,
-                n50 = @n50,
-                misses = @misses,
-                geki = @geki,
-                katu = @katu,
-                slider_breaks = @slider_breaks,
-                large_tick_hits = @large_tick_hits,
-                large_tick_misses = @large_tick_misses,
-                small_tick_hits = @small_tick_hits,
-                small_tick_misses = @small_tick_misses,
-                slider_tail_hits = @slider_tail_hits,
-                slider_tail_misses = @slider_tail_misses,
-                unstable_rate = @unstable_rate,
+                score = CASE WHEN @preserve_existing_result = 1 THEN score ELSE @score END,
+                accuracy = CASE WHEN @preserve_existing_result = 1 THEN accuracy ELSE @accuracy END,
+                grade = CASE WHEN @preserve_existing_result = 1 THEN grade ELSE @grade END,
+                pp = CASE WHEN @preserve_existing_result = 1 THEN pp ELSE @pp END,
+                fc_pp = CASE WHEN @preserve_existing_result = 1 THEN fc_pp ELSE @fc_pp END,
+                max_pp = CASE WHEN @preserve_existing_result = 1 THEN max_pp ELSE @max_pp END,
+                combo = CASE WHEN @preserve_existing_result = 1 THEN combo ELSE @combo END,
+                n300 = CASE WHEN @preserve_existing_result = 1 THEN n300 ELSE @n300 END,
+                n100 = CASE WHEN @preserve_existing_result = 1 THEN n100 ELSE @n100 END,
+                n50 = CASE WHEN @preserve_existing_result = 1 THEN n50 ELSE @n50 END,
+                misses = CASE WHEN @preserve_existing_result = 1 THEN misses ELSE @misses END,
+                geki = CASE WHEN @preserve_existing_result = 1 THEN geki ELSE @geki END,
+                katu = CASE WHEN @preserve_existing_result = 1 THEN katu ELSE @katu END,
+                slider_breaks = CASE WHEN @preserve_existing_result = 1 THEN slider_breaks ELSE @slider_breaks END,
+                large_tick_hits = CASE WHEN @preserve_existing_result = 1 THEN large_tick_hits ELSE @large_tick_hits END,
+                large_tick_misses = CASE WHEN @preserve_existing_result = 1 THEN large_tick_misses ELSE @large_tick_misses END,
+                small_tick_hits = CASE WHEN @preserve_existing_result = 1 THEN small_tick_hits ELSE @small_tick_hits END,
+                small_tick_misses = CASE WHEN @preserve_existing_result = 1 THEN small_tick_misses ELSE @small_tick_misses END,
+                slider_tail_hits = CASE WHEN @preserve_existing_result = 1 THEN slider_tail_hits ELSE @slider_tail_hits END,
+                slider_tail_misses = CASE WHEN @preserve_existing_result = 1 THEN slider_tail_misses ELSE @slider_tail_misses END,
+                unstable_rate = CASE WHEN @preserve_existing_result = 1 THEN unstable_rate ELSE @unstable_rate END,
                 base_stars = COALESCE(@base_stars, base_stars),
                 adjusted_stars = COALESCE(@adjusted_stars, adjusted_stars),
                 raw_json = @raw_json
             WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@progress", snapshot.Progress);
+        cmd.Parameters.AddWithValue("@preserve_existing_result", preserveExistingResult ? 1 : 0);
         cmd.Parameters.AddWithValue("@duration", snapshot.DurationSeconds);
         cmd.Parameters.AddWithValue("@score", snapshot.Score);
         cmd.Parameters.AddWithValue("@accuracy", snapshot.Accuracy);

@@ -6,6 +6,7 @@ namespace Kumori.ReplayViewer;
 public sealed record ViewerContract
 {
     private const int paused_sample_flag = 0x02;
+    private const double completed_capture_tolerance_ms = 1000;
     public const int CurrentVersion = 1;
 
     [JsonPropertyName("contract_version")]
@@ -97,18 +98,22 @@ public sealed record ViewerContract
             if (Attempt.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase))
                 return null;
 
-            double lastSample = Samples
-                .Where(sample => (sample.Flags & paused_sample_flag) == 0)
-                .Select(sample => sample.MapTimeMs)
-                .DefaultIfEmpty(double.NegativeInfinity)
-                .Max();
-            double lastJudgement = JudgementEvents
-                .Select(judgement => (double)judgement.MapTimeMs)
-                .DefaultIfEmpty(double.NegativeInfinity)
-                .Max();
-            double cutoff = Math.Max(lastSample, lastJudgement);
-            return double.IsFinite(cutoff) ? cutoff : null;
+            return capturedAnalysisEnd();
         }
+    }
+
+    /// <summary>
+    /// Resolves the analysis boundary after the beatmap is available. A result
+    /// packet can label an attempt completed even when replay-frame capture
+    /// ended early, so the label alone is not proof of a complete replay.
+    /// </summary>
+    public double? ResolveAnalysisCoverageEnd(double lastPlayableTime)
+    {
+        double? capturedEnd = capturedAnalysisEnd();
+        if (capturedEnd is null)
+            return null;
+
+        return isCompleteCapture(capturedEnd.Value, lastPlayableTime) ? null : capturedEnd;
     }
 
     /// <summary>
@@ -130,6 +135,42 @@ public sealed record ViewerContract
             return double.IsFinite(lastSample) ? lastSample : AnalysisCoverageEnd;
         }
     }
+
+    /// <summary>
+    /// Resolves the playback boundary after the beatmap is available. This
+    /// catches truncated frame streams whose attempt metadata says completed.
+    /// </summary>
+    public double? ResolveReplayPlaybackEnd(double lastPlayableTime)
+    {
+        double lastSample = Samples
+            .Where(sample => (sample.Flags & paused_sample_flag) == 0)
+            .Select(sample => sample.MapTimeMs)
+            .DefaultIfEmpty(double.NegativeInfinity)
+            .Max();
+        if (!double.IsFinite(lastSample))
+            return ResolveAnalysisCoverageEnd(lastPlayableTime);
+
+        return isCompleteCapture(lastSample, lastPlayableTime) ? null : lastSample;
+    }
+
+    private double? capturedAnalysisEnd()
+    {
+        double lastSample = Samples
+            .Where(sample => (sample.Flags & paused_sample_flag) == 0)
+            .Select(sample => sample.MapTimeMs)
+            .DefaultIfEmpty(double.NegativeInfinity)
+            .Max();
+        double lastJudgement = JudgementEvents
+            .Select(judgement => (double)judgement.MapTimeMs)
+            .DefaultIfEmpty(double.NegativeInfinity)
+            .Max();
+        double cutoff = Math.Max(lastSample, lastJudgement);
+        return double.IsFinite(cutoff) ? cutoff : null;
+    }
+
+    private bool isCompleteCapture(double capturedEnd, double lastPlayableTime)
+        => Attempt.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase)
+           && capturedEnd >= lastPlayableTime - completed_capture_tolerance_ms;
 
     public static ViewerContract Load(string path)
     {

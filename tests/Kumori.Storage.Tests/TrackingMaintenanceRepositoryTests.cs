@@ -178,6 +178,78 @@ public sealed class TrackingMaintenanceRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void StartupRepairRestoresLastCoherentCheckpointAfterZeroResultPacket()
+    {
+        var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
+        _ = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        using (var connection = factory.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO sessions(id, started_at, ended_at)
+                VALUES(1, '2026-07-15T22:11:00Z', '2026-07-15T22:13:00Z');
+                INSERT INTO beatmaps(id, identity) VALUES(1, 'map-a');
+                INSERT INTO attempts(
+                    id, session_id, beatmap_id, started_at, ended_at, outcome,
+                    termination_evidence, progress, score, accuracy, grade, pp, combo,
+                    n300, n100, n50, misses, unstable_rate)
+                VALUES(1, 1, 1, '2026-07-15T22:11:22Z', '2026-07-15T22:12:10Z',
+                       'completed', 'results_screen', 1, 0, 100, 'B', 58.22, 0,
+                       0, 0, 0, 0, 0);
+                INSERT INTO attempt_context(attempt_id, source_json, score_json)
+                VALUES(1, '{"client_kind":"lazer"}',
+                    '{"score":0,"grade":"B","hits":{"_300":0,"_100":0,"_50":0,"_0":0}}');
+                INSERT INTO attempt_events(
+                    attempt_id, captured_at, map_time_ms, event_type, value, data_json)
+                VALUES
+                    (1, '2026-07-15T22:11:23Z', 22, 'checkpoint', 0,
+                     '{"accuracy":0,"combo":0,"pp":0,"progress":0,"unstable_rate":0,"n300":0,"n100":0,"n50":0,"misses":0,"slider_breaks":0}'),
+                    (1, '2026-07-15T22:12:08Z', 46062, 'checkpoint', 87.14,
+                     '{"accuracy":86.04497354497354,"combo":150,"pp":87.14,"progress":0.5231345826235093,"unstable_rate":134.715,"n300":187,"n100":15,"n50":2,"misses":21,"slider_breaks":0}'),
+                    (1, '2026-07-15T22:12:10Z', 48163, 'checkpoint', 58.22,
+                     '{"accuracy":100,"combo":0,"pp":58.22,"progress":1,"unstable_rate":0,"n300":0,"n100":0,"n50":0,"misses":0,"slider_breaks":0}');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var repository = new TrackingMaintenanceRepository(factory);
+        Assert.Equal(1, repository.RepairMissingTosuResults());
+        Assert.Equal(0, repository.RepairMissingTosuResults());
+
+        using var verification = factory.Open();
+        using (var values = verification.CreateCommand())
+        {
+            values.CommandText = """
+                SELECT accuracy, pp, combo, n300, n100, n50, misses, progress,
+                       unstable_rate, termination_evidence, outcome, grade
+                FROM attempts WHERE id=1
+                """;
+            using var reader = values.ExecuteReader();
+            Assert.True(reader.Read());
+            Assert.Equal(86.04497354497354, reader.GetDouble(0), precision: 8);
+            Assert.Equal(87.14, reader.GetDouble(1), precision: 6);
+            Assert.Equal(150, reader.GetInt32(2));
+            Assert.Equal(187, reader.GetInt32(3));
+            Assert.Equal(15, reader.GetInt32(4));
+            Assert.Equal(2, reader.GetInt32(5));
+            Assert.Equal(21, reader.GetInt32(6));
+            Assert.Equal(0.5231345826235093, reader.GetDouble(7), precision: 8);
+            Assert.Equal(134.715, reader.GetDouble(8), precision: 6);
+            Assert.Contains("tosu_result_missing", reader.GetString(9));
+            Assert.Equal("quit", reader.GetString(10));
+            Assert.True(reader.IsDBNull(11));
+        }
+        Assert.Equal(21L, Scalar<long>(verification,
+            "SELECT COUNT(*) FROM attempt_events WHERE attempt_id=1 AND event_type='miss'"));
+        Assert.Equal(1L, Scalar<long>(verification,
+            "SELECT COUNT(*) FROM attempt_events WHERE attempt_id=1 AND event_type='hit_100'"));
+        string sourceJson = Scalar<string>(verification,
+            "SELECT source_json FROM attempt_context WHERE attempt_id=1");
+        Assert.Contains("tosu_gameplay_values_missing", sourceJson);
+        Assert.Contains("tosu_checkpoint", sourceJson);
+    }
+
+    [Fact]
     public void StartupRepairRestoresPartialTosuCountsAndEventsOverwrittenBySimulation()
     {
         var factory = new SqliteConnectionFactory(databasePath, readOnly: false);

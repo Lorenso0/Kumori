@@ -120,6 +120,77 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
+    public void BrokenFinalResult_PreservesLastCoherentGameplayCheckpoint()
+    {
+        var sink = CreateSink();
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "broken-final-result",
+            WallTime = 1_788_000_000,
+        });
+        sink.Checkpoint(new AttemptCheckpoint(
+            new AttemptSnapshot
+            {
+                Identity = "broken-final-result",
+                WallTime = 1_788_000_045,
+                DurationSeconds = 45,
+                Score = 450_000,
+                Accuracy = 86.04,
+                Grade = "B",
+                Pp = 87.14,
+                Combo = 150,
+                N300 = 187,
+                N100 = 15,
+                N50 = 2,
+                Misses = 21,
+                Progress = 0.523,
+            },
+            [],
+            Forced: true));
+        sink.Finalize(new AttemptFinalization(
+            "completed",
+            "results_screen",
+            new AttemptSnapshot
+            {
+                Identity = "broken-final-result",
+                WallTime = 1_788_000_048,
+                DurationSeconds = 48,
+                Accuracy = 100,
+                Grade = "B",
+                Progress = 1,
+            },
+            Ordinal: 1));
+
+        using var con = Open();
+        using var command = con.CreateCommand();
+        command.CommandText = """
+            SELECT score, accuracy, grade, pp, combo, n300, n100, n50, misses,
+                   progress, duration_seconds, termination_evidence, outcome
+            FROM attempts
+            """;
+        using var reader = command.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(450_000, reader.GetInt64(0));
+        Assert.Equal(86.04, reader.GetDouble(1), precision: 6);
+        Assert.True(reader.IsDBNull(2));
+        Assert.Equal(87.14, reader.GetDouble(3), precision: 6);
+        Assert.Equal(150, reader.GetInt32(4));
+        Assert.Equal(187, reader.GetInt32(5));
+        Assert.Equal(15, reader.GetInt32(6));
+        Assert.Equal(2, reader.GetInt32(7));
+        Assert.Equal(21, reader.GetInt32(8));
+        Assert.Equal(0.523, reader.GetDouble(9), precision: 6);
+        Assert.Equal(48, reader.GetDouble(10), precision: 6);
+        Assert.Contains("tosu_result_missing", reader.GetString(11));
+        Assert.Equal("quit", reader.GetString(12));
+        reader.Close();
+        Assert.Contains("450000", Scalar<string>(con,
+            "SELECT score_json FROM attempt_context"));
+        Assert.DoesNotContain("\"score\":0", Scalar<string>(con,
+            "SELECT score_json FROM attempt_context"));
+    }
+
+    [Fact]
     public void EmptyRetryPulse_IsDeletedAndReplacementUsesFreshDurableId()
     {
         var sink = CreateSink();

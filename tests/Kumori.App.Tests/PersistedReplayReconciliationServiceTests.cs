@@ -60,7 +60,7 @@ public sealed class PersistedReplayReconciliationServiceTests
     [InlineData("completed", "lazer_memory", 1000, 20, 10, 1, 0, 1, 11, "{}", false, false)]
     [InlineData("quit", "stable_memory", 1000, 20, 10, 1, 0, 1, 11, "{}", true, false)]
     [InlineData("quit", "lazer_memory", 0, 0, 0, 0, 0, 0, 0, "{}", false, false)]
-    [InlineData("abandoned", "lazer_memory", 25, 3, 2, 0, 0, 0, 2, "{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":2}}", true, true)]
+    [InlineData("abandoned", "lazer_memory", 25, 3, 2, 0, 0, 0, 2, "{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":2}}", true, false)]
     public void Partial_simulation_trigger_and_core_authority_are_explicit(
         string outcome,
         string movementSource,

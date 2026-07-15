@@ -28,6 +28,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
     private readonly GameplayWorkCoordinator? workCoordinator;
     private readonly ConcurrentDictionary<long, byte> activeRecoveries = new();
     private AttemptStart? start;
+    private bool sawGameplayResult;
     private long generation;
 
     public LazerReplayFrameRecoverySink(
@@ -54,6 +55,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
 
     public void StartAttempt(AttemptStart value)
     {
+        sawGameplayResult = false;
         start = value.ClientKind == OsuClientKind.Lazer ? value : null;
         if (start is not null)
         {
@@ -70,17 +72,26 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
             }
         }
     }
-    public void Checkpoint(AttemptCheckpoint checkpoint) { }
-    public void DiscardIfEmpty(AttemptDiscard discard) => start = null;
+    public void Checkpoint(AttemptCheckpoint checkpoint)
+        => sawGameplayResult |= HasGameplayResult(checkpoint);
+
+    public void DiscardIfEmpty(AttemptDiscard discard)
+    {
+        start = null;
+        sawGameplayResult = false;
+    }
 
     public void Finalize(AttemptFinalization finalization)
     {
         var capturedStart = start;
         var id = attemptId();
+        bool capturedGameplayResult = sawGameplayResult;
         long capturedGeneration = Volatile.Read(ref generation);
         start = null;
+        sawGameplayResult = false;
         if (capturedStart is null || id is null) return;
-        if (HasMissingTosuResult(finalization))
+        bool tosuResultWasMissing = HasMissingTosuResult(finalization, capturedGameplayResult);
+        if (tosuResultWasMissing)
         {
             Log.Warning(
                 "Detected missing tosu result telemetry for attempt {AttemptId}; restarting tosu while replay recovery continues",
@@ -95,7 +106,14 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         {
             try
             {
-                await RecoverAsync(capturedStart, finalization, id.Value, capturedGeneration, endedAt).ConfigureAwait(false);
+                await RecoverAsync(
+                    capturedStart,
+                    finalization,
+                    id.Value,
+                    capturedGeneration,
+                    endedAt,
+                    tosuResultWasMissing,
+                    simulationOwnsCoreResult: tosuResultWasMissing && !capturedGameplayResult).ConfigureAwait(false);
             }
             finally
             {
@@ -104,11 +122,13 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         }, CancellationToken.None);
     }
 
-    internal static bool HasMissingTosuResult(AttemptFinalization finalization)
+    internal static bool HasMissingTosuResult(
+        AttemptFinalization finalization,
+        bool priorGameplayResult = false)
     {
         AttemptSnapshot snapshot = finalization.Snapshot;
         return !finalization.Outcome.Equals("active", StringComparison.OrdinalIgnoreCase)
-               && snapshot.TimingOffsets.Count > 0
+               && (snapshot.TimingOffsets.Count > 0 || priorGameplayResult)
                && snapshot.Score == 0
                && snapshot.Combo <= 0
                && snapshot.N300 <= 0
@@ -117,12 +137,47 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
                && snapshot.Misses <= 0;
     }
 
+    internal static bool HasGameplayResult(AttemptCheckpoint checkpoint)
+    {
+        AttemptSnapshot snapshot = checkpoint.Snapshot;
+        if (snapshot.Score > 0
+            || snapshot.Combo > 0
+            || snapshot.N300 + snapshot.N100 + snapshot.N50 + snapshot.Misses > 0
+            || snapshot.TimingOffsets.Count > 0)
+            return true;
+
+        foreach (JudgementCapture.CapturedEvent capturedEvent in checkpoint.Events)
+        {
+            if (!capturedEvent.EventType.Equals("checkpoint", StringComparison.Ordinal))
+                continue;
+            try
+            {
+                using var document = JsonDocument.Parse(capturedEvent.DataJson);
+                JsonElement root = document.RootElement;
+                if (Count("n300") + Count("n100") + Count("n50") + Count("misses") > 0)
+                    return true;
+
+                int Count(string name)
+                    => root.TryGetProperty(name, out JsonElement value)
+                       && value.TryGetDouble(out double parsed)
+                        ? Math.Max(0, (int)Math.Round(parsed))
+                        : 0;
+            }
+            catch (JsonException)
+            {
+            }
+        }
+        return false;
+    }
+
     private async Task RecoverAsync(
         AttemptStart attempt,
         AttemptFinalization finalization,
         long id,
         long capturedGeneration,
-        DateTimeOffset endedAt)
+        DateTimeOffset endedAt,
+        bool tosuResultWasMissing,
+        bool simulationOwnsCoreResult)
     {
         try
         {
@@ -138,6 +193,8 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
                     startedAt,
                     endedAt,
                     state,
+                    tosuResultWasMissing,
+                    simulationOwnsCoreResult,
                     pass == SearchPassCount - 1,
                     token);
 
@@ -178,6 +235,8 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         DateTimeOffset startedAt,
         DateTimeOffset endedAt,
         RecoveryState state,
+        bool tosuResultWasMissing,
+        bool simulationOwnsCoreResult,
         bool isLastPass,
         CancellationToken operationToken)
     {
@@ -243,12 +302,15 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
 
         if (matched is null)
         {
-            if ((IsPartialOutcome(finalization.Outcome) || string.IsNullOrWhiteSpace(attempt.Checksum))
+            if ((IsPartialOutcome(finalization.Outcome)
+                 || string.IsNullOrWhiteSpace(attempt.Checksum)
+                 || tosuResultWasMissing && isLastPass)
                 && TryNotifyRetainedSimulation(
                     id,
                     beatmap,
                     state,
-                    HasMissingTosuResult(finalization),
+                    tosuResultWasMissing,
+                    simulationOwnsCoreResult,
                     operationToken))
             {
                 UpdateIfCurrent(capturedGeneration, status =>
@@ -442,6 +504,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         LazerBeatmapAssets beatmap,
         RecoveryState state,
         bool tosuResultWasMissing,
+        bool simulationOwnsCoreResult,
         CancellationToken operationToken)
     {
         if (state.PartialSimulationNotified)
@@ -466,7 +529,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
             samples,
             RequiresSimulation: true,
             RequiresTosuRestart: false,
-            SimulationOwnsCoreResult: tosuResultWasMissing,
+            SimulationOwnsCoreResult: simulationOwnsCoreResult,
             TosuResultWasMissing: tosuResultWasMissing));
         state.PartialSimulationNotified = true;
         Log.Information(

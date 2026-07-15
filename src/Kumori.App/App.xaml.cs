@@ -293,7 +293,7 @@ public partial class App : Application
         if (repairedMissingResults > 0)
         {
             Log.Warning(
-                "Neutralized {AttemptCount} broken tosu result row(s) while persisted replay recovery remains pending",
+                "Repaired or neutralized {AttemptCount} broken tosu result row(s) while replay recovery remains pending",
                 repairedMissingResults);
         }
         if (repairedPartialSimulationResults > 0)

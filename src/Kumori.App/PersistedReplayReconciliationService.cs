@@ -515,7 +515,9 @@ internal sealed class PersistedReplayReconciliationService
                               && retainedReplayFrames
                               && hasGameplayEvidence
                               && !HasCurrentResultSimulation(source);
-        return new PartialSimulationDecision(shouldSimulate, shouldSimulate && resultWasMissing);
+        return new PartialSimulationDecision(
+            shouldSimulate,
+            shouldSimulate && resultWasMissing && coreTotal == 0);
     }
 
     private sealed record Candidate(long AttemptId, DateTimeOffset StartedAt, DateTimeOffset EndedAt,
