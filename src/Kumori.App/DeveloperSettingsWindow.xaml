@@ -82,6 +82,37 @@
 
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
+                        <TextBlock Text="Windows startup" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Read the live per-user Windows startup registration and show the executable it will launch."
+                                   Style="{StaticResource SettingsHint}" />
+                        <Button Content="Show automatic startup executable"
+                                Click="ShowStartupExecutable_Click"
+                                HorizontalAlignment="Left" />
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="StartupExecutablePath"
+                                     IsReadOnly="True"
+                                     Visibility="Collapsed"
+                                     TextWrapping="Wrap"
+                                     Padding="8,5" />
+                            <Button Grid.Column="1"
+                                    Content="Select new .exe"
+                                    Click="SelectStartupExecutable_Click"
+                                    Margin="8,0,0,0" />
+                        </Grid>
+                        <TextBlock Text="A selected executable is registered when you save. Leave the startup option disabled to save it for later without launching it at sign-in."
+                                   Style="{StaticResource Text.Muted}"
+                                   FontSize="10"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
                         <TextBlock Text="Cache additions" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Inspect why Kumori added or installed each local cache item. Newest entries appear first."
                                    Style="{StaticResource SettingsHint}" />

@@ -33,6 +33,7 @@ public partial class WelcomeWindow : Window
         TrackingEnabled.IsChecked = settings.Current.Tracking.Enabled;
         CaptureEnabled.IsChecked = settings.Current.Capture.LazerReplayFrameEnabled;
         RunAtLogin.IsChecked = settings.Current.Startup.RunAtLogin;
+        StartMinimized.IsChecked = settings.Current.Startup.StartMinimized;
         AutoLaunchOtd.IsChecked = settings.Current.OpenTabletDriver.AutoLaunch;
         OtdPath.Text = settings.Current.OpenTabletDriver.InstallPath;
         UpdateOtdState();
@@ -101,6 +102,7 @@ public partial class WelcomeWindow : Window
             s.Tracking.Enabled = TrackingEnabled.IsChecked == true;
             s.Capture.LazerReplayFrameEnabled = CaptureEnabled.IsChecked == true;
             s.Startup.RunAtLogin = RunAtLogin.IsChecked == true;
+            s.Startup.StartMinimized = StartMinimized.IsChecked == true;
             s.OpenTabletDriver.AutoLaunch = AutoLaunchOtd.IsChecked == true;
             s.OpenTabletDriver.InstallPath = OtdPath.Text.Trim();
         });
@@ -116,7 +118,10 @@ public partial class WelcomeWindow : Window
     {
         try
         {
-            StartupRegistration.SetEnabled(RunAtLogin.IsChecked == true);
+            StartupRegistration.SetEnabled(
+                RunAtLogin.IsChecked == true,
+                StartMinimized.IsChecked == true,
+                _settings.Current.Startup.ExecutablePath);
         }
         catch (Exception ex)
         {
@@ -207,7 +212,9 @@ public partial class WelcomeWindow : Window
         SummaryTracking.Text = TrackingEnabled.IsChecked == true ? "Enabled" : "Disabled";
         SummaryCapture.Text = CaptureEnabled.IsChecked == true ? "Enabled" : "Disabled";
         SummaryOtd.Text = AutoLaunchOtd.IsChecked == true ? "Enabled" : "Disabled";
-        SummaryStartup.Text = RunAtLogin.IsChecked == true ? "Enabled" : "Disabled";
+        SummaryStartup.Text = RunAtLogin.IsChecked == true
+            ? StartMinimized.IsChecked == true ? "Enabled (minimized)" : "Enabled"
+            : "Disabled";
         if (TrackingEnabled.IsChecked != _initialTracking || CaptureEnabled.IsChecked != _initialCapture)
         {
             FooterStatus.Text = "Restart Kumori after setup to apply tracking or capture service changes.";

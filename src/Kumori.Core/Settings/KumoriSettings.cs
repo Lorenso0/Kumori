@@ -71,6 +71,8 @@ public sealed class KumoriSettings
     public sealed class StartupSettings
     {
         public bool RunAtLogin { get; set; } = false;
+        public bool StartMinimized { get; set; } = false;
+        public string ExecutablePath { get; set; } = "";
     }
 
     public sealed class WindowSettings

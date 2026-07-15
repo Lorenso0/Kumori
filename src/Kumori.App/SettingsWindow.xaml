@@ -392,6 +392,9 @@
                             <CheckBox x:Name="TrackingEnabled" Content="Log plays with tosu metadata" />
                             <CheckBox x:Name="LazerReplayFrameEnabled" Content="Capture osu! replay frames (stable and lazer)" />
                             <CheckBox x:Name="RunAtLogin" Content="Run Kumori when Windows starts" />
+                            <CheckBox x:Name="StartMinimized"
+                                      Content="Start minimized to tray"
+                                      IsEnabled="{Binding IsChecked, ElementName=RunAtLogin}" />
                         </UniformGrid>
                         <TextBlock Text="Retention days" Style="{StaticResource SettingsLabel}" />
                         <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" />
