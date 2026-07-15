@@ -24,15 +24,18 @@ public partial class LazerFrameDebugWindow : Window
         {
             Interval = TimeSpan.FromMilliseconds(500)
         };
-        _refreshTimer.Tick += (_, _) => Refresh();
+        _refreshTimer.Tick += RefreshTimer_Tick;
         _refreshTimer.Start();
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _refreshTimer.Stop();
+        _refreshTimer.Tick -= RefreshTimer_Tick;
         base.OnClosed(e);
     }
+
+    private void RefreshTimer_Tick(object? sender, EventArgs e) => Refresh();
 
     private void Refresh_Click(object sender, RoutedEventArgs e) => Refresh();
 

@@ -23,6 +23,7 @@ public sealed class TosuTrackingService : IAsyncDisposable
     private readonly AppStateStore _store;
     private readonly WebSocketPacketSource _source;
     private readonly TosuClient _client;
+    private readonly IReplayPlaybackDetector? _replayPlaybackDetector;
     private readonly AttemptTracker? _attemptTracker;
     private readonly SessionTracker? _sessionTracker;
     private readonly IProfileTelemetrySink? _profileTelemetry;
@@ -62,6 +63,7 @@ public sealed class TosuTrackingService : IAsyncDisposable
         IReplayPlaybackDetector? replayPlaybackDetector = null)
     {
         _store = store;
+        _replayPlaybackDetector = replayPlaybackDetector;
         _client = new TosuClient(replayPlaybackDetector);
         _source = new WebSocketPacketSource(uri, recordPackets);
         _attemptTracker = attemptTracker;
@@ -582,6 +584,10 @@ public sealed class TosuTrackingService : IAsyncDisposable
             }
         }
         await _source.DisposeAsync();
+        if (_replayPlaybackDetector is IAsyncDisposable asyncDisposable)
+            await asyncDisposable.DisposeAsync();
+        else if (_replayPlaybackDetector is IDisposable disposable)
+            disposable.Dispose();
         _cts.Dispose();
     }
 

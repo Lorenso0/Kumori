@@ -109,6 +109,29 @@ public sealed class AttemptDetailsViewModelTests
     }
 
     [Fact]
+    public void Mod_display_distinguishes_no_mods_and_falls_back_to_the_summary_key()
+    {
+        var details = new AttemptDetailsViewModel(null!)
+        {
+            Details = new AttemptDetails
+            {
+                Summary = new AttemptSummary { ModsKey = "NM" },
+            },
+        };
+
+        Assert.False(details.HasDisplayMods);
+        Assert.Empty(details.DisplayMods);
+
+        details.Details = new AttemptDetails
+        {
+            Summary = new AttemptSummary { ModsKey = "HDDA" },
+        };
+
+        Assert.True(details.HasDisplayMods);
+        Assert.Equal(["HD", "DA"], details.DisplayMods.Select(mod => mod.Acronym));
+    }
+
+    [Fact]
     public async Task Movement_refresh_reloads_metadata_cached_before_deferred_persistence()
     {
         var databasePath = Path.Combine(

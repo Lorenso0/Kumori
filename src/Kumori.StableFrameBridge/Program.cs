@@ -4,11 +4,42 @@ using Kumori.Native;
 try { System.Diagnostics.Process.GetCurrentProcess().PriorityClass = System.Diagnostics.ProcessPriorityClass.BelowNormal; }
 catch { }
 
-string? gameFolder = args.Length > 0 ? args[0] : null;
+string? gameFolder = null;
+int? parentProcessId = null;
+long? parentStartUtcTicks = null;
+for (var index = 0; index < args.Length; index++)
+{
+    switch (args[index])
+    {
+        case "--game-folder" when index + 1 < args.Length:
+            gameFolder = args[++index];
+            break;
+        case "--parent-pid" when index + 1 < args.Length
+            && int.TryParse(args[++index], out var parsedProcessId):
+            parentProcessId = parsedProcessId;
+            break;
+        case "--parent-start-utc-ticks" when index + 1 < args.Length
+            && long.TryParse(args[++index], out var parsedStartTicks):
+            parentStartUtcTicks = parsedStartTicks;
+            break;
+        default:
+            // Preserve the bridge's historical positional game-folder option
+            // for direct diagnostic launches.
+            gameFolder ??= args[index];
+            break;
+    }
+}
+
+using System.Diagnostics.Process? parentProcess = openParentProcess(
+    parentProcessId,
+    parentStartUtcTicks);
+if (parentProcessId is not null && parentProcess is null)
+    return 4;
+
 StableClrReplayReader? attachingReader = null;
 string? lastAttachDiagnostic = null;
 var attachDiagnosticInterval = System.Diagnostics.Stopwatch.StartNew();
-while (attachingReader is null)
+while (attachingReader is null && parentIsAlive(parentProcess, parentStartUtcTicks))
 {
     attachingReader = StableClrReplayReader.TryAttach(gameFolder);
     string diagnostic = StableClrReplayReader.LastAttachDiagnostic;
@@ -22,6 +53,8 @@ while (attachingReader is null)
     if (attachingReader is null)
         await Task.Delay(StableClrReplayReader.AttachPollInterval);
 }
+if (attachingReader is null)
+    return 0;
 using StableClrReplayReader reader = attachingReader;
 using StableRawReplayReader? diagnosticReader = StableRawReplayReader.TryAttach(gameFolder);
 
@@ -35,7 +68,7 @@ string diagnosticRequestPath = Path.Combine(
 string diagnosticAttemptSignalPath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
     "Kumori", "runtime", "debug", "stable-memory-attempt-active.signal");
-while (true)
+while (parentIsAlive(parentProcess, parentStartUtcTicks))
 {
     IReadOnlyList<Kumori.Tracking.LazerReplayFrame> frames;
     bool attemptActive = File.Exists(diagnosticAttemptSignalPath);
@@ -99,4 +132,44 @@ while (true)
         Console.Error.Flush();
     }
     await Task.Delay(reader.PollInterval);
+}
+
+return 0;
+
+static System.Diagnostics.Process? openParentProcess(int? processId, long? expectedStartUtcTicks)
+{
+    if (processId is null)
+        return null;
+    try
+    {
+        var process = System.Diagnostics.Process.GetProcessById(processId.Value);
+        if (!parentIsAlive(process, expectedStartUtcTicks))
+        {
+            process.Dispose();
+            return null;
+        }
+        return process;
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+static bool parentIsAlive(
+    System.Diagnostics.Process? process,
+    long? expectedStartUtcTicks)
+{
+    if (process is null)
+        return true;
+    try
+    {
+        return !process.HasExited
+               && expectedStartUtcTicks is not null
+               && process.StartTime.ToUniversalTime().Ticks == expectedStartUtcTicks.Value;
+    }
+    catch
+    {
+        return false;
+    }
 }

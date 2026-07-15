@@ -96,6 +96,15 @@ public sealed class KumoriViewerConfigTests : IDisposable
         Assert.Equal(Axes.None, panel.RelativeSizeAxes & Axes.X);
     }
 
+    [Theory]
+    [InlineData("HRHD", "HD", "HR")]
+    [InlineData("10K2KEZNF", "EZ", "NF", "2K", "10K")]
+    [InlineData("[\"SO\",\"HR\",\"RX\",\"HD\"]", "HD", "HR", "RX", "SO")]
+    public void ComparisonReplayModsUseOfficialDisplayOrder(string modsKey, params string[] expected)
+    {
+        Assert.Equal(expected, ReplayModDisplayOrder.FromKey(modsKey));
+    }
+
     [Fact]
     public void ComparisonMovementUsesTheSameInterpolatedPositionForCursorAndJudgements()
     {

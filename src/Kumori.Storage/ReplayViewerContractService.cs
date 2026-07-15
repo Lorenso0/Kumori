@@ -85,6 +85,7 @@ public sealed class ReplayViewerContractService
                 movement_source = "replay_result_recovery",
                 accuracy = details.Summary.Accuracy,
                 score = details.Summary.Score,
+                max_combo = details.BeatmapMaxCombo,
                 grade = details.Summary.Grade ?? "",
                 outcome = details.Summary.Outcome,
                 progress = details.Summary.Progress,
@@ -196,6 +197,7 @@ public sealed class ReplayViewerContractService
                 movement_source = metadata?.Source ?? "live",
                 accuracy = details.Summary.Accuracy,
                 score = details.Summary.Score,
+                max_combo = details.BeatmapMaxCombo,
                 grade = details.Summary.Grade ?? "",
                 outcome = details.Summary.Outcome,
                 progress = details.Summary.Progress,
@@ -238,6 +240,7 @@ public sealed class ReplayViewerContractService
                 score = candidate.summary.Score,
                 pp = candidate.summary.Pp,
                 combo = candidate.summary.Combo,
+                max_combo = details.BeatmapMaxCombo,
                 n300 = candidate.summary.N300,
                 n100 = candidate.summary.N100,
                 n50 = candidate.summary.N50,
@@ -438,8 +441,8 @@ public sealed class ReplayViewerContractService
         var repoRoot = Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "..", "..", ".."));
         var candidates = new[]
         {
-            Path.Combine(repoRoot, "replay_viewer", "bin", "Debug", "net8.0", "win-x64", "Kumori.ReplayViewer.exe"),
-            Path.Combine(repoRoot, "replay_viewer", "bin", "Debug", "net8.0", "Kumori.ReplayViewer.exe"),
+            Path.Combine(repoRoot, "replay_viewer", "bin", "Debug", "net10.0", "win-x64", "Kumori.ReplayViewer.exe"),
+            Path.Combine(repoRoot, "replay_viewer", "bin", "Debug", "net10.0", "Kumori.ReplayViewer.exe"),
             Path.Combine(baseDirectory, "Kumori.ReplayViewer", "Kumori.ReplayViewer.exe"),
             Path.Combine(repoRoot, "dist", "app", "Kumori.ReplayViewer", "Kumori.ReplayViewer.exe"),
             Path.Combine(repoRoot, "replay_viewer", "publish", "Kumori.ReplayViewer.exe"),

@@ -1,6 +1,10 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 using Kumori.Core;
 using Kumori.Core.Settings;
 using Kumori.Core.State;
@@ -16,6 +20,7 @@ public partial class WelcomeWindow : Window
     private readonly AppStateStore? _store;
     private readonly bool _initialTracking;
     private readonly bool _initialCapture;
+    private readonly bool _isReturning;
     private int _step;
     private bool _loaded;
     public event EventHandler? DismissRequested;
@@ -26,9 +31,10 @@ public partial class WelcomeWindow : Window
         _store = store;
         _initialTracking = settings.Current.Tracking.Enabled;
         _initialCapture = settings.Current.Capture.LazerReplayFrameEnabled;
+        _isReturning = settings.Current.FirstRunCompleted;
         InitializeComponent();
 
-        var saved = settings.Current.FirstRunCompleted ? 0 : settings.Current.OnboardingProgressStep;
+        var saved = _isReturning ? 0 : settings.Current.OnboardingProgressStep;
         _step = Math.Clamp(saved, 0, StepCount - 1);
         TrackingEnabled.IsChecked = settings.Current.Tracking.Enabled;
         MinimumAttemptSeconds.Text = settings.Current.Tracking.MinimumAttemptSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -37,6 +43,7 @@ public partial class WelcomeWindow : Window
         StartMinimized.IsChecked = settings.Current.Startup.StartMinimized;
         AutoLaunchOtd.IsChecked = settings.Current.OpenTabletDriver.AutoLaunch;
         OtdPath.Text = settings.Current.OpenTabletDriver.InstallPath;
+        ConfigureModeCopy();
         UpdateOtdState();
         RefreshChecks();
         RenderStep();
@@ -48,6 +55,7 @@ public partial class WelcomeWindow : Window
                 if (_loaded) return;
                 _loaded = true;
                 RefreshChecks();
+                MoveFocusToCurrentStep();
             };
         }
         if (_store is not null)
@@ -57,12 +65,13 @@ public partial class WelcomeWindow : Window
     }
 
     private UIElement[] Steps => [WelcomeStep, SystemStep, TrackingStep, CaptureStep, OptionalStep, ReadyStep];
+    private FrameworkElement[] StepHeadings => [WelcomeHeading, SystemHeading, TrackingHeading, CaptureHeading, OptionalHeading, ReadyHeading];
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
-        SaveDraft();
+        if (!_isReturning) SaveDraft();
         _step = Math.Max(0, _step - 1);
-        PersistProgress();
+        if (!_isReturning) PersistProgress();
         RenderStep();
     }
 
@@ -70,17 +79,17 @@ public partial class WelcomeWindow : Window
     {
         if (_step == 2 && TrackingEnabled.IsChecked == true && !File.Exists(AppPaths.TosuExecutable))
         {
-            FooterStatus.Text = "Install managed tosu before continuing, or disable play tracking.";
+            ShowValidation("Install managed tosu before continuing, or disable play tracking.", InstallTosuButton);
             return;
         }
         if (_step == 2 && !TryReadMinimumAttemptSeconds(out _))
         {
-            FooterStatus.Text = "Minimum play duration must be a whole number from 1 to 300 seconds.";
+            ShowValidation("Minimum play duration must be a whole number from 1 to 300 seconds.", MinimumAttemptSeconds);
             return;
         }
-        SaveDraft();
+        if (!_isReturning) SaveDraft();
         _step = Math.Min(StepCount - 1, _step + 1);
-        PersistProgress();
+        if (!_isReturning) PersistProgress();
         RenderStep();
     }
 
@@ -91,13 +100,106 @@ public partial class WelcomeWindow : Window
         Steps[_step].Visibility = Visibility.Visible;
         StepCounter.Text = $"STEP {_step + 1} OF {StepCount}";
         StepProgress.Value = _step + 1;
-        HeaderSubtitle.Text = titles[_step];
+        HeaderSubtitle.Text = _isReturning
+            ? $"{titles[_step]} · Changes apply only when you save."
+            : $"{titles[_step]} · Progress is saved automatically.";
         BackButton.IsEnabled = _step > 0;
         NextButton.Visibility = _step < StepCount - 1 ? Visibility.Visible : Visibility.Collapsed;
         FinishButton.Visibility = _step == StepCount - 1 ? Visibility.Visible : Visibility.Collapsed;
-        FooterStatus.Text = "Progress is saved automatically.";
+        SetFooterStatus(
+            _isReturning ? "Nothing has been applied yet." : "Progress is saved automatically.",
+            isError: false,
+            announce: false);
+        CaptureRestartNote.Visibility = CaptureEnabled.IsChecked != _initialCapture
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         if (_step is 1 or 2 or 3) RefreshChecks();
         if (_step == StepCount - 1) UpdateSummary();
+        if (_loaded) MoveFocusToCurrentStep();
+    }
+
+    private void ConfigureModeCopy()
+    {
+        if (!_isReturning)
+        {
+            CancelButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        Title = "Review Kumori Setup";
+        HeaderTitle.Text = "Review Kumori setup";
+        CancelButton.Visibility = Visibility.Visible;
+        FinishButton.Content = "Save changes";
+        AutomationProperties.SetName(FinishButton, "Save setup changes");
+        ReadyHeading.Text = "Review changes";
+        ReadyIntro.Text = "Confirm your choices below. Nothing changes until you choose Save changes.";
+        ReadyPrimaryMessage.Text = "Ready to update Kumori.";
+        ReadySecondaryMessage.Text = "Choose Save changes to apply these choices, or Cancel to keep your current setup.";
+        CaptureRestartNote.Text = "This change is not applied until you save. If a play is active then, it applies after the play finishes.";
+    }
+
+    private void MoveFocusToCurrentStep()
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            StepScroller.ScrollToTop();
+            var heading = StepHeadings[_step];
+            heading.Focus();
+            Keyboard.Focus(heading);
+            RaiseLiveRegionChanged(StepCounter);
+        }, DispatcherPriority.Input);
+    }
+
+    private void ShowTrackingValidation(string message, FrameworkElement target)
+    {
+        _step = 2;
+        if (!_isReturning) PersistProgress();
+        RenderStep();
+        ShowValidation(message, target);
+    }
+
+    private void ShowValidation(string message, FrameworkElement target)
+    {
+        SetFooterStatus(message, isError: true, announce: true);
+        Dispatcher.InvokeAsync(() =>
+        {
+            target.Focus();
+            Keyboard.Focus(target);
+            if (target is TextBox textBox) textBox.SelectAll();
+        }, DispatcherPriority.Input);
+    }
+
+    private void SetFooterStatus(string message, bool isError, bool announce)
+    {
+        FooterStatus.Text = message;
+        FooterStatus.SetResourceReference(
+            TextBlock.ForegroundProperty,
+            isError ? "Brush.Warning" : "Brush.TextSecondary");
+        if (announce && _loaded)
+        {
+            Dispatcher.InvokeAsync(
+                () => RaiseLiveRegionChanged(FooterStatus),
+                DispatcherPriority.ContextIdle);
+        }
+    }
+
+    private static void RaiseLiveRegionChanged(UIElement element)
+    {
+        var peer = UIElementAutomationPeer.FromElement(element)
+            ?? UIElementAutomationPeer.CreatePeerForElement(element);
+        peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+    }
+
+    private void SetLiveText(TextBlock target, string text)
+    {
+        if (string.Equals(target.Text, text, StringComparison.Ordinal)) return;
+        target.Text = text;
+        if (_loaded && target.IsVisible)
+        {
+            Dispatcher.InvokeAsync(
+                () => RaiseLiveRegionChanged(target),
+                DispatcherPriority.ContextIdle);
+        }
     }
 
     private void SaveDraft()
@@ -124,9 +226,18 @@ public partial class WelcomeWindow : Window
 
     private void Done_Click(object sender, RoutedEventArgs e)
     {
+        if (TrackingEnabled.IsChecked == true && !File.Exists(AppPaths.TosuExecutable))
+        {
+            ShowTrackingValidation(
+                "Install managed tosu before saving, or disable play tracking.",
+                InstallTosuButton);
+            return;
+        }
         if (!TryReadMinimumAttemptSeconds(out _))
         {
-            FooterStatus.Text = "Minimum play duration must be a whole number from 1 to 300 seconds.";
+            ShowTrackingValidation(
+                "Minimum play duration must be a whole number from 1 to 300 seconds.",
+                MinimumAttemptSeconds);
             return;
         }
         try
@@ -138,7 +249,7 @@ public partial class WelcomeWindow : Window
         }
         catch (Exception ex)
         {
-            FooterStatus.Text = $"Could not update Windows startup: {ex.Message}";
+            ShowValidation($"Could not update Windows startup: {ex.Message}", FinishButton);
             return;
         }
 
@@ -149,7 +260,31 @@ public partial class WelcomeWindow : Window
             s.OnboardingVersion = CurrentOnboardingVersion;
             s.OnboardingProgressStep = StepCount - 1;
         });
-        DismissRequested?.Invoke(this, EventArgs.Empty);
+        RequestDismiss();
+    }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_isReturning) return;
+        RequestDismiss();
+    }
+
+    private void SetupRoot_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!_isReturning || e.Key != Key.Escape) return;
+        e.Handled = true;
+        RequestDismiss();
+    }
+
+    private void RequestDismiss()
+    {
+        if (DismissRequested is { } dismissRequested)
+        {
+            dismissRequested.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        Close();
     }
 
     private bool TryReadMinimumAttemptSeconds(out int value)
@@ -170,17 +305,17 @@ public partial class WelcomeWindow : Window
         InstallTosuButton.IsEnabled = false;
         TosuProgress.Visibility = Visibility.Visible;
         TosuProgress.IsIndeterminate = true;
-        TosuActionStatus.Text = "Checking the latest managed tosu release…";
+        SetLiveText(TosuActionStatus, "Checking the latest managed tosu release…");
         try
         {
             var result = await TosuManager.EnsureInstalledAsync(forceCheck: true);
-            TosuActionStatus.Text = result.InstalledOrUpdated
+            SetLiveText(TosuActionStatus, result.InstalledOrUpdated
                 ? $"Installed tosu {result.Version}."
-                : $"tosu {result.Version} is already ready.";
+                : $"tosu {result.Version} is already ready.");
         }
         catch (Exception ex)
         {
-            TosuActionStatus.Text = $"tosu setup failed: {ex.Message}";
+            SetLiveText(TosuActionStatus, $"tosu setup failed: {ex.Message}");
         }
         finally
         {
@@ -219,10 +354,17 @@ public partial class WelcomeWindow : Window
         };
     }
 
-    private static void SetStatus(TextBlock target, string text, bool positive)
+    private void SetStatus(TextBlock target, string text, bool positive)
     {
+        var changed = !string.Equals(target.Text, text, StringComparison.Ordinal);
         target.Text = text;
         target.SetResourceReference(TextBlock.ForegroundProperty, positive ? "Brush.Success" : "Brush.TextMuted");
+        if (changed && _loaded && SystemStep.IsVisible)
+        {
+            Dispatcher.InvokeAsync(
+                () => RaiseLiveRegionChanged(target),
+                DispatcherPriority.ContextIdle);
+        }
     }
 
     private void Store_StateChanged(AppState state)
@@ -240,7 +382,14 @@ public partial class WelcomeWindow : Window
             ? StartMinimized.IsChecked == true ? "Enabled (minimized)" : "Enabled"
             : "Disabled";
         if (TrackingEnabled.IsChecked != _initialTracking || CaptureEnabled.IsChecked != _initialCapture)
-            FooterStatus.Text = "Tracking changes are applied automatically; an active play is allowed to finish first.";
+        {
+            SetFooterStatus(
+                _isReturning
+                    ? "Changes are ready to save; nothing has been applied yet."
+                    : "Tracking changes are applied automatically; an active play is allowed to finish first.",
+                isError: false,
+                announce: false);
+        }
     }
 
     private void Skin_Click(object sender, RoutedEventArgs e)
@@ -267,26 +416,35 @@ public partial class WelcomeWindow : Window
         var detected = OpenTabletDriverService.Detect(OtdPath.Text.Trim());
         if (detected is null)
         {
-            OtdStatus.Text = "OpenTabletDriver was not found. This optional step can be skipped.";
+            SetLiveText(OtdStatus, "OpenTabletDriver was not found. This optional step can be skipped.");
             return;
         }
         OtdPath.Text = detected.ExecutablePath;
         AutoLaunchOtd.IsChecked = true;
-        OtdStatus.Text = $"Detected {detected.VersionOrUnknown()} at {detected.ExecutablePath}";
+        SetLiveText(OtdStatus, $"Detected {detected.VersionOrUnknown()} at {detected.ExecutablePath}");
         UpdateOtdState(preserveMessage: true);
     }
 
     private void AutoLaunchOtd_Changed(object sender, RoutedEventArgs e) => UpdateOtdState();
+
+    private void CaptureEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        CaptureRestartNote.Visibility = CaptureEnabled.IsChecked != _initialCapture
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (_loaded && CaptureRestartNote.IsVisible)
+            RaiseLiveRegionChanged(CaptureRestartNote);
+    }
 
     private void UpdateOtdState(bool preserveMessage = false)
     {
         var enabled = AutoLaunchOtd.IsChecked == true;
         OtdPath.IsEnabled = enabled;
         if (preserveMessage) return;
-        OtdStatus.Text = enabled
+        SetLiveText(OtdStatus, enabled
             ? string.IsNullOrWhiteSpace(OtdPath.Text)
                 ? "Choose an executable or use Detect."
                 : "OpenTabletDriver will run while Kumori is open."
-            : "Optional · auto-launch is off.";
+            : "Optional · auto-launch is off.");
     }
 }

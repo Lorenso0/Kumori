@@ -19,6 +19,8 @@ internal sealed record StagedKumoriUpdate(string Version, string TargetPath, str
 internal sealed partial class KumoriUpdateInstaller
 {
     private const string ApplyUpdateArgument = "--apply-update";
+    private const string UpdateHealthArgument = "--update-health-token";
+    internal static readonly TimeSpan UpdatedStartupTimeout = TimeSpan.FromMinutes(10);
     private static readonly HttpClient SharedHttp = CreateHttpClient();
     private readonly HttpClient http;
 
@@ -116,6 +118,48 @@ internal sealed partial class KumoriUpdateInstaller
 
         ApplyUpdate(processId, arguments[2], arguments[3], arguments[4]);
         return true;
+    }
+
+    /// <summary>
+    /// Completes the updater's health handshake. This is intentionally called
+    /// only after the shell, database, and configured tracking runtime have
+    /// initialized successfully.
+    /// </summary>
+    public static void SignalHealthy(IReadOnlyList<string> arguments) =>
+        SignalHealthy(arguments, AppPaths.RuntimeDir);
+
+    internal static bool SignalHealthy(IReadOnlyList<string> arguments, string runtimeDirectory)
+    {
+        var token = ParseHealthToken(arguments);
+        if (token is null)
+            return false;
+
+        Directory.CreateDirectory(runtimeDirectory);
+        var marker = HealthMarkerPath(runtimeDirectory, token);
+        var temporary = marker + ".new";
+        try
+        {
+            File.WriteAllText(temporary, DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            File.Move(temporary, marker, overwrite: true);
+            return true;
+        }
+        finally
+        {
+            TryDelete(temporary);
+        }
+    }
+
+    internal static string? ParseHealthToken(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index + 1 < arguments.Count; index++)
+        {
+            if (!string.Equals(arguments[index], UpdateHealthArgument, StringComparison.Ordinal))
+                continue;
+            return Guid.TryParseExact(arguments[index + 1], "N", out var token)
+                ? token.ToString("N")
+                : null;
+        }
+        return null;
     }
 
     public static void CleanupStaleFiles()
@@ -236,7 +280,10 @@ internal sealed partial class KumoriUpdateInstaller
         var target = Path.GetFullPath(targetArgument);
         var package = Path.GetFullPath(packageArgument);
         var backup = Path.Combine(Path.GetDirectoryName(target)!, $".Kumori.previous-{Guid.NewGuid():N}.exe");
-        var targetMoved = false;
+        var healthToken = Guid.NewGuid().ToString("N");
+        var healthMarker = HealthMarkerPath(AppPaths.RuntimeDir, healthToken);
+        var backupCreated = false;
+        Process? updatedProcess = null;
         try
         {
             try
@@ -258,45 +305,69 @@ internal sealed partial class KumoriUpdateInstaller
                 throw new InvalidDataException("The staged update changed after verification.");
             }
 
-            MoveWithRetry(target, backup);
-            targetMoved = true;
-            MoveWithRetry(package, target);
+            CopyWithRetry(target, backup);
+            backupCreated = true;
+            MoveWithRetry(package, target, overwrite: true);
             if (!string.Equals(ComputeSha256(target), actualHash, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidDataException("The installed update failed verification.");
             }
 
             TryDelete(Path.Combine(AppPaths.RuntimeDir, "update-error.txt"));
-            StartKumori(target, showChangelog: true);
+            TryDelete(healthMarker);
+            updatedProcess = StartKumori(target, showChangelog: true, healthToken);
+            WaitForHealthyStartup(updatedProcess, healthMarker);
+            updatedProcess.Dispose();
+            updatedProcess = null;
             TryDelete(backup);
         }
         catch (Exception ex)
         {
-            if (targetMoved)
-            {
-                TryDelete(target);
-                try { MoveWithRetry(backup, target); } catch { }
-            }
-            if (File.Exists(target))
+            StopUpdatedProcess(updatedProcess);
+            updatedProcess?.Dispose();
+            updatedProcess = null;
+
+            Exception? restoreFailure = null;
+            if (backupCreated)
             {
                 try
                 {
-                    Directory.CreateDirectory(AppPaths.RuntimeDir);
-                    File.WriteAllText(
-                        Path.Combine(AppPaths.RuntimeDir, "update-error.txt"),
-                        $"Kumori could not finish installing the update and restored the previous version.\n\n{ex.Message}");
+                    RestoreBackup(backup, target);
                 }
-                catch { }
-                try { StartKumori(target, showChangelog: false); } catch { }
+                catch (Exception recoveryException)
+                {
+                    restoreFailure = recoveryException;
+                }
+            }
+
+            var launchPath = restoreFailure is null && File.Exists(target)
+                ? target
+                : File.Exists(backup) ? backup : null;
+            var recoveryDetail = restoreFailure is null
+                ? "The previous version was restored."
+                : $"Automatic recovery could not replace Kumori.exe. The previous executable was retained at '{backup}'.\n\nRecovery error: {restoreFailure.Message}";
+            try
+            {
+                Directory.CreateDirectory(AppPaths.RuntimeDir);
+                File.WriteAllText(
+                    Path.Combine(AppPaths.RuntimeDir, "update-error.txt"),
+                    $"Kumori could not finish installing the update. {recoveryDetail}\n\nUpdate error: {ex.Message}");
+            }
+            catch { }
+
+            if (launchPath is not null)
+            {
+                try { StartKumori(launchPath, showChangelog: false, healthToken: null).Dispose(); } catch { }
             }
         }
         finally
         {
+            TryDelete(healthMarker);
             TryDelete(package);
         }
     }
 
-    private static void StartKumori(string target, bool showChangelog)
+    private static Process StartKumori(string target, bool showChangelog, string? healthToken)
     {
         var start = new ProcessStartInfo(target)
         {
@@ -307,7 +378,96 @@ internal sealed partial class KumoriUpdateInstaller
         {
             start.ArgumentList.Add("--show-changelog");
         }
-        _ = Process.Start(start) ?? throw new InvalidOperationException("The updated Kumori executable could not be started.");
+        if (healthToken is not null)
+        {
+            start.ArgumentList.Add(UpdateHealthArgument);
+            start.ArgumentList.Add(healthToken);
+        }
+        return Process.Start(start) ?? throw new InvalidOperationException("The updated Kumori executable could not be started.");
+    }
+
+    private static void WaitForHealthyStartup(Process process, string marker)
+    {
+        WaitForHealthyStartup(
+            () => File.Exists(marker),
+            () => process.HasExited,
+            () => process.ExitCode,
+            UpdatedStartupTimeout,
+            Stopwatch.GetTimestamp,
+            Stopwatch.GetElapsedTime,
+            Thread.Sleep);
+    }
+
+    internal static void WaitForHealthyStartup(
+        Func<bool> markerExists,
+        Func<bool> hasExited,
+        Func<int> getExitCode,
+        TimeSpan timeout,
+        Func<long> getTimestamp,
+        Func<long, TimeSpan> getElapsedTime,
+        Action<TimeSpan> delay)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+
+        var startedAt = getTimestamp();
+        while (getElapsedTime(startedAt) < timeout)
+        {
+            if (markerExists())
+                return;
+            if (hasExited())
+                throw new InvalidOperationException($"The updated Kumori process exited with code {getExitCode()} before startup completed.");
+            delay(TimeSpan.FromMilliseconds(250));
+        }
+
+        // Give a marker written exactly on the deadline one final chance before
+        // rolling back an otherwise healthy update.
+        if (markerExists())
+            return;
+        if (hasExited())
+            throw new InvalidOperationException($"The updated Kumori process exited with code {getExitCode()} before startup completed.");
+        throw new TimeoutException("The updated Kumori process did not confirm a healthy startup in time.");
+    }
+
+    private static void StopUpdatedProcess(Process? process)
+    {
+        if (process is null)
+            return;
+        try
+        {
+            if (process.HasExited)
+                return;
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit((int)TimeSpan.FromSeconds(10).TotalMilliseconds);
+        }
+        catch
+        {
+            // The subsequent atomic restore will fail safely while the target
+            // remains locked; the retained backup is never deleted in that case.
+        }
+    }
+
+    private static string HealthMarkerPath(string runtimeDirectory, string token) =>
+        Path.Combine(runtimeDirectory, $"update-health-{token}.ready");
+
+    internal static void RestoreBackup(string backup, string target)
+    {
+        if (!File.Exists(backup))
+            throw new FileNotFoundException("The previous Kumori executable is unavailable.", backup);
+
+        var temporary = Path.Combine(
+            Path.GetDirectoryName(target)!,
+            $".Kumori.restore-{Guid.NewGuid():N}.exe");
+        try
+        {
+            CopyWithRetry(backup, temporary);
+            // Keep the current target in place until a complete replacement is
+            // ready. A failed copy therefore cannot leave Kumori.exe missing.
+            MoveWithRetry(temporary, target, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temporary);
+        }
     }
 
     private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)
@@ -331,19 +491,42 @@ internal sealed partial class KumoriUpdateInstaller
         }
     }
 
-    private static void MoveWithRetry(string source, string destination)
+    private static void MoveWithRetry(string source, string destination, bool overwrite = false)
     {
         const int attempts = 20;
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                File.Move(source, destination);
+                File.Move(source, destination, overwrite);
                 return;
             }
             catch (IOException) when (attempt < attempts)
             {
                 Thread.Sleep(250);
+            }
+        }
+    }
+
+    private static void CopyWithRetry(string source, string destination)
+    {
+        const int attempts = 20;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Copy(source, destination, overwrite: false);
+                return;
+            }
+            catch (IOException) when (attempt < attempts)
+            {
+                TryDelete(destination);
+                Thread.Sleep(250);
+            }
+            catch
+            {
+                TryDelete(destination);
+                throw;
             }
         }
     }

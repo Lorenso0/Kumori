@@ -23,6 +23,7 @@ public sealed class SessionRowViewModel : HistoryRowViewModel
 
     public bool IsCollapsed { get; }
     public string Chevron => IsCollapsed ? ">" : "v";
+    public string ToggleLabel => IsCollapsed ? "Expand session" : "Collapse session";
 
     public bool IsActive => _activeSessionId == Model.Id && string.IsNullOrEmpty(Model.EndedAt);
 

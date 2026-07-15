@@ -7,7 +7,7 @@
     <Color x:Key="Color.CardSelectedBackground">#3A2B35</Color>
     <Color x:Key="Color.ControlBackground">#27282C</Color>
     <Color x:Key="Color.ControlHoverBackground">#36373C</Color>
-    <Color x:Key="Color.SubtleBorder">#4B4C53</Color>
+    <Color x:Key="Color.SubtleBorder">#70717A</Color>
     <Color x:Key="Color.StrongBorder">#D84B91</Color>
     <Color x:Key="Color.AccentPink">#E84D9A</Color>
     <Color x:Key="Color.AccentPurple">#B78AF0</Color>
@@ -39,7 +39,7 @@
     <SolidColorBrush x:Key="Brush.BackgroundPrimary" Color="{StaticResource Color.AppBackground}" />
     <SolidColorBrush x:Key="Brush.BackgroundSecondary" Color="{StaticResource Color.PanelBackground}" />
     <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.SubtleBorder}" />
-    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="#4B4C53" />
     <SolidColorBrush x:Key="Brush.Negative" Color="{StaticResource Color.Danger}" />
     <SolidColorBrush x:Key="Brush.NavigationBackground" Color="#E6222327" />
     <SolidColorBrush x:Key="Brush.TopBarBackground" Color="#D928292D" />

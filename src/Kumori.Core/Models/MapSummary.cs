@@ -17,6 +17,7 @@ public sealed record MapSummary
     public double BestPp { get; init; }
     public double BestAccuracy { get; init; }
     public int BestCombo { get; init; }
+    public int BeatmapMaxCombo { get; init; }
     public double AverageAccuracy { get; init; }
     public double AveragePp { get; init; }
     public double AverageCombo { get; init; }

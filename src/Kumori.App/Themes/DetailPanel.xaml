@@ -2,14 +2,14 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Style x:Key="Panel.Surface" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource Brush.PanelBackground}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
     </Style>
 
     <Style x:Key="MetricTile" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="0,0,1,1" />
         <Setter Property="Padding" Value="9,6" />
         <Setter Property="MinHeight" Value="46" />
@@ -17,7 +17,7 @@
 
     <Style x:Key="CompactStatTile" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="0,0,1,1" />
         <Setter Property="Padding" Value="7,5" />
     </Style>
@@ -31,7 +31,7 @@
     <Style TargetType="Expander">
         <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Template">
@@ -44,6 +44,7 @@
                                           DockPanel.Dock="Top"
                                           Content="{TemplateBinding Header}"
                                           IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          MinHeight="24"
                                           Foreground="{DynamicResource Brush.TextSecondary}"
                                           Background="Transparent"
                                           BorderThickness="0"

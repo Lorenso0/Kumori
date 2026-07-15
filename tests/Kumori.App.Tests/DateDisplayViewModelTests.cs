@@ -70,4 +70,15 @@ public sealed class DateDisplayViewModelTests
         Assert.Equal(98.5, card.BestAccuracy);
         Assert.Equal(99.25, card.AverageAccuracy);
     }
+
+    [Fact]
+    public void MapComboTextShowsBestComboAgainstBeatmapMaximum()
+    {
+        var card = new MapCardViewModel("map", new[]
+        {
+            new AttemptSummary { Id = 1, Outcome = "completed", Combo = 184, BeatmapMaxCombo = 432 },
+        });
+
+        Assert.Equal("184/432", card.ComboText);
+    }
 }

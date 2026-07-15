@@ -32,6 +32,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.StableFrameBridge", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.ReplayViewer", "replay_viewer\Kumori.ReplayViewer.csproj", "{CA8C4542-7858-462F-8D57-48236487FB9D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kumori.AutoMapperCompatPatcher", "tools\Kumori.AutoMapperCompatPatcher\Kumori.AutoMapperCompatPatcher.csproj", "{E70A4C21-80FA-4C0A-A1A7-62B4A6A7C011}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -90,6 +92,10 @@ Global
 		{CA8C4542-7858-462F-8D57-48236487FB9D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CA8C4542-7858-462F-8D57-48236487FB9D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CA8C4542-7858-462F-8D57-48236487FB9D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E70A4C21-80FA-4C0A-A1A7-62B4A6A7C011}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E70A4C21-80FA-4C0A-A1A7-62B4A6A7C011}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E70A4C21-80FA-4C0A-A1A7-62B4A6A7C011}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E70A4C21-80FA-4C0A-A1A7-62B4A6A7C011}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{D3D3C9AE-1ED8-4ED6-9693-05A159F3B9E8} = {03D161BE-62EF-4B54-BE6F-0074D90EE034}

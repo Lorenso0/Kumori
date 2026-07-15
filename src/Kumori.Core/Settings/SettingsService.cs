@@ -40,8 +40,8 @@ public sealed class SettingsService
             {
                 try
                 {
-                    current = JsonSerializer.Deserialize<KumoriSettings>(
-                        File.ReadAllText(_settingsFile), JsonOptions) ?? new KumoriSettings();
+                    current = Normalize(JsonSerializer.Deserialize<KumoriSettings>(
+                        File.ReadAllText(_settingsFile), JsonOptions) ?? new KumoriSettings());
                     return current;
                 }
                 catch (Exception ex) when (ex is JsonException or NotSupportedException)
@@ -71,6 +71,7 @@ public sealed class SettingsService
         {
             next = Clone(current);
             mutate(next);
+            Normalize(next);
             SaveLocked(next);
             Volatile.Write(ref current, next);
         }
@@ -86,8 +87,68 @@ public sealed class SettingsService
     }
 
     private static KumoriSettings Clone(KumoriSettings settings) =>
-        JsonSerializer.Deserialize<KumoriSettings>(JsonSerializer.Serialize(settings, JsonOptions), JsonOptions)
-        ?? throw new InvalidOperationException("Settings snapshot could not be cloned.");
+        Normalize(JsonSerializer.Deserialize<KumoriSettings>(JsonSerializer.Serialize(settings, JsonOptions), JsonOptions)
+        ?? throw new InvalidOperationException("Settings snapshot could not be cloned."));
+
+    /// <summary>
+    /// Validates a settings document from a backup and removes values that can
+    /// cause external side effects before the user has reviewed them again.
+    /// Ordinary visual and tracking preferences are retained.
+    /// </summary>
+    public static string PrepareRestoredSettings(string json)
+    {
+        KumoriSettings restored;
+        try
+        {
+            restored = Normalize(JsonSerializer.Deserialize<KumoriSettings>(json, JsonOptions)
+                ?? throw new InvalidDataException("Backup settings are empty."));
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            throw new InvalidDataException("Backup settings are not a valid Kumori settings document.", ex);
+        }
+
+        restored.Version = 2;
+
+        // Backups are portable data, not authorization to launch executables,
+        // create persistence, reconfigure displays, contact a custom server,
+        // or write future backups to an arbitrary local/UNC path.
+        restored.OpenTabletDriver = new KumoriSettings.OpenTabletDriverSettings();
+        restored.Startup = new KumoriSettings.StartupSettings();
+        restored.Display = new KumoriSettings.DisplaySettings();
+        restored.Media = new KumoriSettings.MediaSettings();
+        restored.ReplayViewer.SkinPath = string.Empty;
+        restored.Tracking.MinimumAttemptSeconds = new KumoriSettings.TrackingSettings().MinimumAttemptSeconds;
+        restored.Tracking.RetentionDays = 0;
+        restored.Tracking.PacketRecordingEnabled = false;
+        restored.Backup = new KumoriSettings.BackupSettings();
+        restored.Developer = new KumoriSettings.DeveloperSettings();
+
+        return JsonSerializer.Serialize(restored, JsonOptions);
+    }
+
+    /// <summary>
+    /// Restores non-null defaults for sections that System.Text.Json permits a
+    /// hand-edited or older file to explicitly set to null.
+    /// </summary>
+    internal static KumoriSettings Normalize(KumoriSettings settings)
+    {
+        settings.Tracking ??= new KumoriSettings.TrackingSettings();
+        settings.ReplayViewer ??= new KumoriSettings.ReplayViewerSettings();
+        settings.Capture ??= new KumoriSettings.CaptureSettings();
+        settings.Media ??= new KumoriSettings.MediaSettings();
+        settings.OpenTabletDriver ??= new KumoriSettings.OpenTabletDriverSettings();
+        settings.Display ??= new KumoriSettings.DisplaySettings();
+        settings.Startup ??= new KumoriSettings.StartupSettings();
+        settings.Window ??= new KumoriSettings.WindowSettings();
+        settings.Appearance ??= new KumoriSettings.AppearanceSettings();
+        settings.Backup ??= new KumoriSettings.BackupSettings();
+        settings.Developer ??= new KumoriSettings.DeveloperSettings();
+        settings.Appearance.CustomTheme ??= new CustomThemeSettings();
+        settings.Appearance.CustomTheme.Colors ??= CustomThemePalette.CreateDefaultColors();
+        settings.Media.FallbackMirrors ??= [];
+        return settings;
+    }
 
     private bool TryPreserveCorruptSettings()
     {

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 
 namespace Kumori.Native;
@@ -8,14 +9,19 @@ public sealed class ProcessMemory : IDisposable
 {
     private const int ProcessVmRead = 0x0010;
     private const int ProcessQueryInformation = 0x0400;
-    private readonly nint _handle;
+    private readonly SafeProcessHandle _handle;
 
-    private ProcessMemory(nint handle) => _handle = handle;
+    private ProcessMemory(SafeProcessHandle handle) => _handle = handle;
 
     public static ProcessMemory Open(Process process)
     {
         var handle = OpenProcess(ProcessVmRead | ProcessQueryInformation, false, process.Id);
-        if (handle == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new Win32Exception(error);
+        }
         return new ProcessMemory(handle);
     }
 
@@ -23,7 +29,9 @@ public sealed class ProcessMemory : IDisposable
     public long ReadInt64(nint address) => BitConverter.ToInt64(Read(address, 8));
     public float ReadFloat(nint address) => BitConverter.ToSingle(Read(address, 4));
     public double ReadDouble(nint address) => BitConverter.ToDouble(Read(address, 8));
-    public nint ReadIntPtr(nint address) => (nint)BitConverter.ToInt64(Read(address, 8));
+    public nint ReadIntPtr(nint address) => IntPtr.Size == 8
+        ? (nint)BitConverter.ToInt64(Read(address, 8))
+        : (nint)BitConverter.ToInt32(Read(address, 4));
     public byte[] ReadBytes(nint address, int count) => Read(address, count);
 
     public void ReadBytes(nint address, byte[] buffer, int count)
@@ -31,7 +39,8 @@ public sealed class ProcessMemory : IDisposable
         ArgumentNullException.ThrowIfNull(buffer);
         if ((uint)count > (uint)buffer.Length)
             throw new ArgumentOutOfRangeException(nameof(count));
-        if (!ReadProcessMemory(_handle, address, buffer, count, out var bytesRead) || bytesRead != count)
+        if (!ReadProcessMemory(_handle, address, buffer, (nuint)count, out var bytesRead)
+            || bytesRead != (nuint)count)
             throw new Win32Exception(Marshal.GetLastWin32Error());
     }
 
@@ -56,7 +65,7 @@ public sealed class ProcessMemory : IDisposable
     public nint FindPointer(nint baseAddress, long size, nint value)
     {
         const int chunkSize = 1024 * 1024;
-        var needle = BitConverter.GetBytes(value.ToInt64());
+        var search = new ProcessMemoryPointerSearch(value, IntPtr.Size);
         var remaining = size;
         var address = baseAddress;
         while (remaining > 0)
@@ -66,10 +75,7 @@ public sealed class ProcessMemory : IDisposable
             try { buffer = Read(address, readSize); }
             catch { return 0; }
 
-            for (var i = 0; i <= buffer.Length - 8; i += 8)
-            {
-                if (buffer.AsSpan(i, 8).SequenceEqual(needle)) return address + i;
-            }
+            if (search.TrySearch(address, buffer, out var match)) return match;
 
             address += readSize;
             remaining -= readSize;
@@ -142,27 +148,34 @@ public sealed class ProcessMemory : IDisposable
     private byte[] Read(nint address, int count)
     {
         var buffer = new byte[count];
-        if (!ReadProcessMemory(_handle, address, buffer, count, out var bytesRead) || bytesRead != count)
+        if (!ReadProcessMemory(_handle, address, buffer, (nuint)count, out var bytesRead)
+            || bytesRead != (nuint)count)
             throw new Win32Exception(Marshal.GetLastWin32Error());
         return buffer;
     }
 
     public void Dispose()
     {
-        if (_handle != 0) CloseHandle(_handle);
+        _handle.Dispose();
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern nint OpenProcess(int desiredAccess, bool inheritHandle, int processId);
+    private static extern SafeProcessHandle OpenProcess(int desiredAccess, bool inheritHandle, int processId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool ReadProcessMemory(nint process, nint baseAddress, byte[] buffer, int size, out int bytesRead);
+    private static extern bool ReadProcessMemory(
+        SafeProcessHandle process,
+        nint baseAddress,
+        byte[] buffer,
+        nuint size,
+        out nuint bytesRead);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern int VirtualQueryEx(nint process, nint address, out MemoryBasicInformation buffer, nuint length);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(nint handle);
+    private static extern nuint VirtualQueryEx(
+        SafeProcessHandle process,
+        nint address,
+        out MemoryBasicInformation buffer,
+        nuint length);
 }
 
 public readonly record struct MemoryRegion(nint BaseAddress, long RegionSize, bool Writable, bool Executable, uint Type);

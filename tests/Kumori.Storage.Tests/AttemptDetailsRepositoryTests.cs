@@ -146,6 +146,26 @@ public class AttemptDetailsRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void GetDetails_OversizedSqliteTimingBlobKeepsSummaryWithoutLoadingOffsets()
+    {
+        using (var con = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            con.Open();
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = "UPDATE attempt_timing SET offsets_zlib = zeroblob(@size) WHERE attempt_id = 1";
+            cmd.Parameters.AddWithValue("@size", BlobCodec.MaxCompressedBytes + 1);
+            cmd.ExecuteNonQuery();
+        }
+
+        var details = CreateRepository().GetDetails(1);
+
+        Assert.NotNull(details?.Timing);
+        Assert.Empty(details!.Timing!.Offsets);
+        Assert.Equal(4, details.Timing.HitCount);
+        Assert.Equal(2.19, details.Timing.Mean);
+    }
+
+    [Fact]
     public void GetDetails_UnknownAttempt_ReturnsNull()
     {
         Assert.Null(CreateRepository().GetDetails(9999));

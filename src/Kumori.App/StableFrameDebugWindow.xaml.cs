@@ -17,15 +17,18 @@ public partial class StableFrameDebugWindow : Window
         DarkTitleBar.Apply(new System.Windows.Interop.WindowInteropHelper(this).Handle);
         Refresh();
         refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        refreshTimer.Tick += (_, _) => Refresh();
+        refreshTimer.Tick += RefreshTimer_Tick;
         refreshTimer.Start();
     }
 
     protected override void OnClosed(EventArgs e)
     {
         refreshTimer.Stop();
+        refreshTimer.Tick -= RefreshTimer_Tick;
         base.OnClosed(e);
     }
+
+    private void RefreshTimer_Tick(object? sender, EventArgs e) => Refresh();
 
     private void Refresh_Click(object sender, RoutedEventArgs e) => Refresh();
     private void Copy_Click(object sender, RoutedEventArgs e) => Clipboard.SetText(StatusText.Text);

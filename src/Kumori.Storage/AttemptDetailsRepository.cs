@@ -360,7 +360,7 @@ public sealed class AttemptDetailsRepository
     {
         using var cmd = con.CreateCommand();
         cmd.CommandText = """
-            SELECT offsets_zlib, hit_count, early_count, late_count,
+            SELECT length(offsets_zlib), offsets_zlib, hit_count, early_count, late_count,
                    mean, median, deviation
             FROM attempt_timing WHERE attempt_id = @id
             """;
@@ -373,7 +373,18 @@ public sealed class AttemptDetailsRepository
         double[] offsets;
         try
         {
-            offsets = BlobCodec.DecodeOffsets((byte[])r.GetValue(0));
+            var compressedLength = r.GetInt64(0);
+            if (compressedLength is < 0 or > BlobCodec.MaxCompressedBytes)
+            {
+                throw new InvalidDataException(
+                    $"Compressed timing data exceeds the {BlobCodec.MaxCompressedBytes:N0}-byte limit.");
+            }
+            var payload = (byte[])r.GetValue(1);
+            if (payload.LongLength != compressedLength)
+            {
+                throw new InvalidDataException("Timing data length changed while it was being read.");
+            }
+            offsets = BlobCodec.DecodeOffsets(payload);
         }
         catch
         {
@@ -382,12 +393,12 @@ public sealed class AttemptDetailsRepository
         return new TimingSummary
         {
             Offsets = offsets,
-            HitCount = (int)r.GetInt64(1),
-            EarlyCount = (int)r.GetInt64(2),
-            LateCount = (int)r.GetInt64(3),
-            Mean = r.GetDouble(4),
-            Median = r.GetDouble(5),
-            Deviation = r.GetDouble(6),
+            HitCount = (int)r.GetInt64(2),
+            EarlyCount = (int)r.GetInt64(3),
+            LateCount = (int)r.GetInt64(4),
+            Mean = r.GetDouble(5),
+            Median = r.GetDouble(6),
+            Deviation = r.GetDouble(7),
         };
     }
 

@@ -81,6 +81,29 @@ public class SettingsMigrationTests
     }
 
     [Fact]
+    public void Load_ReplacesExplicitlyNullSettingsSectionsWithDefaults()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.v2.json");
+            File.WriteAllText(path, """{"Tracking":null,"OpenTabletDriver":null,"Startup":null,"Appearance":null}""");
+
+            var loaded = new SettingsService(path, Path.Combine(dir.FullName, "missing.json")).Load();
+
+            Assert.NotNull(loaded.Tracking);
+            Assert.NotNull(loaded.OpenTabletDriver);
+            Assert.NotNull(loaded.Startup);
+            Assert.NotNull(loaded.Appearance);
+            Assert.NotNull(loaded.Appearance.CustomTheme);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void ImportLegacy_ToleratesGarbage()
     {
         var s = SettingsService.ImportLegacy("not json at all");

@@ -16,7 +16,7 @@ public readonly record struct ResponsiveLayoutState(ResponsiveLayoutMode Mode, b
 
 public static class ResponsiveLayoutResolver
 {
-    public const double CompactMaximumWidth = 899;
+    public const double CompactMaximumWidth = 1023;
     public const double StandardMaximumWidth = 1279;
     public const double ShortMaximumHeight = 599;
 

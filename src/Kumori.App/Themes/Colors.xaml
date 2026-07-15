@@ -42,6 +42,6 @@
     <SolidColorBrush x:Key="Brush.BackgroundPrimary" Color="{StaticResource Color.AppBackground}" />
     <SolidColorBrush x:Key="Brush.BackgroundSecondary" Color="{StaticResource Color.PanelBackground}" />
     <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.SubtleBorder}" />
-    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="#3C242F" />
     <SolidColorBrush x:Key="Brush.Negative" Color="{StaticResource Color.Danger}" />
 </ResourceDictionary>

@@ -8,6 +8,10 @@ namespace Kumori.Storage;
 
 public sealed class TrackingMaintenanceRepository
 {
+    internal const int MaxRawSnapshotCompressedBytes = 4 * 1024 * 1024;
+    internal const int MaxRawSnapshotDecompressedBytes = 16 * 1024 * 1024;
+    internal const int MaxRawSnapshotMods = 64;
+
     private readonly SqliteConnectionFactory _factory;
 
     public TrackingMaintenanceRepository(SqliteConnectionFactory factory)
@@ -46,12 +50,15 @@ public sealed class TrackingMaintenanceRepository
                 WHERE a.id=@id AND s.ended_at IS NULL
                 """, ("@id", attemptId)) > 0)
             throw new InvalidOperationException("An attempt in the active session cannot be deleted.");
+        using var tx = con.BeginTransaction();
         using var cmd = con.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "DELETE FROM attempts WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", attemptId);
         var deleted = cmd.ExecuteNonQuery();
-        RebuildPersonalBests(con);
-        PruneUnusedBeatmaps(con);
+        RebuildPersonalBests(con, tx);
+        PruneUnusedBeatmaps(con, tx);
+        tx.Commit();
         return deleted;
     }
 
@@ -63,12 +70,15 @@ public sealed class TrackingMaintenanceRepository
                 "SELECT COUNT(*) FROM sessions WHERE id=@id AND ended_at IS NULL",
                 ("@id", sessionId)) > 0)
             throw new InvalidOperationException("The active session cannot be deleted.");
+        using var tx = con.BeginTransaction();
         using var cmd = con.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "DELETE FROM sessions WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", sessionId);
         var deleted = cmd.ExecuteNonQuery();
-        RebuildPersonalBests(con);
-        PruneUnusedBeatmaps(con);
+        RebuildPersonalBests(con, tx);
+        PruneUnusedBeatmaps(con, tx);
+        tx.Commit();
         return deleted;
     }
 
@@ -83,9 +93,9 @@ public sealed class TrackingMaintenanceRepository
         cmd.Parameters.AddWithValue("@before", isoTimestamp);
         var deleted = cmd.ExecuteNonQuery();
         DeleteIfExists(con, tx, "profile_snapshots", "captured_at < @before", ("@before", isoTimestamp));
+        RebuildPersonalBests(con, tx);
+        PruneUnusedBeatmaps(con, tx);
         tx.Commit();
-        RebuildPersonalBests(con);
-        PruneUnusedBeatmaps(con);
         return deleted;
     }
 
@@ -160,10 +170,9 @@ public sealed class TrackingMaintenanceRepository
             WHERE ended_at IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.session_id=sessions.id)
             """);
-        Execute(con, tx, "DELETE FROM beatmaps WHERE id NOT IN (SELECT beatmap_id FROM attempts)");
+        RebuildPersonalBests(con, tx);
+        PruneUnusedBeatmaps(con, tx);
         tx.Commit();
-        RebuildPersonalBests(con);
-        PruneUnusedBeatmaps(con);
         return (invalid, emptySessions, reclassified);
     }
 
@@ -218,9 +227,9 @@ public sealed class TrackingMaintenanceRepository
             WHERE ended_at IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.session_id=sessions.id)
             """);
+        RebuildPersonalBests(con, tx);
+        PruneUnusedBeatmaps(con, tx);
         tx.Commit();
-        RebuildPersonalBests(con);
-        PruneUnusedBeatmaps(con);
         return (attempts, emptySessions);
     }
 
@@ -314,27 +323,49 @@ public sealed class TrackingMaintenanceRepository
         var updated = 0;
         using var select = con.CreateCommand();
         select.CommandText = """
-            SELECT a.id, r.payload_zlib
+            SELECT a.id, length(r.payload_zlib), r.payload_zlib
             FROM attempts a
             JOIN attempt_raw_snapshots r ON r.attempt_id=a.id
             WHERE r.kind='start'
             ORDER BY a.id
             """;
         using var reader = select.ExecuteReader();
-        var rows = new List<(long Id, byte[] Payload)>();
+        var rows = new List<(long Id, IReadOnlyList<(string Acronym, string SettingsJson)> Mods)>();
         while (reader.Read())
         {
-            rows.Add((reader.GetInt64(0), (byte[])reader["payload_zlib"]));
-        }
-        foreach (var (id, payload) in rows)
-        {
-            var mods = TryExtractMods(payload);
-            if (mods.Count == 0)
+            if (reader.IsDBNull(1))
             {
                 continue;
             }
+            var compressedLength = reader.GetInt64(1);
+            if (compressedLength < 0 || compressedLength > MaxRawSnapshotCompressedBytes)
+            {
+                continue;
+            }
+
+            var payload = (byte[])reader.GetValue(2);
+            if (payload.LongLength != compressedLength)
+            {
+                continue;
+            }
+
+            var mods = TryExtractMods(payload);
+            if (mods.Count > 0)
+            {
+                rows.Add((reader.GetInt64(0), mods));
+            }
+        }
+        reader.Close();
+
+        if (rows.Count == 0)
+        {
+            return 0;
+        }
+
+        using var tx = con.BeginTransaction();
+        foreach (var (id, mods) in rows)
+        {
             var modsKey = string.Join(",", mods.Select(m => m.Acronym));
-            using var tx = con.BeginTransaction();
             Execute(con, tx, "UPDATE attempts SET mods_key=@mods WHERE id=@id", ("@mods", (object)modsKey), ("@id", id));
             Execute(con, tx, "DELETE FROM attempt_mods WHERE attempt_id=@id", ("@id", id));
             for (var i = 0; i < mods.Count; i++)
@@ -343,13 +374,10 @@ public sealed class TrackingMaintenanceRepository
                     "INSERT INTO attempt_mods(attempt_id,position,acronym,settings_json) VALUES(@id,@pos,@acronym,@settings)",
                     ("@id", id), ("@pos", i), ("@acronym", (object)mods[i].Acronym), ("@settings", mods[i].SettingsJson));
             }
-            tx.Commit();
             updated++;
         }
-        if (updated > 0)
-        {
-            RebuildPersonalBests(con);
-        }
+        RebuildPersonalBests(con, tx);
+        tx.Commit();
         return updated;
     }
 
@@ -509,31 +537,92 @@ public sealed class TrackingMaintenanceRepository
             throw new InvalidOperationException("Tracking data cannot be changed while a session is active.");
     }
 
-    private static void RebuildPersonalBests(SqliteConnection con)
+    private static void RebuildPersonalBests(
+        SqliteConnection con,
+        SqliteTransaction? transaction = null)
     {
-        DeleteAllFrom(con, null, "personal_bests");
-        DeleteAllFrom(con, null, "attempt_improvements");
-        using var cmd = con.CreateCommand();
-        cmd.CommandText = """
-            INSERT OR REPLACE INTO personal_bests(beatmap_id, mods_key, metric, attempt_id, value)
-            SELECT beatmap_id, mods_key, 'pp', id, pp
-            FROM (
-                SELECT a.*,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY beatmap_id, mods_key
-                           ORDER BY pp DESC, accuracy DESC, score DESC, id DESC
-                       ) row_number
-                FROM attempts a
-                WHERE outcome IN ('completed', 'failed')
-            )
-            WHERE row_number = 1
-            """;
-        cmd.ExecuteNonQuery();
+        using var ownedTransaction = transaction is null ? con.BeginTransaction() : null;
+        var tx = transaction ?? ownedTransaction!;
+        DeleteAllFrom(con, tx, "personal_bests");
+        DeleteAllFrom(con, tx, "attempt_improvements");
+
+        foreach (var metric in PersonalBestMetrics)
+        {
+            using (var improvements = con.CreateCommand())
+            {
+                improvements.Transaction = tx;
+                improvements.CommandText = $"""
+                    WITH candidates AS (
+                        SELECT a.id,
+                               a.beatmap_id,
+                               a.mods_key,
+                               a.{metric.ColumnName} AS new_value,
+                               (
+                                   SELECT {metric.Aggregate}(previous.{metric.ColumnName})
+                                   FROM attempts previous
+                                   WHERE previous.beatmap_id = a.beatmap_id
+                                     AND previous.mods_key = a.mods_key
+                                     AND previous.outcome IN ('completed', 'failed')
+                                     AND previous.id < a.id
+                               ) AS previous_value
+                        FROM attempts a
+                        WHERE a.outcome IN ('completed', 'failed')
+                    )
+                    INSERT INTO attempt_improvements(attempt_id, metric, previous_value, new_value, delta)
+                    SELECT id, @metric, previous_value, new_value,
+                           CASE WHEN previous_value IS NULL THEN NULL ELSE new_value - previous_value END
+                    FROM candidates
+                    WHERE previous_value IS NULL OR new_value {metric.Comparison} previous_value
+                    """;
+                improvements.Parameters.AddWithValue("@metric", metric.Name);
+                improvements.ExecuteNonQuery();
+            }
+
+            using var best = con.CreateCommand();
+            best.Transaction = tx;
+            best.CommandText = $"""
+                INSERT INTO personal_bests(beatmap_id, mods_key, metric, attempt_id, value)
+                SELECT beatmap_id, mods_key, @metric, id, {metric.ColumnName}
+                FROM (
+                    SELECT a.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY beatmap_id, mods_key
+                               ORDER BY {metric.ColumnName} {metric.SortDirection}, id ASC
+                           ) AS row_number
+                    FROM attempts a
+                    WHERE outcome IN ('completed', 'failed')
+                )
+                WHERE row_number = 1
+                """;
+            best.Parameters.AddWithValue("@metric", metric.Name);
+            best.ExecuteNonQuery();
+        }
+
+        ownedTransaction?.Commit();
     }
 
-    private static void PruneUnusedBeatmaps(SqliteConnection con)
+    private static readonly PersonalBestMetric[] PersonalBestMetrics =
+    [
+        new("score", "score", "MAX", ">", "DESC"),
+        new("accuracy", "accuracy", "MAX", ">", "DESC"),
+        new("pp", "pp", "MAX", ">", "DESC"),
+        new("combo", "combo", "MAX", ">", "DESC"),
+        new("fewest_misses", "misses", "MIN", "<", "ASC"),
+    ];
+
+    private sealed record PersonalBestMetric(
+        string Name,
+        string ColumnName,
+        string Aggregate,
+        string Comparison,
+        string SortDirection);
+
+    private static void PruneUnusedBeatmaps(
+        SqliteConnection con,
+        SqliteTransaction? transaction = null)
     {
         using var cmd = con.CreateCommand();
+        cmd.Transaction = transaction;
         cmd.CommandText = "DELETE FROM beatmaps WHERE id NOT IN (SELECT beatmap_id FROM attempts)";
         cmd.ExecuteNonQuery();
     }
@@ -579,17 +668,48 @@ public sealed class TrackingMaintenanceRepository
     {
         try
         {
+            if (zlibPayload.LongLength > MaxRawSnapshotCompressedBytes)
+            {
+                return Array.Empty<(string, string)>();
+            }
+
             using var input = new MemoryStream(zlibPayload);
             using var zlib = new System.IO.Compression.ZLibStream(input, System.IO.Compression.CompressionMode.Decompress);
-            using var doc = JsonDocument.Parse(zlib);
+            using var json = new MemoryStream();
+            var buffer = new byte[81920];
+            var decompressedBytes = 0;
+            while (true)
+            {
+                var read = zlib.Read(buffer, 0, buffer.Length);
+                if (read == 0)
+                {
+                    break;
+                }
+                if (read > MaxRawSnapshotDecompressedBytes - decompressedBytes)
+                {
+                    return Array.Empty<(string, string)>();
+                }
+                json.Write(buffer, 0, read);
+                decompressedBytes += read;
+            }
+
+            json.Position = 0;
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 64 });
             var root = doc.RootElement.TryGetProperty("payload", out var payload) ? payload : doc.RootElement;
             if (!TryFindProperty(root, "mods", out var modsElement) || modsElement.ValueKind != JsonValueKind.Array)
             {
                 return Array.Empty<(string, string)>();
             }
             var mods = new List<(string, string)>();
+            var modCount = 0;
             foreach (var mod in modsElement.EnumerateArray())
             {
+                modCount++;
+                if (modCount > MaxRawSnapshotMods)
+                {
+                    return Array.Empty<(string, string)>();
+                }
+
                 var acronym = mod.TryGetProperty("acronym", out var acronymElement)
                     ? acronymElement.GetString()
                     : null;

@@ -49,6 +49,7 @@ public class AttemptSqliteSinkTests : IDisposable
         Assert.Equal(1, Scalar<long>(con, "SELECT COUNT(*) FROM attempt_timing"));
         Assert.Equal(1, Scalar<long>(con, "SELECT COUNT(*) FROM attempt_context"));
         Assert.Equal(5, Scalar<long>(con, "SELECT COUNT(*) FROM personal_bests"));
+        Assert.Equal(5, Scalar<long>(con, "SELECT COUNT(*) FROM attempt_improvements"));
         Assert.True(Scalar<long>(con, "SELECT COUNT(*) FROM attempt_events WHERE event_type='checkpoint'") > 0);
         Assert.Equal("DT", Scalar<string>(con, "SELECT acronym FROM attempt_mods WHERE position=1"));
     }
@@ -88,7 +89,7 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
-    public void EmptyRetryPulse_IsDeletedAndOrdinalReused()
+    public void EmptyRetryPulse_IsDeletedAndReplacementUsesFreshDurableId()
     {
         var sink = CreateSink();
         var tracker = new AttemptTracker(sink);
@@ -97,13 +98,13 @@ public class AttemptSqliteSinkTests : IDisposable
         var discardedId = Assert.IsType<long>(sink.CurrentAttemptId);
         tracker.Ingest(Menu(0.1));
         tracker.Ingest(Play(0.2));
-        Assert.Equal(discardedId, Assert.IsType<long>(sink.CurrentAttemptId));
+        Assert.Equal(discardedId + 1, Assert.IsType<long>(sink.CurrentAttemptId));
         tracker.Ingest(Play(3.4, live: 3400, score: 1000, n300: 20, progress: 0.4));
         tracker.Ingest(Results(3.5, score: 1000, n300: 20, progress: 0.4));
 
         using var con = Open();
         Assert.Equal(1, Scalar<long>(con, "SELECT COUNT(*) FROM attempts"));
-        Assert.Equal(1, Scalar<long>(con, "SELECT MIN(id) FROM attempts"));
+        Assert.Equal(discardedId + 1, Scalar<long>(con, "SELECT MIN(id) FROM attempts"));
     }
 
     [Fact]
@@ -571,7 +572,7 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
-    public async Task Flush_MakesDiscardDurableAndReplacementCanReuseAttemptId()
+    public async Task Flush_MakesDiscardDurableAndReplacementUsesFreshAttemptId()
     {
         var scheduler = new ControlledPersistenceScheduler();
         var sink = new AttemptSqliteSink(
@@ -607,16 +608,142 @@ public class AttemptSqliteSinkTests : IDisposable
             Identity = "real-attempt",
             WallTime = 1_788_000_000.2,
         });
-        Assert.Equal(discardedId, Assert.IsType<long>(sink.CurrentAttemptId));
+        var replacementId = Assert.IsType<long>(sink.CurrentAttemptId);
+        Assert.Equal(discardedId + 1, replacementId);
         await sink.FlushPendingPersistenceAsync();
 
         using (var replacement = Open())
         {
-            Assert.Equal(discardedId, Scalar<long>(replacement, "SELECT id FROM attempts"));
+            Assert.Equal(replacementId, Scalar<long>(replacement, "SELECT id FROM attempts"));
             Assert.Equal("real-attempt", Scalar<string>(replacement, """
                 SELECT b.identity
                 FROM attempts a
                 JOIN beatmaps b ON b.id = a.beatmap_id
+                """));
+        }
+
+        await scheduler.RunToCompletionAsync();
+    }
+
+    [Fact]
+    public async Task TwoSinks_ReserveDistinctDatabaseOwnedIdsBeforeEitherPersists()
+    {
+        var firstScheduler = new ControlledPersistenceScheduler();
+        var secondScheduler = new ControlledPersistenceScheduler();
+        var factory = new SqliteConnectionFactory(_dbPath, readOnly: false);
+        var first = new AttemptSqliteSink(factory, firstScheduler.Schedule);
+        var second = new AttemptSqliteSink(factory, secondScheduler.Schedule);
+
+        await Task.WhenAll(
+            Task.Run(() => first.StartAttempt(new AttemptStart
+            {
+                Identity = "concurrent-one",
+                WallTime = 1_788_000_000,
+            })),
+            Task.Run(() => second.StartAttempt(new AttemptStart
+            {
+                Identity = "concurrent-two",
+                WallTime = 1_788_000_001,
+            })));
+
+        var firstSessionId = Assert.IsType<long>(first.CurrentSessionId);
+        var secondSessionId = Assert.IsType<long>(second.CurrentSessionId);
+        var firstAttemptId = Assert.IsType<long>(first.CurrentAttemptId);
+        var secondAttemptId = Assert.IsType<long>(second.CurrentAttemptId);
+        Assert.NotEqual(firstSessionId, secondSessionId);
+        Assert.NotEqual(firstAttemptId, secondAttemptId);
+
+        await Task.WhenAll(
+            first.FlushPendingPersistenceAsync(),
+            second.FlushPendingPersistenceAsync());
+
+        using var persisted = Open();
+        Assert.Equal(2, Scalar<long>(persisted, "SELECT COUNT(*) FROM sessions"));
+        Assert.Equal(2, Scalar<long>(persisted, "SELECT COUNT(*) FROM attempts"));
+        Assert.Equal(2, Scalar<long>(persisted, "SELECT COUNT(DISTINCT id) FROM attempts"));
+
+        await firstScheduler.RunToCompletionAsync();
+        await secondScheduler.RunToCompletionAsync();
+    }
+
+    [Fact]
+    public async Task IdReservationAdvancesPastExplicitRowsAddedAfterSinkConstruction()
+    {
+        var scheduler = new ControlledPersistenceScheduler();
+        var sink = new AttemptSqliteSink(
+            new SqliteConnectionFactory(_dbPath, readOnly: false),
+            scheduler.Schedule);
+        using (var connection = Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO sessions(id, started_at, ended_at)
+                VALUES(50, '2026-07-15T10:00:00Z', '2026-07-15T10:10:00Z');
+                INSERT INTO beatmaps(id, identity) VALUES(50, 'explicit-map');
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, ended_at, outcome)
+                VALUES(50, 50, 50, '2026-07-15T10:00:00Z', '2026-07-15T10:10:00Z', 'completed');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "reserved-after-explicit",
+            WallTime = 1_788_000_100,
+        });
+
+        Assert.Equal(51, sink.CurrentSessionId);
+        Assert.Equal(51, sink.CurrentAttemptId);
+        await sink.FlushPendingPersistenceAsync();
+        await scheduler.RunToCompletionAsync();
+    }
+
+    [Fact]
+    public async Task IdReservationUsesOneDatabaseWriteForAWholeLocalBlock()
+    {
+        var scheduler = new ControlledPersistenceScheduler();
+        var sink = new AttemptSqliteSink(
+            new SqliteConnectionFactory(_dbPath, readOnly: false),
+            scheduler.Schedule);
+
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "block-one",
+            WallTime = 1_788_000_000,
+        });
+        var firstAttemptId = Assert.IsType<long>(sink.CurrentAttemptId);
+        long attemptSequenceAfterFirst;
+        using (var connection = Open())
+        {
+            attemptSequenceAfterFirst = Scalar<long>(connection, """
+                SELECT next_id FROM tracking_id_sequences WHERE entity = 'attempt'
+                """);
+            Assert.Equal(
+                firstAttemptId + AttemptSqliteSink.IdReservationBlockSize,
+                attemptSequenceAfterFirst);
+        }
+
+        sink.Finalize(new AttemptFinalization(
+            "retried",
+            "retry",
+            new AttemptSnapshot
+            {
+                Identity = "block-one",
+                WallTime = 1_788_000_001,
+                DurationSeconds = 1,
+            },
+            Ordinal: 1));
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "block-two",
+            WallTime = 1_788_000_001.1,
+        });
+
+        Assert.Equal(firstAttemptId + 1, sink.CurrentAttemptId);
+        using (var connection = Open())
+        {
+            Assert.Equal(attemptSequenceAfterFirst, Scalar<long>(connection, """
+                SELECT next_id FROM tracking_id_sequences WHERE entity = 'attempt'
                 """));
         }
 

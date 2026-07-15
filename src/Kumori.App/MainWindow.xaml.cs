@@ -7,6 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Kumori.App.ViewModels;
 using Kumori.Core.Settings;
 using Kumori.Native;
@@ -19,6 +20,8 @@ public partial class MainWindow : Window
     private const double DefaultWindowHeight = 820;
     private const double MinimumRestoredWindowWidth = 720;
     private const double MinimumRestoredWindowHeight = 480;
+    private static readonly Geometry MaximizeIconGeometry = Geometry.Parse("M 1.5 1.5 L 10.5 1.5 L 10.5 10.5 L 1.5 10.5 Z");
+    private static readonly Geometry RestoreIconGeometry = Geometry.Parse("M 3.5 1.5 L 10.5 1.5 L 10.5 8.5 M 1.5 3.5 L 8.5 3.5 L 8.5 10.5 L 1.5 10.5 Z");
 
     private readonly SettingsService _settings;
     private ResponsiveLayoutState _layoutState;
@@ -26,6 +29,8 @@ public partial class MainWindow : Window
     private string _selectedPage = "Dashboard";
     private WelcomeWindow? _onboardingWindow;
     private SkinLibraryWindow? _onboardingToolWindow;
+    private IInputElement? _focusBeforeOnboarding;
+    private long? _expandedTechnicalDetailsAttemptId;
 
     /// <summary>Set by App before Shutdown so the tray Exit actually closes the window.</summary>
     public bool ForceClose { get; set; }
@@ -38,7 +43,12 @@ public partial class MainWindow : Window
         InitializeComponent();
         ApplyInitialBounds();
         SizeChanged += (_, _) => ApplyResponsiveLayout();
-        Loaded += (_, _) => ApplyResponsiveLayout();
+        StateChanged += (_, _) => UpdateWindowChromeState();
+        Loaded += (_, _) =>
+        {
+            ApplyResponsiveLayout();
+            UpdateWindowChromeState();
+        };
         Closing += (_, e) =>
         {
             SaveBounds();
@@ -71,7 +81,38 @@ public partial class MainWindow : Window
         {
             _compactInspectorOpen = true;
             ApplyResponsiveLayout();
+            Dispatcher.BeginInvoke(
+                DispatcherPriority.Input,
+                new Action(() => InspectorBackButton.Focus()));
         }
+
+        ScheduleTechnicalDetailsSelectionCheck();
+    }
+
+    private void TechnicalDetailsExpander_Expanded(object sender, RoutedEventArgs e)
+        => _expandedTechnicalDetailsAttemptId = (DataContext as MainViewModel)?.SelectedAttempt?.Id;
+
+    private void TechnicalDetailsExpander_Collapsed(object sender, RoutedEventArgs e)
+        => _expandedTechnicalDetailsAttemptId = null;
+
+    private void ScheduleTechnicalDetailsSelectionCheck()
+    {
+        if (TechnicalDetailsExpander is not { IsExpanded: true })
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(() =>
+            {
+                var selectedAttemptId = (DataContext as MainViewModel)?.SelectedAttempt?.Id;
+                if (TechnicalDetailsExpander.IsExpanded
+                    && selectedAttemptId != _expandedTechnicalDetailsAttemptId)
+                {
+                    TechnicalDetailsExpander.IsExpanded = false;
+                }
+            }));
     }
 
     private void SessionToggle_Click(object sender, RoutedEventArgs e)
@@ -254,7 +295,7 @@ public partial class MainWindow : Window
 
     private void FilterChip_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string filter } && DataContext is MainViewModel viewModel)
+        if (sender is FrameworkElement { Tag: string filter } && DataContext is MainViewModel viewModel)
         {
             viewModel.SelectedFilterMode = filter;
         }
@@ -272,6 +313,16 @@ public partial class MainWindow : Window
 
     private void MaximizeWindow_Click(object sender, RoutedEventArgs e) =>
         WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void UpdateWindowChromeState()
+    {
+        var isMaximized = WindowState == WindowState.Maximized;
+        MaximizeGlyph.Data = isMaximized ? RestoreIconGeometry : MaximizeIconGeometry;
+        MaximizeWindowButton.ToolTip = isMaximized ? "Restore" : "Maximize";
+        System.Windows.Automation.AutomationProperties.SetName(
+            MaximizeWindowButton,
+            isMaximized ? "Restore window" : "Maximize window");
+    }
 
     private void CloseWindow_Click(object sender, RoutedEventArgs e) => Close();
 
@@ -325,6 +376,10 @@ public partial class MainWindow : Window
             if (existing.Tag is Window existingWindow && existingWindow.GetType() == window.GetType())
             {
                 WorkspaceTabs.SelectedItem = existing;
+                // Commands construct the candidate window before requesting a
+                // tab. Close an unused duplicate so its dispatcher timers and
+                // event subscriptions cannot keep the full window alive.
+                window.Close();
                 return;
             }
         }
@@ -383,13 +438,19 @@ public partial class MainWindow : Window
         window.Closed += (_, _) => Dispatcher.InvokeAsync(() =>
         {
             WorkspaceTabs.Items.Remove(tab);
-            WorkspaceTabs.Visibility = WorkspaceTabs.Items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-            WorkspaceEmptyText.Visibility = WorkspaceTabs.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateWorkspaceTabPresentation();
         });
         WorkspaceTabs.Items.Add(tab);
         WorkspaceTabs.SelectedItem = tab;
-        WorkspaceTabs.Visibility = Visibility.Visible;
-        WorkspaceEmptyText.Visibility = Visibility.Collapsed;
+        UpdateWorkspaceTabPresentation();
+    }
+
+    private void UpdateWorkspaceTabPresentation()
+    {
+        var hasTabs = WorkspaceTabs.Items.Count > 0;
+        WorkspaceTabs.Visibility = hasTabs ? Visibility.Visible : Visibility.Collapsed;
+        WorkspaceEmptyText.Visibility = hasTabs ? Visibility.Collapsed : Visibility.Visible;
+        WorkspaceTabs.Tag = WorkspaceTabs.Items.Count <= 1 ? "Single" : "Multiple";
     }
 
     public static bool TryOpenWorkspace(Window window, string title)
@@ -407,6 +468,8 @@ public partial class MainWindow : Window
         if (_onboardingWindow is not null)
         {
             OnboardingOverlay.Visibility = Visibility.Visible;
+            SetUnderlyingContentEnabled(false);
+            FocusFirstInteractive(OnboardingHost);
             onboarding.ReleaseFromHost();
             return;
         }
@@ -428,8 +491,11 @@ public partial class MainWindow : Window
         }
         OnboardingHost.DataContext = onboarding.DataContext;
         OnboardingHost.Content = content;
+        _focusBeforeOnboarding ??= Keyboard.FocusedElement;
+        SetUnderlyingContentEnabled(false);
         OnboardingOverlay.Visibility = Visibility.Visible;
         onboarding.DismissRequested += (_, _) => CloseOnboarding();
+        FocusFirstInteractive(OnboardingHost);
     }
 
     public void CloseOnboarding()
@@ -440,6 +506,20 @@ public partial class MainWindow : Window
         OnboardingHost.Resources.Clear();
         OnboardingOverlay.Visibility = Visibility.Collapsed;
         _onboardingWindow = null;
+        SetUnderlyingContentEnabled(true);
+        var focusToRestore = _focusBeforeOnboarding;
+        _focusBeforeOnboarding = null;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            if (focusToRestore is not null)
+            {
+                Keyboard.Focus(focusToRestore);
+            }
+            else
+            {
+                NavigationView.Focus();
+            }
+        }));
     }
 
     public void OpenOnboardingTool(SkinLibraryWindow tool, string title)
@@ -463,8 +543,10 @@ public partial class MainWindow : Window
         OnboardingToolHost.DataContext = tool.DataContext;
         OnboardingToolHost.Content = content;
         OnboardingToolTitle.Text = title;
+        OnboardingHost.IsEnabled = false;
         OnboardingToolLayer.Visibility = Visibility.Visible;
         tool.DismissRequested += (_, _) => CloseOnboardingTool();
+        FocusFirstInteractive(OnboardingToolHost);
     }
 
     public void CloseOnboardingTool()
@@ -473,7 +555,30 @@ public partial class MainWindow : Window
         OnboardingToolHost.Resources.Clear();
         OnboardingToolLayer.Visibility = Visibility.Collapsed;
         _onboardingToolWindow = null;
+        OnboardingHost.IsEnabled = true;
+        if (OnboardingOverlay.Visibility == Visibility.Visible)
+        {
+            FocusFirstInteractive(OnboardingHost);
+        }
     }
+
+    private void SetUnderlyingContentEnabled(bool isEnabled)
+    {
+        NavigationView.IsEnabled = isEnabled;
+        DashboardRoot.IsEnabled = isEnabled;
+        PerformancePage.IsEnabled = isEnabled;
+        MapsPage.IsEnabled = isEnabled;
+        WorkspacePage.IsEnabled = isEnabled;
+    }
+
+    private void FocusFirstInteractive(FrameworkElement host) =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            if (host.IsVisible && host.IsEnabled)
+            {
+                host.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+            }
+        }));
 
     private void OnboardingToolBack_Click(object sender, RoutedEventArgs e) => CloseOnboardingTool();
 
@@ -547,13 +652,24 @@ public partial class MainWindow : Window
         PerformancePage.Margin = pageMargin;
         MapsPage.Margin = pageMargin;
         WorkspacePage.Margin = pageMargin;
+        // At the 720 DIP minimum this still leaves the hosted settings view
+        // more than its 420 DIP compact target, while keeping every rail label whole.
+        WorkspaceNavigationColumn.Width = new GridLength(210);
+        WorkspaceGapColumn.Width = new GridLength(_layoutState.IsCompact ? 8 : 10);
+
+        var showPageBadges = ActualWidth >= 900;
+        PerformanceScopeBadge.Visibility = showPageBadges ? Visibility.Visible : Visibility.Collapsed;
+        MapsSortBadge.Visibility = showPageBadges ? Visibility.Visible : Visibility.Collapsed;
 
         MetricsGrid.Columns = _layoutState.IsCompact ? 3 : 6;
         MetricsRow.Height = new GridLength(_layoutState.IsCompact ? 136 : 88);
-        TopBarRow.Height = new GridLength(_layoutState.IsShort ? 54 : 72);
-        var showDashboardHeading = ActualWidth >= 900;
-        DashboardTitleText.Visibility = showDashboardHeading ? Visibility.Visible : Visibility.Collapsed;
-        DashboardSubtitleText.Visibility = showDashboardHeading ? Visibility.Visible : Visibility.Collapsed;
+        var compactInspector = _layoutState.IsCompact && _compactInspectorOpen;
+        TopBarRow.Height = compactInspector
+            ? new GridLength(0)
+            : new GridLength(_layoutState.IsCompact ? 46 : _layoutState.IsShort ? 54 : 72);
+        DashboardTitleText.Visibility = compactInspector ? Visibility.Collapsed : Visibility.Visible;
+        DashboardSubtitleText.Visibility = _layoutState.IsCompact ? Visibility.Collapsed : Visibility.Visible;
+        RefreshButton.Visibility = compactInspector ? Visibility.Collapsed : Visibility.Visible;
         TopStatusStrip.Visibility = Visibility.Collapsed;
         InspectorHeaderTitle.Visibility = _layoutState.IsCompact && _compactInspectorOpen
             ? Visibility.Collapsed

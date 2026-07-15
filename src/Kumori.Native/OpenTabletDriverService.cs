@@ -17,7 +17,7 @@ public static partial class OpenTabletDriverService
     private const string SupportedVersion = "0.6.7";
     private static readonly object LaunchGate = new();
     private static readonly object MappingGate = new();
-    private static readonly HashSet<int> OwnedProcessIds = [];
+    private static readonly Dictionary<int, OwnedProcessIdentity> OwnedProcesses = [];
     private static string? refreshExecutablePath;
     private static IReadOnlyList<OtdMonitor>? appliedTopology;
     private static IReadOnlyList<OtdMonitor>? pendingTopology;
@@ -72,16 +72,25 @@ public static partial class OpenTabletDriverService
     {
         lock (LaunchGate)
         {
-            var owned = OwnedProcessIds.ToArray();
-            OwnedProcessIds.Clear();
+            var owned = OwnedProcesses.Values.ToArray();
+            OwnedProcesses.Clear();
             if (owned.Length == 0)
                 return;
 
             var processes = new List<Process>();
-            foreach (var id in owned)
+            foreach (var identity in owned)
             {
-                try { processes.Add(Process.GetProcessById(id)); }
-                catch { }
+                var process = OpenMatchingOwnedProcess(identity);
+                if (process is not null)
+                {
+                    processes.Add(process);
+                }
+                else
+                {
+                    Log.Warning(
+                        "Skipped closing former OpenTabletDriver process id {ProcessId} because its process identity changed",
+                        identity.ProcessId);
+                }
             }
 
             foreach (var process in processes)
@@ -234,6 +243,7 @@ public static partial class OpenTabletDriverService
         if (!File.Exists(executablePath))
             throw new FileNotFoundException("OpenTabletDriver executable was not found.", executablePath);
 
+        var installationDirectory = Path.GetDirectoryName(Path.GetFullPath(executablePath))!;
         var daemonWasRunning = IsDaemonRunning();
         var before = ProcessIds();
         var startInfo = new ProcessStartInfo
@@ -256,11 +266,11 @@ public static partial class OpenTabletDriverService
             executablePath);
         if (process is not null)
         {
-            OwnedProcessIds.Clear();
-            OwnedProcessIds.Add(process.Id);
+            OwnedProcesses.Clear();
+            RememberOwnedProcess(process, executablePath);
             process.Dispose();
             if (!daemonWasRunning)
-                TrackOwnedProcesses(before);
+                TrackOwnedProcesses(before, installationDirectory);
         }
         return launched;
     }
@@ -288,7 +298,7 @@ public static partial class OpenTabletDriverService
 
             Log.Information(
                 "Restarting OpenTabletDriver after display topology change without writing its settings file");
-            OwnedProcessIds.Clear();
+            OwnedProcesses.Clear();
             try
             {
                 foreach (var process in processes)
@@ -344,8 +354,34 @@ public static partial class OpenTabletDriverService
         try
         {
             var processPath = process.MainModule?.FileName;
-            var processDirectory = processPath is null ? null : Path.GetDirectoryName(Path.GetFullPath(processPath));
-            return string.Equals(processDirectory, installationDirectory, StringComparison.OrdinalIgnoreCase);
+            return IsExecutableFromInstallation(processPath, installationDirectory);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static bool IsExecutableFromInstallation(
+        string? executablePath,
+        string installationDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath)
+            || string.IsNullOrWhiteSpace(installationDirectory))
+            return false;
+
+        try
+        {
+            var processDirectory = Path.GetDirectoryName(Path.GetFullPath(executablePath));
+            if (processDirectory is null)
+                return false;
+            var expectedDirectory = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(installationDirectory));
+            var actualDirectory = Path.TrimEndingDirectorySeparator(processDirectory);
+            return string.Equals(
+                actualDirectory,
+                expectedDirectory,
+                StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -366,7 +402,9 @@ public static partial class OpenTabletDriverService
         return ids;
     }
 
-    private static void TrackOwnedProcesses(HashSet<int> before)
+    private static void TrackOwnedProcesses(
+        HashSet<int> before,
+        string installationDirectory)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
         while (DateTimeOffset.UtcNow < deadline)
@@ -378,9 +416,10 @@ public static partial class OpenTabletDriverService
                 {
                     try
                     {
-                        if (!before.Contains(process.Id))
-                            OwnedProcessIds.Add(process.Id);
-                        if (OwnedProcessIds.Contains(process.Id)
+                        if (!before.Contains(process.Id)
+                            && IsFromInstallation(process, installationDirectory))
+                            RememberOwnedProcess(process);
+                        if (OwnedProcesses.ContainsKey(process.Id)
                             && string.Equals(process.ProcessName, "OpenTabletDriver.Daemon", StringComparison.OrdinalIgnoreCase))
                         {
                             foundDaemon = true;
@@ -394,6 +433,71 @@ public static partial class OpenTabletDriverService
             Thread.Sleep(100);
         }
     }
+
+    private static void RememberOwnedProcess(Process process, string? knownExecutablePath = null)
+    {
+        var identity = CaptureProcessIdentity(process, knownExecutablePath);
+        if (identity is { } owned)
+            OwnedProcesses[owned.ProcessId] = owned;
+    }
+
+    private static Process? OpenMatchingOwnedProcess(OwnedProcessIdentity expected)
+    {
+        Process? process = null;
+        try
+        {
+            process = Process.GetProcessById(expected.ProcessId);
+            var actual = CaptureProcessIdentity(process);
+            if (actual is not { } identity || !ProcessIdentityMatches(expected, identity))
+            {
+                process.Dispose();
+                return null;
+            }
+            return process;
+        }
+        catch
+        {
+            process?.Dispose();
+            return null;
+        }
+    }
+
+    private static OwnedProcessIdentity? CaptureProcessIdentity(
+        Process process,
+        string? knownExecutablePath = null)
+    {
+        try
+        {
+            var path = knownExecutablePath ?? process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(path))
+                return null;
+            return new OwnedProcessIdentity(
+                process.Id,
+                process.StartTime.ToUniversalTime().Ticks,
+                Path.GetFullPath(path));
+        }
+        catch
+        {
+            // If Windows will not provide a stable identity, fail closed and
+            // leave the process running rather than risking an unrelated PID.
+            return null;
+        }
+    }
+
+    internal static bool ProcessIdentityMatches(
+        OwnedProcessIdentity expected,
+        OwnedProcessIdentity actual) =>
+        expected.ProcessId == actual.ProcessId
+        && expected.StartTimeUtcTicks == actual.StartTimeUtcTicks
+        && string.Equals(
+            Path.GetFullPath(expected.ExecutablePath),
+            Path.GetFullPath(actual.ExecutablePath),
+            StringComparison.OrdinalIgnoreCase);
+
+    internal readonly record struct OwnedProcessIdentity(
+        int ProcessId,
+        long StartTimeUtcTicks,
+        string ExecutablePath);
 
     private static IEnumerable<string> CandidatePaths(string configuredPath)
     {

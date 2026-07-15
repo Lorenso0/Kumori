@@ -6,8 +6,8 @@ public sealed class ResponsiveLayoutResolverTests
 {
     [Theory]
     [InlineData(720, ResponsiveLayoutMode.Compact)]
-    [InlineData(899, ResponsiveLayoutMode.Compact)]
-    [InlineData(900, ResponsiveLayoutMode.Standard)]
+    [InlineData(1023, ResponsiveLayoutMode.Compact)]
+    [InlineData(1024, ResponsiveLayoutMode.Standard)]
     [InlineData(1279, ResponsiveLayoutMode.Standard)]
     [InlineData(1280, ResponsiveLayoutMode.Wide)]
     [InlineData(3840, ResponsiveLayoutMode.Wide)]

@@ -46,15 +46,42 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
             RelativeSizeAxes = Axes.X,
             AutoSizeAxes = Axes.Y,
             Direction = FillDirection.Vertical,
-            Spacing = new Vector2(0, 4),
+            Spacing = new Vector2(0, 6),
         };
         foreach (var option in options)
             list.Add(new ReplayCard(option, option.AttemptId == selectedAttemptId, comparisonColour, () => select(option)));
 
         var children = new List<Drawable>
         {
-            label("Choose a replay to compare.", 9.5f, true),
-            label("Same map - matching gameplay mods", 8),
+            label("Choose a replay to compare.", 10.5f, true),
+            label("Same map - matching gameplay mods", 9.2f),
+        };
+
+        // Keep the primary choice first: users should choose (and see) the replay
+        // before adjusting the colours used to render it.
+        if (options.Count == 0)
+        {
+            children.Add(label("No matching replay with cursor data.", 9.8f));
+        }
+        else
+        {
+            children.Add(sectionLabel(options.Count == 1 ? "1 ELIGIBLE REPLAY" : $"{options.Count} ELIGIBLE REPLAYS"));
+            children.Add(new OsuScrollContainer(Direction.Vertical)
+            {
+                RelativeSizeAxes = Axes.X,
+                Height = Math.Min(options.Count * 78, 228),
+                Child = list,
+            });
+        }
+
+        children.AddRange(
+        [
+            new Box
+            {
+                RelativeSizeAxes = Axes.X,
+                Height = 1,
+                Colour = Colour4.White.Opacity(0.12f),
+            },
             compactColour("Comparison cursor", comparisonColour),
             compactColour("Comparison trail", comparisonTrailColour),
             new Box
@@ -64,7 +91,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
                 Colour = Colour4.White.Opacity(0.12f),
             },
             new CompactActionButton("Compare a .osr file", chooseOsr, Colour4.FromHex("#386FA4")),
-            label("Temporary - never added to history", 7.5f),
+            label("Temporary - never added to history", 8.5f),
             new ImportStatusText(importStatus),
             new Box
             {
@@ -72,22 +99,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
                 Height = 1,
                 Colour = Colour4.White.Opacity(0.12f),
             },
-        };
-
-        if (options.Count == 0)
-        {
-            children.Add(label("No matching replay with cursor data.", 9));
-        }
-        else
-        {
-            children.Add(sectionLabel(options.Count == 1 ? "1 ELIGIBLE REPLAY" : $"{options.Count} ELIGIBLE REPLAYS"));
-            children.Add(new OsuScrollContainer(Direction.Vertical)
-            {
-                RelativeSizeAxes = Axes.X,
-                Height = Math.Min(options.Count * 59, 172),
-                Child = list,
-            });
-        }
+        ]);
 
         if (selectedAttemptId is not null)
             children.Add(new CompactActionButton("Stop comparison", stop, Colour4.FromHex("#b72f69")));
@@ -114,8 +126,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
         private readonly Action action;
         private Box background = null!;
         private Box accent = null!;
-        private SpriteText modText = null!;
-        private SpriteText? activeText;
+        private Box selectionWash = null!;
 
         public ReplayCard(ComparisonContract attempt, bool selected, Bindable<Colour4> colour, Action action)
         {
@@ -124,9 +135,9 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
             this.selected = selected;
             this.colour = colour;
             this.action = action;
-            Height = 54;
+            Height = 72;
             Masking = true;
-            CornerRadius = 6;
+            CornerRadius = 7;
             BorderThickness = selected ? 2 : 1;
         }
 
@@ -141,7 +152,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
             var topLine = new Container
             {
                 RelativeSizeAxes = Axes.X,
-                Height = 13,
+                Height = 16,
                 Children =
                 [
                     new SpriteText
@@ -150,7 +161,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
                         RelativeSizeAxes = Axes.X,
                         Width = selected ? 0.68f : 1,
                         Truncate = true,
-                        Font = FontUsage.Default.With(size: 9.5f, weight: "bold"),
+                        Font = FontUsage.Default.With(size: 10.8f, weight: "bold"),
                         Colour = Colour4.White.Opacity(0.96f),
                     },
                 ],
@@ -158,35 +169,46 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
 
             if (selected)
             {
-                activeText = new SpriteText
-                {
-                    Text = "COMPARING",
-                    Anchor = Anchor.TopRight,
-                    Origin = Anchor.TopRight,
-                    Font = FontUsage.Default.With(size: 7.5f, weight: "bold"),
-                };
-                topLine.Add(activeText);
+                topLine.Add(new StatusBadge(colour));
             }
+
+            IReadOnlyList<string> orderedMods = ReplayModDisplayOrder.FromKey(attempt.ModsKey);
+            var overview = new List<Drawable>();
+            if (orderedMods.Count == 0)
+                overview.Add(new ModBadge("NM", colour, muted: true));
+            else
+                overview.AddRange(orderedMods.Select(acronym => new ModBadge(acronym, colour)));
+
+            overview.Add(stat($"{attempt.Accuracy:0.00}%", Colour4.White, 10.2f, true));
+            string combo = attempt.MaxCombo > 0
+                ? $"{attempt.Combo}/{attempt.MaxCombo}× combo"
+                : $"{attempt.Combo}× combo";
+            overview.Add(stat(combo, Colour4.White.Opacity(0.76f), 9.2f));
 
             InternalChildren =
             [
                 background = new Box
                 {
                     RelativeSizeAxes = Axes.Both,
-                    Colour = Colour4.White.Opacity(selected ? 0.14f : 0.055f),
+                    Colour = Colour4.FromHex(selected ? "#171B1E" : "#111416"),
+                },
+                selectionWash = new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = colour.Value.Opacity(selected ? 0.09f : 0.02f),
                 },
                 accent = new Box
                 {
                     RelativeSizeAxes = Axes.Y,
-                    Width = 3,
+                    Width = 4,
                     Colour = colour.Value,
                 },
                 new FillFlowContainer
                 {
                     RelativeSizeAxes = Axes.Both,
-                    Padding = new MarginPadding { Left = 10, Right = 8, Top = 5, Bottom = 4 },
+                    Padding = new MarginPadding { Left = 11, Right = 9, Top = 7, Bottom = 6 },
                     Direction = FillDirection.Vertical,
-                    Spacing = new Vector2(0, 2),
+                    Spacing = new Vector2(0, 4),
                     Children =
                     [
                         topLine,
@@ -195,26 +217,21 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
                             RelativeSizeAxes = Axes.X,
                             AutoSizeAxes = Axes.Y,
                             Direction = FillDirection.Horizontal,
-                            Spacing = new Vector2(9, 0),
-                            Children =
-                            [
-                                modText = stat(attempt.ModsKey, Colour4.White, true),
-                                stat($"{attempt.Accuracy:0.00}%", Colour4.White.Opacity(0.9f)),
-                                stat($"{attempt.Combo}x combo", Colour4.White.Opacity(0.62f)),
-                            ],
+                            Spacing = new Vector2(6, 0),
+                            Children = overview,
                         },
                         new FillFlowContainer
                         {
                             RelativeSizeAxes = Axes.X,
                             AutoSizeAxes = Axes.Y,
                             Direction = FillDirection.Horizontal,
-                            Spacing = new Vector2(9, 0),
+                            Spacing = new Vector2(10, 0),
                             Children =
                             [
-                                stat($"{attempt.Score:N0} score", Colour4.White.Opacity(0.58f)),
-                                stat($"100  {attempt.N100}", Colour4.FromHex("#73D89A")),
-                                stat($"50  {attempt.N50}", Colour4.FromHex("#F0CA63")),
-                                stat($"Miss  {attempt.Misses}", Colour4.FromHex("#FF6C9D")),
+                                stat($"SCORE  {attempt.Score:N0}", Colour4.White.Opacity(0.7f), 8.6f, true),
+                                stat($"100  {attempt.N100}", Colour4.FromHex("#73D89A"), 8.8f, true),
+                                stat($"50  {attempt.N50}", Colour4.FromHex("#F0CA63"), 8.8f, true),
+                                stat($"MISS  {attempt.Misses}", Colour4.FromHex("#FF6C9D"), 8.8f, true),
                             ],
                         },
                     ],
@@ -227,9 +244,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
             base.Update();
             BorderColour = colour.Value.Opacity(selected ? 0.9f : 0.35f);
             accent.Colour = colour.Value;
-            modText.Colour = colour.Value.Lighten(0.25f);
-            if (activeText != null)
-                activeText.Colour = colour.Value.Lighten(0.25f);
+            selectionWash.Colour = colour.Value.Opacity(selected ? 0.09f : 0.02f);
         }
 
         protected override bool OnClick(ClickEvent e)
@@ -240,21 +255,95 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
 
         protected override bool OnHover(HoverEvent e)
         {
-            background.FadeColour(Colour4.White.Opacity(0.18f), 100);
+            background.FadeColour(Colour4.FromHex("#202529"), 100);
             return true;
         }
 
         protected override void OnHoverLost(HoverLostEvent e)
-            => background.FadeColour(Colour4.White.Opacity(selected ? 0.14f : 0.055f), 100);
+            => background.FadeColour(Colour4.FromHex(selected ? "#171B1E" : "#111416"), 100);
 
-        private static SpriteText stat(string text, Colour4 colour, bool bold = false) => new()
+        private static SpriteText stat(string text, Colour4 colour, float size = 9.5f, bool bold = false) => new()
         {
             Text = text,
             Font = bold
-                ? FontUsage.Default.With(size: 8.2f, weight: "bold")
-                : FontUsage.Default.With(size: 8.2f),
+                ? FontUsage.Default.With(size: size, weight: "bold")
+                : FontUsage.Default.With(size: size),
             Colour = colour,
         };
+
+        private partial class ModBadge : CompositeDrawable
+        {
+            private readonly Bindable<Colour4> colour;
+            private readonly bool muted;
+            private Box background = null!;
+
+            public ModBadge(string acronym, Bindable<Colour4> colour, bool muted = false)
+            {
+                this.colour = colour;
+                this.muted = muted;
+                Width = acronym.Length > 2 ? 29 : 24;
+                Height = 15;
+                Masking = true;
+                CornerRadius = 4;
+                BorderThickness = 1;
+                InternalChildren =
+                [
+                    background = new Box { RelativeSizeAxes = Axes.Both },
+                    new SpriteText
+                    {
+                        Text = acronym,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Font = FontUsage.Default.With(size: 8.2f, weight: "bold"),
+                        Colour = muted ? Colour4.White.Opacity(0.62f) : Colour4.White,
+                    },
+                ];
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+                Colour4 badgeColour = muted ? Colour4.White : colour.Value;
+                background.Colour = badgeColour.Opacity(muted ? 0.07f : 0.22f);
+                BorderColour = badgeColour.Opacity(muted ? 0.18f : 0.55f);
+            }
+        }
+
+        private partial class StatusBadge : CompositeDrawable
+        {
+            private readonly Bindable<Colour4> colour;
+            private Box background = null!;
+            private SpriteText text = null!;
+
+            public StatusBadge(Bindable<Colour4> colour)
+            {
+                this.colour = colour;
+                Anchor = Anchor.TopRight;
+                Origin = Anchor.TopRight;
+                Width = 60;
+                Height = 14;
+                Masking = true;
+                CornerRadius = 7;
+                InternalChildren =
+                [
+                    background = new Box { RelativeSizeAxes = Axes.Both },
+                    text = new SpriteText
+                    {
+                        Text = "COMPARING",
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Font = FontUsage.Default.With(size: 7.2f, weight: "bold"),
+                    },
+                ];
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+                background.Colour = colour.Value.Opacity(0.2f);
+                text.Colour = colour.Value.Lighten(0.3f);
+            }
+        }
     }
 
     private static SpriteText label(string text, float size, bool bold = false) => new()
@@ -265,7 +354,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
         Font = bold
             ? FontUsage.Default.With(size: size, weight: "bold")
             : FontUsage.Default.With(size: size),
-        Colour = Colour4.White.Opacity(bold ? 0.88f : 0.62f),
+        Colour = Colour4.White.Opacity(bold ? 0.94f : 0.74f),
     };
 
     private static SpriteText sectionLabel(string text) => new()
@@ -273,9 +362,9 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
         Text = text,
         RelativeSizeAxes = Axes.X,
         Truncate = true,
-        Font = FontUsage.Default.With(size: 7.5f, weight: "bold"),
-        Colour = Colour4.White.Opacity(0.48f),
-        Margin = new MarginPadding { Top = 2 },
+        Font = FontUsage.Default.With(size: 8.5f, weight: "bold"),
+        Colour = Colour4.White.Opacity(0.7f),
+        Margin = new MarginPadding { Top = 4 },
     };
 
     private partial class ImportStatusText : SpriteText
@@ -287,8 +376,8 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
             this.status = status;
             RelativeSizeAxes = Axes.X;
             Truncate = true;
-            Font = FontUsage.Default.With(size: 7.5f);
-            Colour = Colour4.White.Opacity(0.62f);
+            Font = FontUsage.Default.With(size: 8.5f);
+            Colour = Colour4.White.Opacity(0.74f);
         }
 
         protected override void LoadComplete()
@@ -312,11 +401,11 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
 
     private static Drawable compactColour(string text, Bindable<Colour4> colour)
     {
-        const float scale = 0.7f;
+        const float scale = 0.85f;
         return new Container
         {
             RelativeSizeAxes = Axes.X,
-            Height = 43,
+            Height = 53,
             Masking = true,
             Child = new SettingsColour
             {
@@ -340,7 +429,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
             this.action = action;
             baseColour = colour;
             RelativeSizeAxes = Axes.X;
-            Height = 30;
+            Height = 34;
             Masking = true;
             CornerRadius = 6;
             InternalChildren =
@@ -351,7 +440,7 @@ internal partial class KumoriComparisonPanel : PlayerSettingsGroup
                     Text = text,
                     Anchor = Anchor.Centre,
                     Origin = Anchor.Centre,
-                    Font = FontUsage.Default.With(size: 10, weight: "bold"),
+                    Font = FontUsage.Default.With(size: 10.5f, weight: "bold"),
                     Colour = Colour4.White,
                 },
             ];

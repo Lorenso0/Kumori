@@ -23,7 +23,7 @@
         </Style>
     </UserControl.Resources>
 
-    <Border Background="{DynamicResource Brush.NavigationBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,0,1,0">
+    <Border Background="{DynamicResource Brush.NavigationBackground}" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,0,1,0">
         <Grid Margin="6,8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="0" />
@@ -43,10 +43,11 @@
                 </Grid>
             </Button>
 
-            <Button x:Name="DashboardButton" Grid.Row="1" Click="Dashboard_Click" Style="{StaticResource NavigationButton}" ToolTip="Dashboard"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE80F;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Dashboard" Style="{StaticResource NavigationLabel}"/></Grid></Button>
-            <Button x:Name="PerformanceButton" Grid.Row="2" Click="Performance_Click" Style="{StaticResource NavigationButton}" ToolTip="Performance"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE9D2;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Performance" Style="{StaticResource NavigationLabel}"/></Grid></Button>
-            <Button x:Name="MapsButton" Grid.Row="3" Click="Maps_Click" Style="{StaticResource NavigationButton}" ToolTip="Maps"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE81D;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Maps" Style="{StaticResource NavigationLabel}"/></Grid></Button>
+            <Button x:Name="DashboardButton" Grid.Row="1" Click="Dashboard_Click" Style="{StaticResource NavigationButton}" ToolTip="Dashboard" AutomationProperties.Name="Dashboard" AutomationProperties.PositionInSet="1" AutomationProperties.SizeOfSet="4"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE80F;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Dashboard" Style="{StaticResource NavigationLabel}"/></Grid></Button>
+            <Button x:Name="PerformanceButton" Grid.Row="2" Click="Performance_Click" Style="{StaticResource NavigationButton}" ToolTip="Performance" AutomationProperties.Name="Performance" AutomationProperties.PositionInSet="2" AutomationProperties.SizeOfSet="4"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE9D2;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Performance" Style="{StaticResource NavigationLabel}"/></Grid></Button>
+            <Button x:Name="MapsButton" Grid.Row="3" Click="Maps_Click" Style="{StaticResource NavigationButton}" ToolTip="Maps" AutomationProperties.Name="Maps" AutomationProperties.PositionInSet="3" AutomationProperties.SizeOfSet="4"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE81D;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Maps" Style="{StaticResource NavigationLabel}"/></Grid></Button>
             <Button Grid.Row="8" Click="Toggle_Click" Style="{StaticResource NavigationButton}" ToolTip="Expand or collapse sidebar"
+                    AutomationProperties.Name="Expand or collapse navigation"
                     Visibility="{Binding CanToggle, RelativeSource={RelativeSource AncestorType={x:Type local:AdaptiveNavigationRail}}, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <TextBlock FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -55,14 +56,26 @@
                     <TextBlock Grid.Column="1" Text="Collapse" Style="{StaticResource NavigationLabel}" FontWeight="Normal" Foreground="{DynamicResource Brush.TextMuted}"/>
                 </Grid>
             </Button>
-            <Button Grid.Row="9" Click="Changelog_Click" Style="{StaticResource NavigationButton}" ToolTip="Changelog">
+            <Button x:Name="ChangelogButton"
+                    Grid.Row="9"
+                    Click="Changelog_Click"
+                    Style="{StaticResource NavigationButton}"
+                    ToolTip="Changelog"
+                    AutomationProperties.Name="Changelog"
+                    AutomationProperties.HelpText="Opens the changelog inside Kumori">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="Changelog" Style="{StaticResource NavigationLabel}"/>
                 </Grid>
             </Button>
-            <Button Grid.Row="10" Click="Discord_Click" Style="{StaticResource NavigationButton}" ToolTip="Join the Kumori Discord">
+            <Button x:Name="DiscordButton"
+                    Grid.Row="10"
+                    Click="Discord_Click"
+                    Style="{StaticResource NavigationButton}"
+                    ToolTip="Join the Kumori Discord"
+                    AutomationProperties.Name="Join the Kumori Discord"
+                    AutomationProperties.HelpText="Opens an external website">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Viewbox Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -72,7 +85,7 @@
                     <TextBlock Grid.Column="1" Text="Discord" Style="{StaticResource NavigationLabel}"/>
                 </Grid>
             </Button>
-            <Button x:Name="SettingsButton" Grid.Row="11" Click="Settings_Click" Style="{StaticResource NavigationButton}" ToolTip="Settings"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Settings" Style="{StaticResource NavigationLabel}"/></Grid></Button>
+            <Button x:Name="SettingsButton" Grid.Row="11" Click="Settings_Click" Style="{StaticResource NavigationButton}" ToolTip="Settings &amp; tools" AutomationProperties.Name="Settings and tools" AutomationProperties.PositionInSet="4" AutomationProperties.SizeOfSet="4"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="Settings" Style="{StaticResource NavigationLabel}"/></Grid></Button>
         </Grid>
     </Border>
 </UserControl>

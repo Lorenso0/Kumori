@@ -187,6 +187,9 @@ public sealed record AttemptContract
     [JsonPropertyName("score")]
     public long Score { get; init; }
 
+    [JsonPropertyName("max_combo")]
+    public int MaxCombo { get; init; }
+
     [JsonPropertyName("grade")]
     public string Grade { get; init; } = "";
 
@@ -289,6 +292,7 @@ public sealed record ComparisonContract
     [JsonPropertyName("score")] public long Score { get; init; }
     [JsonPropertyName("pp")] public double Pp { get; init; }
     [JsonPropertyName("combo")] public int Combo { get; init; }
+    [JsonPropertyName("max_combo")] public int MaxCombo { get; init; }
     [JsonPropertyName("n300")] public int N300 { get; init; }
     [JsonPropertyName("n100")] public int N100 { get; init; }
     [JsonPropertyName("n50")] public int N50 { get; init; }

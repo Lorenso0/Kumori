@@ -3,6 +3,10 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
+using System.Windows.Input;
 using System.Windows.Media;
 using Kumori.Core.Models;
 using Serilog;
@@ -30,15 +34,15 @@ public sealed class MapPressureGraph : FrameworkElement
 {
     public static readonly DependencyProperty DetailsProperty =
         DependencyProperty.Register(nameof(Details), typeof(AttemptDetails), typeof(MapPressureGraph),
-            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnDetailsChanged));
 
     public static readonly DependencyProperty CurveProperty =
         DependencyProperty.Register(nameof(Curve), typeof(IReadOnlyList<PressurePoint>), typeof(MapPressureGraph),
-            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnGraphDataChanged));
 
     public static readonly DependencyProperty UrSamplesProperty =
         DependencyProperty.Register(nameof(UrSamples), typeof(IReadOnlyList<UrPoint>), typeof(MapPressureGraph),
-            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnGraphDataChanged));
 
     public static readonly DependencyProperty ShowMissProperty =
         DependencyProperty.Register(nameof(ShowMiss), typeof(bool), typeof(MapPressureGraph),
@@ -64,7 +68,15 @@ public sealed class MapPressureGraph : FrameworkElement
     public static readonly DependencyProperty UrBrushProperty = BrushProperty(nameof(UrBrush), "#82728E");
     public static readonly DependencyProperty GraphTextBrushProperty = BrushProperty(nameof(GraphTextBrush), "#82728E");
     private int? _hoverTimeMs;
+    private int? _keyboardTimeMs;
     private (double Left, double Right, double Top, double Bottom, int End) _lastBounds;
+
+    public MapPressureGraph()
+    {
+        Focusable = true;
+        KeyboardNavigation.SetIsTabStop(this, true);
+        AutomationProperties.SetLiveSetting(this, AutomationLiveSetting.Polite);
+    }
 
     public AttemptDetails? Details { get => (AttemptDetails?)GetValue(DetailsProperty); set => SetValue(DetailsProperty, value); }
     public IReadOnlyList<PressurePoint>? Curve { get => (IReadOnlyList<PressurePoint>?)GetValue(CurveProperty); set => SetValue(CurveProperty, value); }
@@ -88,12 +100,16 @@ public sealed class MapPressureGraph : FrameworkElement
         var height = ActualHeight;
         if (width < 40 || height < 24)
         {
+            _lastBounds = default;
+            DrawKeyboardFocus(dc);
             return;
         }
 
         if (Details is not { } details)
         {
+            _lastBounds = default;
             DrawEmpty(dc, 12, height / 2);
+            DrawKeyboardFocus(dc);
             return;
         }
 
@@ -112,10 +128,7 @@ public sealed class MapPressureGraph : FrameworkElement
         var curve = Curve is { Count: > 1 } c ? c : FallbackCurve(events, details);
         var samples = UrSamples ?? System.Array.Empty<UrPoint>();
 
-        var end = 1;
-        foreach (var p in curve) end = System.Math.Max(end, p.TimeMs);
-        foreach (var t in missTimes) end = System.Math.Max(end, t);
-        foreach (var t in breakTimes) end = System.Math.Max(end, t);
+        var end = TimelineEnd();
         var visibleSamples = samples
             .Where(s => s.TimeMs >= 0 && s.TimeMs <= end)
             .ToArray();
@@ -213,7 +226,7 @@ public sealed class MapPressureGraph : FrameworkElement
             dc.DrawGeometry(null, new Pen(UrBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 3 }, 0) }, geo);
         }
 
-        if (_hoverTimeMs is { } hover)
+        if ((_hoverTimeMs ?? _keyboardTimeMs) is { } hover)
         {
             var clamped = Math.Clamp(hover, 0, end);
             var x = X(clamped);
@@ -224,6 +237,7 @@ public sealed class MapPressureGraph : FrameworkElement
             dc.DrawLine(hoverPen, new Point(x, top), new Point(x, bottom));
             dc.DrawEllipse(FillBrush, new Pen(LineBrush, 1), new Point(x, y), 3, 3);
         }
+        DrawKeyboardFocus(dc);
     }
 
     protected override void OnMouseMove(System.Windows.Input.MouseEventArgs e)
@@ -249,11 +263,80 @@ public sealed class MapPressureGraph : FrameworkElement
         InvalidateVisual();
     }
 
+    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseLeftButtonDown(e);
+        Focus();
+    }
+
     protected override void OnMouseLeave(System.Windows.Input.MouseEventArgs e)
     {
         base.OnMouseLeave(e);
         ClearHover();
     }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            if (_keyboardTimeMs is not null)
+            {
+                SetKeyboardTime(null);
+                e.Handled = true;
+            }
+            return;
+        }
+
+        if (Details is null)
+        {
+            return;
+        }
+
+        var end = TimelineEnd();
+        var current = Math.Clamp(_keyboardTimeMs ?? 0, 0, end);
+        var step = Math.Clamp(end / 100, 1000, 5000);
+        var page = Math.Max(step, end / 10);
+        int? next = e.Key switch
+        {
+            Key.Left => current - step,
+            Key.Right => _keyboardTimeMs is null ? 0 : current + step,
+            Key.PageUp => current - page,
+            Key.PageDown => _keyboardTimeMs is null ? 0 : current + page,
+            Key.Home => 0,
+            Key.End => end,
+            Key.Enter or Key.Space => current,
+            _ => null,
+        };
+        if (next is null)
+        {
+            return;
+        }
+
+        SetKeyboardTime(
+            Math.Clamp(next.Value, 0, end),
+            forceAnnouncement: e.Key is Key.Enter or Key.Space);
+        e.Handled = true;
+    }
+
+    protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnGotKeyboardFocus(e);
+        InvalidateVisual();
+    }
+
+    protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnLostKeyboardFocus(e);
+        InvalidateVisual();
+    }
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new MapPressureGraphAutomationPeer(this);
 
     protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
     {
@@ -460,10 +543,172 @@ public sealed class MapPressureGraph : FrameworkElement
             return;
         }
         _hoverTimeMs = null;
-        HoverReadout = "";
-        ToolTip = null;
+        UpdateReadoutFromKeyboardSelection();
         InvalidateVisual();
     }
+
+    private void SetKeyboardTime(int? mapTime, bool forceAnnouncement = false)
+    {
+        var oldValue = AccessibleValue;
+        _hoverTimeMs = null;
+        _keyboardTimeMs = mapTime;
+        UpdateReadoutFromKeyboardSelection();
+        InvalidateVisual();
+
+        var newValue = AccessibleValue;
+        if (forceAnnouncement || !string.Equals(oldValue, newValue, StringComparison.Ordinal))
+        {
+            RaiseAccessibleValueChanged(oldValue, newValue);
+        }
+    }
+
+    private void UpdateReadoutFromKeyboardSelection()
+    {
+        if (_keyboardTimeMs is { } mapTime && Details is { } details)
+        {
+            mapTime = Math.Clamp(mapTime, 0, TimelineEnd());
+            _keyboardTimeMs = mapTime;
+            var curve = Curve is { Count: > 1 } c ? c : FallbackCurve(details.Events, details);
+            HoverReadout = BuildHoverSummary(mapTime, PressureAt(curve, mapTime));
+            ToolTip = BuildHoverText(mapTime);
+            return;
+        }
+
+        _keyboardTimeMs = null;
+        HoverReadout = "";
+        ToolTip = null;
+    }
+
+    private int TimelineEnd()
+    {
+        var end = Details is { } details ? MapDuration(details) : 1;
+        if (Curve is { } curve)
+        {
+            foreach (var point in curve)
+            {
+                end = Math.Max(end, point.TimeMs);
+            }
+        }
+        if (UrSamples is { } samples)
+        {
+            foreach (var sample in samples)
+            {
+                end = Math.Max(end, sample.TimeMs);
+            }
+        }
+        return Math.Max(1, end);
+    }
+
+    private void DrawKeyboardFocus(DrawingContext dc)
+    {
+        if (!IsKeyboardFocused || ActualWidth < 3 || ActualHeight < 3)
+        {
+            return;
+        }
+
+        var pen = new Pen(System.Windows.SystemColors.HighlightBrush, 1.5)
+        {
+            DashStyle = new DashStyle(new double[] { 2, 2 }, 0),
+        };
+        dc.DrawRectangle(null, pen, new Rect(1, 1, ActualWidth - 2, ActualHeight - 2));
+    }
+
+    private string AccessibleName => Details is null
+        ? "Map pressure graph, no data"
+        : $"Map pressure graph, {FormatDuration(TimelineEnd())}";
+
+    private string AccessibleSummary
+    {
+        get
+        {
+            if (Details is not { } details)
+            {
+                return "No map pressure data is available.";
+            }
+
+            var curve = Curve is { Count: > 1 } c ? c : FallbackCurve(details.Events, details);
+            var missCount = details.Events.Count(e => e.EventType == "miss" && e.MapTimeMs is >= 0);
+            var breakCount = details.Events.Count(e => e.EventType == "slider_break" && e.MapTimeMs is >= 0);
+            var urCount = UrSamples?.Count ?? 0;
+            var parts = new List<string>
+            {
+                $"Timeline {FormatDuration(TimelineEnd())}",
+            };
+            if (curve.Count > 0)
+            {
+                var peak = curve.OrderByDescending(point => point.Value).First();
+                parts.Add(Invariant($"peak pressure {peak.Value * 100:0}% at {FormatDuration(peak.TimeMs)}"));
+            }
+            parts.Add(missCount == 1 ? "1 miss" : Invariant($"{missCount:N0} misses"));
+            parts.Add(breakCount == 1 ? "1 slider break" : Invariant($"{breakCount:N0} slider breaks"));
+            if (urCount > 0)
+            {
+                parts.Add(Invariant($"{urCount:N0} unstable-rate samples"));
+            }
+            return string.Join("; ", parts) + ".";
+        }
+    }
+
+    private string AccessibleHelpText =>
+        AccessibleSummary +
+        " Use Left and Right Arrow to move along the timeline, Page Up and Page Down to move by ten percent, " +
+        "Home and End to jump, and Escape to clear the cursor.";
+
+    private string AccessibleValue
+    {
+        get
+        {
+            if (Details is null)
+            {
+                return "No map pressure data";
+            }
+            if ((_hoverTimeMs ?? _keyboardTimeMs) is { } mapTime)
+            {
+                return BuildHoverText(Math.Clamp(mapTime, 0, TimelineEnd()));
+            }
+            return AccessibleSummary;
+        }
+    }
+
+    private void RaiseAccessibleValueChanged(string oldValue, string newValue)
+    {
+        if (UIElementAutomationPeer.FromElement(this) is MapPressureGraphAutomationPeer peer)
+        {
+            peer.RaiseValueChanged(oldValue, newValue);
+        }
+    }
+
+    private static void OnDetailsChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
+    {
+        var graph = (MapPressureGraph)dependencyObject;
+        var oldValue = graph.AccessibleValue;
+        graph._hoverTimeMs = null;
+        graph._keyboardTimeMs = null;
+        graph._lastBounds = default;
+        graph.UpdateReadoutFromKeyboardSelection();
+        graph.RaiseAccessibleValueChanged(oldValue, graph.AccessibleValue);
+    }
+
+    private static void OnGraphDataChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
+    {
+        var graph = (MapPressureGraph)dependencyObject;
+        var oldValue = graph.AccessibleValue;
+        graph.UpdateReadoutFromKeyboardSelection();
+        var newValue = graph.AccessibleValue;
+        if (!string.Equals(oldValue, newValue, StringComparison.Ordinal))
+        {
+            graph.RaiseAccessibleValueChanged(oldValue, newValue);
+        }
+    }
+
+    private static string FormatDuration(int milliseconds)
+    {
+        var seconds = Math.Max(0, milliseconds) / 1000;
+        return Invariant($"{seconds / 60}:{seconds % 60:00}");
+    }
+
+    private static string Invariant(FormattableString value) =>
+        value.ToString(CultureInfo.InvariantCulture);
 
     private static double PressureAt(IReadOnlyList<PressurePoint> curve, int mapTime)
     {
@@ -514,4 +759,48 @@ public sealed class MapPressureGraph : FrameworkElement
     private static DependencyProperty BrushProperty(string name, string fallback) =>
         DependencyProperty.Register(name, typeof(Brush), typeof(MapPressureGraph),
             new FrameworkPropertyMetadata(Frozen(fallback), FrameworkPropertyMetadataOptions.AffectsRender));
+
+    private sealed class MapPressureGraphAutomationPeer(MapPressureGraph owner)
+        : FrameworkElementAutomationPeer(owner), IValueProvider
+    {
+        private MapPressureGraph Graph => (MapPressureGraph)Owner;
+
+        public bool IsReadOnly => true;
+
+        public string Value => Graph.AccessibleValue;
+
+        public override object? GetPattern(PatternInterface pattern) =>
+            pattern == PatternInterface.Value ? this : base.GetPattern(pattern);
+
+        public void SetValue(string value) =>
+            throw new InvalidOperationException("The map pressure graph is read-only.");
+
+        protected override string GetNameCore()
+        {
+            var explicitName = base.GetNameCore();
+            return string.IsNullOrWhiteSpace(explicitName) ? Graph.AccessibleName : explicitName;
+        }
+
+        protected override string GetHelpTextCore()
+        {
+            var explicitHelp = base.GetHelpTextCore();
+            return string.IsNullOrWhiteSpace(explicitHelp)
+                ? Graph.AccessibleHelpText
+                : $"{explicitHelp} {Graph.AccessibleHelpText}";
+        }
+
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Custom;
+
+        protected override string GetClassNameCore() => nameof(MapPressureGraph);
+
+        protected override string GetLocalizedControlTypeCore() => "interactive chart";
+
+        protected override bool IsKeyboardFocusableCore() => Graph.Focusable && Graph.IsEnabled;
+
+        internal void RaiseValueChanged(string oldValue, string newValue)
+        {
+            RaisePropertyChangedEvent(ValuePatternIdentifiers.ValueProperty, oldValue, newValue);
+            RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }
+    }
 }

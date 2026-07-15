@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
-using AutoMapper;
 using osu.Framework;
 using osu.Framework.Platform;
 using osu.Game.Rulesets.Osu.Replays;
@@ -28,18 +27,21 @@ public static class Program
             NativeViewerLog.Write($"Starting with args: {string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}");
             if (options.Probe)
             {
-                bool autoMapperCompatible = typeof(MapperConfiguration).GetConstructor(
-                    [typeof(Action<IMapperConfigurationExpression>)]) is not null;
-                NativeViewerLog.Write(autoMapperCompatible ? "Probe succeeded" : "Probe failed: incompatible AutoMapper ABI");
+                AutoMapperCompatibilityResult autoMapper = AutoMapperCompatibilityProbe.Run();
+                NativeViewerLog.Write(autoMapper.Compatible
+                    ? $"Probe succeeded with secured AutoMapper {autoMapper.Version}"
+                    : $"Probe failed: {autoMapper.Error}");
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
-                    status = autoMapperCompatible ? "ok" : "error",
+                    status = autoMapper.Compatible ? "ok" : "error",
                     contract_version = ViewerContract.CurrentVersion,
                     lazer_package = BuildInfo.LazerPackageVersion,
-                    automapper_compatible = autoMapperCompatible,
+                    automapper_compatible = autoMapper.Compatible,
+                    automapper_version = autoMapper.Version,
+                    automapper_error = autoMapper.Error,
                     assembly = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
                 }));
-                return autoMapperCompatible ? 0 : 2;
+                return autoMapper.Compatible ? 0 : 2;
             }
 
             ViewerContract contract = ViewerContract.Load(options.ContractPath!);

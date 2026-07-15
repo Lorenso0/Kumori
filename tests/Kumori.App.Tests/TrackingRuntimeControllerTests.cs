@@ -96,6 +96,122 @@ public sealed class TrackingRuntimeControllerTests
         Assert.Equal(0, stops);
     }
 
+    [Fact]
+    public async Task AsyncDispose_WaitsForReconcileAndPreventsRestartAfterStop()
+    {
+        var store = new AppStateStore();
+        var starts = 0;
+        var stops = 0;
+        var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controller = new TrackingRuntimeController(
+            store,
+            _ => { starts++; return Task.CompletedTask; },
+            async () =>
+            {
+                stops++;
+                stopEntered.TrySetResult();
+                await releaseStop.Task;
+            },
+            (_, _) => { },
+            _ => { });
+
+        await controller.ApplyAsync(Settings(enabled: true, capture: true));
+        var reconcile = controller.ApplyAsync(Settings(enabled: true, capture: false));
+        await stopEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var dispose = controller.DisposeAsync().AsTask();
+        Assert.False(dispose.IsCompleted);
+        releaseStop.TrySetResult();
+        await reconcile;
+        await dispose;
+
+        Assert.Equal(1, starts);
+        Assert.Equal(1, stops);
+    }
+
+    [Fact]
+    public async Task PlayBoundaryDuringDeferralPublicationIsNotLost()
+    {
+        var store = new AppStateStore();
+        var stops = 0;
+        Task? scheduled = null;
+        using var controller = new TrackingRuntimeController(
+            store,
+            _ => Task.CompletedTask,
+            () => { stops++; return Task.CompletedTask; },
+            (task, _) => scheduled = task,
+            status =>
+            {
+                if (!status.Contains("current play", StringComparison.OrdinalIgnoreCase))
+                    return;
+                store.Update(state => state with
+                {
+                    Tracking = state.Tracking with { LatestTelemetry = new TosuTelemetry { IsPlaying = false } },
+                });
+            });
+
+        await controller.ApplyAsync(Settings(enabled: true, capture: true));
+        store.Update(state => state with
+        {
+            Tracking = state.Tracking with { LatestTelemetry = new TosuTelemetry { IsPlaying = true } },
+        });
+
+        await controller.ApplyAsync(Settings(enabled: false, capture: false));
+        Assert.NotNull(scheduled);
+        await scheduled!;
+
+        Assert.Equal(1, stops);
+    }
+
+    [Fact]
+    public async Task ImmediateNextPlayRearmsDeferredChangeForTheFollowingBoundary()
+    {
+        var store = new AppStateStore();
+        var stops = 0;
+        var deferralPublications = 0;
+        Task? scheduled = null;
+        using var controller = new TrackingRuntimeController(
+            store,
+            _ => Task.CompletedTask,
+            () => { stops++; return Task.CompletedTask; },
+            (task, _) => scheduled = task,
+            status =>
+            {
+                if (!status.Contains("current play", StringComparison.OrdinalIgnoreCase)
+                    || ++deferralPublications != 1)
+                    return;
+                store.Update(state => state with
+                {
+                    Tracking = state.Tracking with { LatestTelemetry = new TosuTelemetry { IsPlaying = false } },
+                });
+                store.Update(state => state with
+                {
+                    Tracking = state.Tracking with { LatestTelemetry = new TosuTelemetry { IsPlaying = true } },
+                });
+            });
+
+        await controller.ApplyAsync(Settings(enabled: true, capture: true));
+        store.Update(state => state with
+        {
+            Tracking = state.Tracking with { LatestTelemetry = new TosuTelemetry { IsPlaying = true } },
+        });
+        await controller.ApplyAsync(Settings(enabled: false, capture: false));
+
+        Assert.NotNull(scheduled);
+        await scheduled!;
+        Assert.Equal(0, stops);
+
+        store.Update(state => state with
+        {
+            Tracking = state.Tracking with { LatestTelemetry = new TosuTelemetry { IsPlaying = false } },
+        });
+        Assert.NotNull(scheduled);
+        await scheduled!;
+
+        Assert.Equal(1, stops);
+    }
+
     private static KumoriSettings Settings(bool enabled, bool capture)
     {
         var settings = new KumoriSettings();

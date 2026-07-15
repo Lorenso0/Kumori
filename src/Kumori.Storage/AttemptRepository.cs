@@ -160,6 +160,7 @@ public sealed class AttemptRepository
         var hasSetId = HasColumn(con, "beatmaps", "set_id");
         var hasChecksum = HasColumn(con, "beatmaps", "checksum");
         var hasMapper = HasColumn(con, "beatmaps", "mapper");
+        var hasMaxCombo = HasColumn(con, "beatmaps", "max_combo");
         var hasAdjustedStars = HasColumn(con, "attempts", "adjusted_stars");
         using var cmd = con.CreateCommand();
         var beatmapId = hasBeatmapId ? "b.beatmap_id" : "NULL";
@@ -177,7 +178,8 @@ public sealed class AttemptRepository
                    SUM(CASE WHEN a.outcome='completed' THEN 1 ELSE 0 END),
                    MAX(a.pp), COALESCE(MAX(CASE WHEN a.outcome='completed' THEN a.accuracy END), 0), MAX(a.combo),
                    AVG(a.accuracy), AVG(a.pp), AVG(a.combo),
-                   MAX({(hasAdjustedStars ? "COALESCE(a.adjusted_stars, a.base_stars, b.stars)" : "b.stars")})
+                   MAX({(hasAdjustedStars ? "COALESCE(a.adjusted_stars, a.base_stars, b.stars)" : "b.stars")}),
+                   MAX({(hasMaxCombo ? "COALESCE(b.max_combo, 0)" : "0")})
             FROM attempts a
             JOIN beatmaps b ON b.id=a.beatmap_id
             GROUP BY {mapKey}
@@ -207,6 +209,7 @@ public sealed class AttemptRepository
                 AveragePp = reader.GetDouble(16),
                 AverageCombo = reader.GetDouble(17),
                 Stars = reader.IsDBNull(18) ? null : reader.GetDouble(18),
+                BeatmapMaxCombo = (int)reader.GetInt64(19),
             });
         }
         return result;

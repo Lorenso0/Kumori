@@ -80,7 +80,7 @@ OpenTabletDriver and LG Dual Mode support are optional. LG Dual Mode only works 
 
 ## Building from source
 
-This section is for developers. On Windows, install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), clone the repository, and run one of these commands from the repository folder:
+This section is for developers. On Windows, install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), clone the repository, and run one of these commands from the repository folder:
 
 ```bat
 build-app.cmd

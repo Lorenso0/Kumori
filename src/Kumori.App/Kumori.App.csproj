@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>Kumori</AssemblyName>
@@ -21,9 +21,6 @@
     <PackageReference Include="Serilog" Version="4.1.0" />
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
-    <!-- Security floors for older transitive references in the osu! dependency graph. -->
-    <PackageReference Include="System.Net.Http" Version="4.3.4" />
-    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="ppy.osu.Game" Version="2026.621.0" />
     <PackageReference Include="ppy.osu.Game.Rulesets.Osu" Version="2026.621.0" />
   </ItemGroup>
@@ -32,6 +29,10 @@
     <ProjectReference Include="..\Kumori.Storage\Kumori.Storage.csproj" />
     <ProjectReference Include="..\Kumori.Tracking\Kumori.Tracking.csproj" />
     <ProjectReference Include="..\Kumori.Native\Kumori.Native.csproj" />
+    <ProjectReference Include="..\..\tools\Kumori.AutoMapperCompatPatcher\Kumori.AutoMapperCompatPatcher.csproj"
+                      ReferenceOutputAssembly="false"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PlatformTarget"
+                      PrivateAssets="all" />
   </ItemGroup>
   <Target Name="BuildStableFrameBridge" BeforeTargets="Build">
     <MSBuild Projects="..\Kumori.StableFrameBridge\Kumori.StableFrameBridge.csproj"
@@ -41,13 +42,13 @@
   </Target>
   <Target Name="CopyStableFrameBridge" AfterTargets="Build" DependsOnTargets="BuildStableFrameBridge">
     <ItemGroup>
-      <StableFrameBridgeFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0\win-x86\**\*" />
+      <StableFrameBridgeFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net10.0\win-x86\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(StableFrameBridgeFiles)" DestinationFiles="@(StableFrameBridgeFiles->'$(OutDir)stable-frame-bridge\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="IncludeStableFrameBridgeInPublish" BeforeTargets="_ComputeFilesToBundle" DependsOnTargets="BuildStableFrameBridge">
     <ItemGroup>
-      <StableFrameBridgePublishFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net8.0\win-x86\**\*" />
+      <StableFrameBridgePublishFiles Include="..\Kumori.StableFrameBridge\bin\$(Configuration)\net10.0\win-x86\**\*" />
       <ResolvedFileToPublish Include="@(StableFrameBridgePublishFiles)">
         <RelativePath>stable-frame-bridge\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

@@ -65,7 +65,7 @@ public partial class BackupWindow : Window
         try
         {
             await Task.Run(() => service.StageRestore(row.Info.Path));
-            StatusText.Text = "Restore staged. Exit and reopen Kumori to apply it.";
+            StatusText.Text = "Restore staged. Exit and reopen Kumori to apply it. External paths and automatic integrations will remain disabled until you review them.";
         }
         catch (Exception ex)
         {

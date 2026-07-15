@@ -144,7 +144,7 @@ public class ReplayViewerContractServiceTests : IDisposable
                 INSERT INTO attempt_movement VALUES (4, 'live', 1000, 2, 0, 'not_checked', '{}', '2026-07-07T10:11:30');
                 INSERT INTO attempt_movement_chunks VALUES (4, 0, 0, 1000, 2, @blob);
 
-                INSERT INTO beatmaps VALUES (2, 'x|y|different', 'Artist', 'Song', 'Insane', 5.2);
+                INSERT INTO beatmaps VALUES (2, 'x|y|different', 'Artist', 'Song', 'Insane', 5.2, 300);
                 INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
                     accuracy, score, pp, combo, n300, n100, n50, misses, mods_key)
                 VALUES (3, 1, 2, '2026-07-07T10:12:00', 'completed', 99.1, 999999, 190, 550, 620, 2, 1, 0, 'NM');
@@ -167,6 +167,7 @@ public class ReplayViewerContractServiceTests : IDisposable
         Assert.Equal(2, options[0].GetProperty("attempt_id").GetInt64());
         Assert.Equal("NM", options[0].GetProperty("mods_key").GetString());
         Assert.Equal(987654, options[0].GetProperty("score").GetInt64());
+        Assert.Equal(423, options[0].GetProperty("max_combo").GetInt32());
         Assert.Equal(4, options[0].GetProperty("n100").GetInt32());
         Assert.Equal(2, options[0].GetProperty("n50").GetInt32());
         Assert.Equal("100", options[0].GetProperty("judgement_events")[0].GetProperty("kind").GetString());
@@ -226,14 +227,14 @@ public class ReplayViewerContractServiceTests : IDisposable
         cmd.CommandText = "DELETE FROM attempt_movement_chunks";
         cmd.ExecuteNonQuery();
 
-        Assert.Throws<InvalidOperationException>(() => CreateService().WriteContract(1, _beatmapPath));
+        Assert.Throws<InvalidDataException>(() => CreateService().WriteContract(1, _beatmapPath));
     }
 
     [Fact]
     public void ResolveViewerExecutable_FindsDistViewerFromAppDebugOutput()
     {
         var root = Path.Combine(Path.GetTempPath(), $"kumori-viewer-resolve-{Guid.NewGuid():N}");
-        var appBase = Path.Combine(root, "src", "Kumori.App", "bin", "Debug", "net8.0-windows");
+        var appBase = Path.Combine(root, "src", "Kumori.App", "bin", "Debug", "net10.0-windows");
         var viewer = Path.Combine(root, "dist", "app", "Kumori.ReplayViewer", "Kumori.ReplayViewer.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(viewer)!);
         Directory.CreateDirectory(appBase);
@@ -297,7 +298,8 @@ public class ReplayViewerContractServiceTests : IDisposable
             CREATE TABLE sessions(id INTEGER PRIMARY KEY, started_at TEXT NOT NULL);
             CREATE TABLE beatmaps(
                 id INTEGER PRIMARY KEY, identity TEXT NOT NULL UNIQUE,
-                artist TEXT, title TEXT, difficulty TEXT, stars REAL);
+                artist TEXT, title TEXT, difficulty TEXT, stars REAL,
+                max_combo INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE attempts(
                 id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL,
                 beatmap_id INTEGER NOT NULL, started_at TEXT NOT NULL,
@@ -361,7 +363,7 @@ public class ReplayViewerContractServiceTests : IDisposable
                 payload_zlib BLOB NOT NULL);
 
             INSERT INTO sessions VALUES (1, '2026-07-07T10:00:00');
-            INSERT INTO beatmaps VALUES (1, 'x|y|z', 'Artist', 'Song', 'Extra', 6.1);
+            INSERT INTO beatmaps VALUES (1, 'x|y|z', 'Artist', 'Song', 'Extra', 6.1, 423);
             INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
                 accuracy, score, grade, pp, fc_pp, max_pp, combo,
                 n300, n100, n50, misses, slider_breaks, unstable_rate,

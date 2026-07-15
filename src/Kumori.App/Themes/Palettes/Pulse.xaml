@@ -7,7 +7,7 @@
     <Color x:Key="Color.CardSelectedBackground">#51225E</Color>
     <Color x:Key="Color.ControlBackground">#241330</Color>
     <Color x:Key="Color.ControlHoverBackground">#3D2051</Color>
-    <Color x:Key="Color.SubtleBorder">#713E82</Color>
+    <Color x:Key="Color.SubtleBorder">#8A4E9C</Color>
     <Color x:Key="Color.StrongBorder">#FF4EB8</Color>
     <Color x:Key="Color.AccentPink">#FF4EB8</Color>
     <Color x:Key="Color.AccentPurple">#A96BFF</Color>
@@ -39,7 +39,7 @@
     <SolidColorBrush x:Key="Brush.BackgroundPrimary" Color="{StaticResource Color.AppBackground}" />
     <SolidColorBrush x:Key="Brush.BackgroundSecondary" Color="{StaticResource Color.PanelBackground}" />
     <SolidColorBrush x:Key="Brush.Border" Color="{StaticResource Color.SubtleBorder}" />
-    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="{StaticResource Color.SubtleBorder}" />
+    <SolidColorBrush x:Key="Brush.BorderSubtle" Color="#713E82" />
     <SolidColorBrush x:Key="Brush.Negative" Color="{StaticResource Color.Danger}" />
     <LinearGradientBrush x:Key="Brush.NavigationBackground" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#30113E"/><GradientStop Color="#190B26" Offset="1"/></LinearGradientBrush>
     <LinearGradientBrush x:Key="Brush.TopBarBackground" StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#32113B"/><GradientStop Color="#160A22" Offset="1"/></LinearGradientBrush>

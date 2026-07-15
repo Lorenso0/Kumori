@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not defined KUMORI_VERSION set KUMORI_VERSION=0.4.1
+if not defined KUMORI_VERSION set KUMORI_VERSION=0.4.2
 
 REM ============================================================
 REM  Kumori WPF app (new .NET solution) build script.
@@ -16,15 +16,30 @@ REM ============================================================
 
 if /i "%~1"=="publish" goto :publish
 
+REM Re-running the launcher while this Debug build is resident in the tray
+REM cannot rebuild its locked output files. Activate that instance instead;
+REM developers who need a rebuild can exit it from the tray and run again.
+set "KUMORI_DEBUG_APP=%CD%\src\Kumori.App\bin\Debug\net10.0-windows10.0.17763.0\Kumori.exe"
+if /i "%~1"=="run" if exist "%KUMORI_DEBUG_APP%" (
+    powershell -NoProfile -NonInteractive -Command "$target=[IO.Path]::GetFullPath($env:KUMORI_DEBUG_APP); $running=Get-Process -Name Kumori -ErrorAction SilentlyContinue | Where-Object { try { [IO.Path]::GetFullPath($_.Path) -eq $target } catch { $false } }; if ($running) { exit 0 }; exit 1"
+    if not errorlevel 1 (
+        echo.
+        echo Kumori is already running. Activating the existing Debug instance.
+        echo Exit Kumori from its tray icon first if you need to rebuild changes.
+        start "" "%KUMORI_DEBUG_APP%"
+        exit /b 0
+    )
+)
+
 dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Debug -r win-x64 -p:Version=%KUMORI_VERSION% ^
   --self-contained false ^
-  -o replay_viewer\bin\Debug\net8.0\win-x64
+  -o replay_viewer\bin\Debug\net10.0\win-x64
 if errorlevel 1 exit /b %errorlevel%
 
 dotnet build Kumori.sln -c Debug
 if errorlevel 1 exit /b %errorlevel%
 
-xcopy /E /I /Y replay_viewer\bin\Debug\net8.0\win-x64 src\Kumori.App\bin\Debug\net8.0-windows10.0.17763.0\Kumori.ReplayViewer >nul
+xcopy /E /I /Y replay_viewer\bin\Debug\net10.0\win-x64 src\Kumori.App\bin\Debug\net10.0-windows10.0.17763.0\Kumori.ReplayViewer >nul
 if errorlevel 1 exit /b %errorlevel%
 
 dotnet test Kumori.sln -c Debug --no-build
@@ -32,7 +47,7 @@ if errorlevel 1 exit /b %errorlevel%
 
 if /i "%~1"=="run" (
     dotnet run --project src\Kumori.App\Kumori.App.csproj -c Debug --no-build
-    exit /b %errorlevel%
+    exit /b
 )
 
 echo.

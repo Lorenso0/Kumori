@@ -82,12 +82,14 @@ public sealed class OsrComparisonImporterTests : IDisposable
         {
             ModsKey = "NM",
             ClockRate = 1,
+            MaxCombo = 1,
         });
 
         Assert.True(imported.Ephemeral);
         Assert.Equal(OsrComparisonImporter.EphemeralAttemptId, imported.AttemptId);
         Assert.Equal("comparison.osr", imported.SourceName);
         Assert.Equal(123456, imported.Score);
+        Assert.Equal(1, imported.MaxCombo);
         Assert.Equal(1, imported.N300);
         Assert.Equal(2, imported.Samples.Count);
 

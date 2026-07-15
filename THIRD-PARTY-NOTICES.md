@@ -47,3 +47,7 @@ Microsoft.Data.Sqlite and SQLite (MIT/public domain), Realm .NET (Apache-2.0),
 Serilog (Apache-2.0), and Microsoft.Toolkit.Uwp.Notifications (MIT). Their
 package metadata and source repositories contain the authoritative copyright
 and licence texts. This notice must remain with redistributed copies of Kumori.
+
+Kumori's build tooling uses Mono.Cecil under the MIT License to update osu!'s
+legacy AutoMapper constructor calls in copied build outputs. The NuGet package
+cache and upstream package remain unchanged.

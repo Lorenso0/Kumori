@@ -33,11 +33,12 @@ public sealed class BackupService
         {
             try
             {
-                // Failed versions of Create() could leave a ZIP containing only
-                // manifest.json. Never present those partial files as restorable.
-                ValidateArchive(path);
+                // Cataloging deliberately validates only the small ZIP structure and
+                // manifest. The database's full integrity check remains a restore-time
+                // operation so listing backups stays cheap even for large databases.
+                var createdAt = ValidateArchive(path);
                 var file = new FileInfo(path);
-                backups.Add(new BackupInfo(file.FullName, file.LastWriteTimeUtc, file.Length));
+                backups.Add(new BackupInfo(file.FullName, createdAt, file.Length));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
             {
@@ -175,6 +176,7 @@ public sealed class BackupService
                 if (!string.Equals(check.ExecuteScalar() as string, "ok", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Backup database failed its integrity check.");
             }
+            SanitizeRestoredSettingsFile(Path.Combine(staging, "settings.v2.json"));
             if (Directory.Exists(pendingRestoreDirectory)) Directory.Delete(pendingRestoreDirectory, true);
             Directory.Move(staging, pendingRestoreDirectory);
         }
@@ -203,6 +205,7 @@ public sealed class BackupService
         Directory.CreateDirectory(AppPaths.TrackingDataDir);
         Directory.CreateDirectory(AppPaths.ConfigDir);
         ValidateDatabaseFile(database);
+        SanitizeRestoredSettingsFile(settings);
         try
         {
             CopyForRollback(AppPaths.TrackingDatabase, databaseRollback);
@@ -258,26 +261,77 @@ public sealed class BackupService
             throw new InvalidDataException("Staged backup database failed its integrity check.");
     }
 
-    private static void ValidateArchive(string archivePath)
+    private static void SanitizeRestoredSettingsFile(string path)
+    {
+        if (!File.Exists(path))
+            return;
+
+        var sanitized = SettingsService.PrepareRestoredSettings(File.ReadAllText(path));
+        var temporary = path + ".safe";
+        try
+        {
+            File.WriteAllText(temporary, sanitized);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temporary);
+        }
+    }
+
+    private static DateTimeOffset ValidateArchive(string archivePath)
     {
         const long maximumDatabaseBytes = 4L * 1024 * 1024 * 1024;
         const long maximumSettingsBytes = 16L * 1024 * 1024;
+        const long maximumManifestBytes = 64L * 1024;
         var allowed = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
         {
             ["osu_tracking.sqlite3"] = maximumDatabaseBytes,
             ["settings.v2.json"] = maximumSettingsBytes,
-            ["manifest.json"] = maximumSettingsBytes,
+            ["manifest.json"] = maximumManifestBytes,
         };
         using var archive = ZipFile.OpenRead(archivePath);
         if (archive.Entries.Count > allowed.Count)
             throw new InvalidDataException("Backup contains unexpected files.");
+
+        var entries = new Dictionary<string, ZipArchiveEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in archive.Entries)
         {
-            if (!allowed.TryGetValue(entry.FullName.Replace('\\', '/'), out var maximum) || entry.Length > maximum)
+            var name = entry.FullName.Replace('\\', '/');
+            if (!allowed.TryGetValue(name, out var maximum) || entry.Length > maximum)
                 throw new InvalidDataException($"Backup entry '{entry.FullName}' is not valid.");
+            if (!entries.TryAdd(name, entry))
+                throw new InvalidDataException($"Backup contains duplicate entry '{entry.FullName}'.");
         }
-        if (!archive.Entries.Any(entry => string.Equals(entry.FullName, "osu_tracking.sqlite3", StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidDataException("Backup does not contain a tracking database.");
+
+        if (!entries.TryGetValue("osu_tracking.sqlite3", out var database) || database.Length == 0)
+            throw new InvalidDataException("Backup does not contain one non-empty tracking database.");
+        if (!entries.TryGetValue("manifest.json", out var manifest) || manifest.Length == 0)
+            throw new InvalidDataException("Backup does not contain one non-empty manifest.");
+
+        try
+        {
+            using var manifestStream = manifest.Open();
+            using var document = JsonDocument.Parse(manifestStream, new JsonDocumentOptions { MaxDepth = 16 });
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("format", out var format)
+                || !format.TryGetInt32(out var formatNumber)
+                || formatNumber != 1
+                || !root.TryGetProperty("created_at", out var createdAtValue)
+                || createdAtValue.ValueKind != JsonValueKind.String
+                || !createdAtValue.TryGetDateTimeOffset(out var createdAt)
+                || createdAt > DateTimeOffset.UtcNow.AddMinutes(5))
+            {
+                throw new InvalidDataException("Backup manifest is not valid.");
+            }
+
+            return createdAt;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("Backup manifest is not valid JSON.", ex);
+        }
     }
 
     private static void CopyForRollback(string source, string rollback)

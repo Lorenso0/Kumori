@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Automation;
 
 namespace Kumori.App.Controls;
 
@@ -64,5 +65,14 @@ public partial class AdaptiveNavigationRail : UserControl
         PerformanceButton.Style = SelectedPage == "Performance" ? active : normal;
         MapsButton.Style = SelectedPage == "Maps" ? active : normal;
         SettingsButton.Style = SelectedPage == "Settings" ? active : normal;
+        SetCurrentPageStatus(DashboardButton, "Dashboard");
+        SetCurrentPageStatus(PerformanceButton, "Performance");
+        SetCurrentPageStatus(MapsButton, "Maps");
+        SetCurrentPageStatus(SettingsButton, "Settings");
     }
+
+    private void SetCurrentPageStatus(Button button, string page) =>
+        AutomationProperties.SetItemStatus(
+            button,
+            SelectedPage == page ? "Current page" : string.Empty);
 }

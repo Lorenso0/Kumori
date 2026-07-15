@@ -210,6 +210,20 @@ public class AttemptRepositoryTests : IDisposable
         Assert.Equal(98.5, Assert.Single(CreateRepository().GetMapSummaries()).BestAccuracy);
     }
 
+    [Fact]
+    public void GetMapSummariesIncludesBeatmapMaxComboWhenAvailable()
+    {
+        using (var con = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            con.Open();
+            using var command = con.CreateCommand();
+            command.CommandText = "ALTER TABLE beatmaps ADD COLUMN max_combo INTEGER NOT NULL DEFAULT 0; UPDATE beatmaps SET max_combo=432;";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(432, Assert.Single(CreateRepository().GetMapSummaries()).BeatmapMaxCombo);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

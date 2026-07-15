@@ -29,25 +29,32 @@
         </Style>
 
         <Style x:Key="SettingsHint" TargetType="TextBlock" BasedOn="{StaticResource Text.Metadata}">
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Margin" Value="0,0,0,12" />
         </Style>
 
         <Style x:Key="SettingsLabel" TargetType="TextBlock" BasedOn="{StaticResource Text.Metadata}">
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
 
+        <Style x:Key="SettingsFieldLabel" TargetType="Label">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,0,5" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+
         <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
-            <Setter Property="MinHeight" Value="28" />
-            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="8,5" />
         </Style>
 
         <Style TargetType="Button" BasedOn="{StaticResource Button.Chrome}">
-            <Setter Property="Height" Value="28" />
-            <Setter Property="MinHeight" Value="28" />
-            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="12,4" />
             <Setter Property="FontSize" Value="12" />
         </Style>
 
@@ -55,33 +62,21 @@
             <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
             <Setter Property="Margin" Value="0,0,0,8" />
             <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="32" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border x:Name="Box"
-                                    Width="11"
-                                    Height="11"
-                                    Background="{DynamicResource Brush.ControlBackground}"
-                                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
-                                    BorderThickness="1"
-                                    Margin="0,0,5,0">
-                                <Path x:Name="Check"
-                                      Width="7"
-                                      Height="6"
-                                      HorizontalAlignment="Center"
-                                      VerticalAlignment="Center"
-                                      Data="M 0.5 3 L 2.7 5.2 L 6.5 0.8"
-                                      Stroke="{DynamicResource Brush.TextPrimary}"
-                                      StrokeThickness="1.25"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      Visibility="Collapsed" />
-                            </Border>
-                            <ContentPresenter VerticalAlignment="Center" />
-                        </StackPanel>
+                        <Border x:Name="FocusBorder" MinHeight="32" Padding="4,3" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="5">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border x:Name="Box" Width="18" Height="18" VerticalAlignment="Center" Background="{DynamicResource Brush.ControlBackground}" BorderBrush="{DynamicResource Brush.StrongBorder}" BorderThickness="1" CornerRadius="3">
+                                    <Path x:Name="Check" Width="10" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center" Data="M 0.75 4 L 3.6 6.75 L 9.25 0.75" Stroke="{DynamicResource Brush.TextPrimary}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed" />
+                                </Border>
+                                <TextBlock Grid.Column="1" Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="{TemplateBinding FontSize}" FontWeight="{TemplateBinding FontWeight}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="8,0,0,0" />
+                            </Grid>
+                        </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.AccentPink}" />
@@ -91,10 +86,49 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
                             </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="FocusBorder" Property="Background" Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                <Setter TargetName="FocusBorder" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55" /></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <Style x:Key="ThemeCardRadioButton" TargetType="RadioButton">
+            <Setter Property="Width" Value="152"/><Setter Property="Height" Value="132"/><Setter Property="Margin" Value="0,0,8,10"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="CardFrame" Padding="10" Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="8">
+                            <Grid>
+                                <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                                <Border x:Name="SelectedIndicator" Width="20" Height="20" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-4,0" Background="{DynamicResource Brush.AccentPink}" CornerRadius="10" Visibility="Collapsed">
+                                    <Path Width="10" Height="8" Data="M 0.75 4 L 3.6 6.75 L 9.25 0.75" Stroke="{DynamicResource Brush.TextPrimary}" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="CardFrame" Property="Background" Value="{DynamicResource Brush.CardHoverBackground}"/><Setter TargetName="CardFrame" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}"/></Trigger>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="CardFrame" Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}"/><Setter TargetName="CardFrame" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/><Setter TargetName="CardFrame" Property="BorderThickness" Value="2"/><Setter TargetName="SelectedIndicator" Property="Visibility" Value="Visible"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="CardFrame" Property="BorderBrush" Value="{DynamicResource Brush.TextPrimary}"/><Setter TargetName="CardFrame" Property="BorderThickness" Value="2"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CustomColorRowCard" TargetType="Border">
+            <Setter Property="MinHeight" Value="68"/><Setter Property="Margin" Value="0,0,0,8"/><Setter Property="Padding" Value="9"/><Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}"/><Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.CardHoverBackground}"/><Setter Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}"/></Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}"/><Setter Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/><Setter Property="BorderThickness" Value="2"/></Trigger>
+            </Style.Triggers>
         </Style>
     </Window.Resources>
 
@@ -106,33 +140,29 @@
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,0,0,1" Padding="18,14">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
-                    <TextBlock Text="Companion automation, replay viewer, tracking, media, and startup." Style="{StaticResource Text.Metadata}" FontSize="12" Margin="0,3,0,0" />
-                </StackPanel>
-                <TextBlock Grid.Column="1" Text="Saved to settings.v2.json" Style="{StaticResource Text.Muted}" FontSize="11" VerticalAlignment="Center" />
-            </Grid>
+            <StackPanel>
+                <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
+                <TextBlock Text="Companion automation, replay viewer, tracking, media, and startup." Style="{StaticResource Text.Metadata}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0" />
+                <TextBlock Text="Changes are kept when you choose Save." Style="{StaticResource Text.Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0" />
+            </StackPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="18">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PanningMode="VerticalOnly">
+            <StackPanel Margin="14,16,10,16">
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
                         <TextBlock Text="Appearance" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Choose a visual style. The preview applies immediately across every open Kumori window."
                                    Style="{StaticResource SettingsHint}" />
-                        <WrapPanel>
+                        <WrapPanel Orientation="Horizontal">
                             <RadioButton x:Name="RefinedTheme"
                                          GroupName="Theme"
                                          Tag="refined-kumori"
                                          Checked="Theme_Checked"
-                                         Margin="0,0,18,10">
-                                <StackPanel Width="176">
+                                         Style="{StaticResource ThemeCardRadioButton}"
+                                         AutomationProperties.Name="Refined Kumori theme"
+                                         AutomationProperties.HelpText="Burgundy, pink, and crisp data surfaces">
+                                <StackPanel>
                                     <Border Height="40" CornerRadius="6" BorderBrush="#FF2DA8" BorderThickness="1" Background="#20101A">
                                         <Border Margin="8" Background="#351027" CornerRadius="4" />
                                     </Border>
@@ -144,8 +174,10 @@
                                          GroupName="Theme"
                                          Tag="pulse"
                                          Checked="Theme_Checked"
-                                         Margin="0,0,18,10">
-                                <StackPanel Width="176">
+                                         Style="{StaticResource ThemeCardRadioButton}"
+                                         AutomationProperties.Name="Pulse theme"
+                                         AutomationProperties.HelpText="Energetic, rounded, and artwork-forward">
+                                <StackPanel>
                                     <Border Height="40" CornerRadius="10" BorderBrush="#FF4EB8" BorderThickness="1">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#51225E"/><GradientStop Color="#20102D" Offset="1"/></LinearGradientBrush>
@@ -159,8 +191,10 @@
                                          GroupName="Theme"
                                          Tag="windows-fluent"
                                          Checked="Theme_Checked"
-                                         Margin="0,0,0,10">
-                                <StackPanel Width="176">
+                                         Style="{StaticResource ThemeCardRadioButton}"
+                                         AutomationProperties.Name="Windows Fluent theme"
+                                         AutomationProperties.HelpText="Layered charcoal and native restraint">
+                                <StackPanel>
                                     <Border Height="40" CornerRadius="8" BorderBrush="#4B4C53" BorderThickness="1" Background="#292A2F">
                                         <Border Margin="8" Background="#3A2B35" CornerRadius="5" />
                                     </Border>
@@ -172,8 +206,10 @@
                                          GroupName="Theme"
                                          Tag="custom"
                                          Checked="Theme_Checked"
-                                         Margin="18,0,0,10">
-                                <StackPanel Width="176">
+                                         Style="{StaticResource ThemeCardRadioButton}"
+                                         AutomationProperties.Name="Custom theme"
+                                         AutomationProperties.HelpText="Use your own shareable color palette">
+                                <StackPanel>
                                     <Border Height="40" CornerRadius="8" BorderBrush="{DynamicResource Brush.StrongBorder}" BorderThickness="1">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -197,23 +233,17 @@
                                 BorderBrush="{DynamicResource Brush.SubtleBorder}"
                                 BorderThickness="1">
                             <StackPanel>
-                                <Grid Margin="0,0,0,10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="Theme name" Style="{StaticResource SettingsLabel}" />
-                                        <TextBox x:Name="CustomThemeName" Width="220" HorizontalAlignment="Left" MaxLength="80" />
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Content="Import" Click="ImportTheme_Click" Margin="8,18,0,0" />
-                                    <Button Grid.Column="2" Content="Export" Click="ExportTheme_Click" Margin="8,18,0,0" />
-                                    <Button Grid.Column="3" Content="Reset" Click="ResetTheme_Click" Margin="8,18,0,0" />
-                                </Grid>
+                                <StackPanel Margin="0,0,0,10">
+                                    <Label Content="Theme name" Target="{Binding ElementName=CustomThemeName}" Style="{StaticResource SettingsFieldLabel}" />
+                                    <TextBox x:Name="CustomThemeName" MaxLength="80" AutomationProperties.Name="Custom theme name" />
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button Content="Import" Click="ImportTheme_Click" Margin="0,0,8,0" AutomationProperties.Name="Import custom theme" />
+                                        <Button Content="Export" Click="ExportTheme_Click" Margin="0,0,8,0" AutomationProperties.Name="Export custom theme" />
+                                        <Button Content="Reset" Click="ResetTheme_Click" AutomationProperties.Name="Reset custom theme" />
+                                    </WrapPanel>
+                                </StackPanel>
                                 <TextBlock Text="Choose a role below, then use Kumori's color picker or enter #RRGGBB / #AARRGGBB. Every change previews immediately; Save keeps it."
-                                           Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,10" />
+                                           Style="{StaticResource Text.Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
 
                                 <Border Height="176"
                                         Margin="0,0,0,14"
@@ -221,7 +251,8 @@
                                         ClipToBounds="True"
                                         Background="{DynamicResource Brush.AppBackground}"
                                         BorderBrush="{DynamicResource Brush.StrongBorder}"
-                                        BorderThickness="1">
+                                        BorderThickness="1"
+                                        AutomationProperties.Name="Custom theme preview">
                                     <Grid x:Name="ThemePreviewRoot">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="66" />
@@ -244,7 +275,7 @@
                                             </Border>
                                             <Border x:Name="PreviewPanel" Grid.Row="1" Margin="10" Padding="9" CornerRadius="6" Background="{DynamicResource Brush.PanelBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
                                                 <Grid>
-                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="112"/></Grid.ColumnDefinitions>
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="96"/></Grid.ColumnDefinitions>
                                                     <StackPanel Margin="0,0,9,0">
                                                         <Border x:Name="PreviewSelectedCard" Padding="8" CornerRadius="5" Background="{DynamicResource Brush.CardSelectedBackground}" BorderBrush="{DynamicResource Brush.StrongBorder}" BorderThickness="1">
                                                             <StackPanel>
@@ -278,7 +309,7 @@
                                 </Border>
                                 <StackPanel Margin="0,0,0,10">
                                     <TextBlock x:Name="PreviewSelectionTitle" Text="Select a color role" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TextPrimary}" />
-                                    <TextBlock x:Name="PreviewSelectionDescription" Text="The matching element is outlined in the live preview." Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="PreviewSelectionDescription" Text="The matching element is outlined in the live preview. Press Enter or Space on a color row to open the picker." Style="{StaticResource Text.Muted}" FontSize="11" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <Border Height="340"
                                         Margin="0,0,0,8"
@@ -300,32 +331,53 @@
                                                 </DataTemplate>
                                             </GroupStyle.HeaderTemplate>
                                             <GroupStyle.Panel>
-                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                                 <ItemsPanelTemplate><StackPanel /></ItemsPanelTemplate>
                                             </GroupStyle.Panel>
                                         </GroupStyle>
                                     </ItemsControl.GroupStyle>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Width="310" MinHeight="62" Margin="0,0,10,8" Padding="8" CornerRadius="6" Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" MouseLeftButtonUp="CustomColorRow_MouseLeftButtonUp" Cursor="Hand">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/><ColumnDefinition Width="108"/></Grid.ColumnDefinitions>
+                                             <Border Style="{StaticResource CustomColorRowCard}"
+                                                     Focusable="True"
+                                                     KeyboardNavigation.IsTabStop="True"
+                                                     MouseLeftButtonUp="CustomColorRow_MouseLeftButtonUp"
+                                                     KeyDown="CustomColorRow_KeyDown"
+                                                     GotKeyboardFocus="CustomColorRow_GotKeyboardFocus"
+                                                     AutomationProperties.Name="{Binding Label}"
+                                                     AutomationProperties.HelpText="{Binding Description}">
+                                                 <Grid>
+                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="36"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions>
                                                     <StackPanel VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Label}" Foreground="{DynamicResource Brush.TextPrimary}" FontWeight="SemiBold" />
                                                         <TextBlock Text="{Binding Description}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="0,2,8,0" />
                                                     </StackPanel>
-                                                    <Button Grid.Column="1" Width="26" Height="26" Padding="0" Background="{Binding Swatch}" BorderBrush="{DynamicResource Brush.StrongBorder}" Click="CustomSwatch_Click" ToolTip="Open in-app color picker" />
-                                                    <TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" TextChanged="CustomColor_TextChanged" Margin="6,0,0,0" VerticalAlignment="Center" PreviewMouseDown="CustomHex_PreviewMouseDown" />
+                                                     <Button Grid.Column="1" Width="32" Height="32" Padding="0" Background="{Binding Swatch}" BorderBrush="{DynamicResource Brush.StrongBorder}" Click="CustomSwatch_Click" ToolTip="Open color picker" AutomationProperties.Name="{Binding Label, StringFormat={}{0} color picker}" />
+                                                     <TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" TextChanged="CustomColor_TextChanged" Margin="6,0,0,0" VerticalAlignment="Center" PreviewMouseDown="CustomHex_PreviewMouseDown" AutomationProperties.Name="{Binding Label, StringFormat={}{0} hex color}" AutomationProperties.HelpText="Enter a color as #RRGGBB or #AARRGGBB" />
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                                     </ScrollViewer>
+                                 </Border>
+                                <Border x:Name="CustomThemeContrastWarningPanel"
+                                        Visibility="Collapsed"
+                                        Margin="0,0,0,8"
+                                        Padding="10,8"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource Brush.ControlBackground}"
+                                        BorderBrush="{DynamicResource Brush.Warning}"
+                                        BorderThickness="1">
+                                    <TextBlock x:Name="CustomThemeContrastWarning"
+                                               Foreground="{DynamicResource Brush.Warning}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               AutomationProperties.LiveSetting="Polite" />
                                 </Border>
                                 <TextBlock x:Name="CustomThemeError"
-                                           Foreground="{DynamicResource Brush.Danger}"
-                                           FontSize="11"
-                                           TextWrapping="Wrap" />
+                                            Foreground="{DynamicResource Brush.Danger}"
+                                            FontSize="11"
+                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -337,23 +389,23 @@
                         <TextBlock Text="Controls optional helpers managed by Kumori." Style="{StaticResource SettingsHint}" />
 
                         <CheckBox x:Name="OtdAutoLaunch" Content="Run OpenTabletDriver while Kumori is open" />
-                        <TextBlock Text="OpenTabletDriver executable" Style="{StaticResource SettingsLabel}" />
+                        <Label Content="OpenTabletDriver executable" Target="{Binding ElementName=OtdPath}" Style="{StaticResource SettingsFieldLabel}" />
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="OtdPath" />
-                            <Button Grid.Column="1" Content="Browse" Click="BrowseOtd_Click" Margin="8,0,0,0" />
-                            <Button Grid.Column="2" Content="Detect" Click="DetectOtd_Click" Margin="8,0,0,0" />
+                            <TextBox x:Name="OtdPath" AutomationProperties.Name="OpenTabletDriver executable path" />
+                            <Button Grid.Column="1" Content="Browse" Click="BrowseOtd_Click" Margin="8,0,0,0" AutomationProperties.Name="Browse for OpenTabletDriver" />
+                            <Button Grid.Column="2" Content="Detect" Click="DetectOtd_Click" Margin="8,0,0,0" AutomationProperties.Name="Detect OpenTabletDriver" />
                         </Grid>
 
                         <CheckBox x:Name="DualModeEnabled" Content="Switch LG monitor dual mode automatically" />
                         <CheckBox x:Name="SuspendOsuDuringDualModeSwitch"
                                   Content="Pause osu! while the display mode changes"
                                   Margin="0,4,0,0" />
-                        <TextBlock Text="Uses Kumori's built-in DDC/CI command. This option works only with compatible LG monitors." Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" />
+                        <TextBlock Text="Uses Kumori's built-in DDC/CI command. This option works only with compatible LG monitors." Style="{StaticResource Text.Muted}" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
@@ -361,26 +413,26 @@
                     <StackPanel>
                         <TextBlock Text="Replay Viewer" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Native replay playback, skins, audio mix, and visual timing durations." Style="{StaticResource SettingsHint}" />
-                        <UniformGrid Columns="2" Margin="0,0,0,4">
+                        <StackPanel Margin="0,0,0,4">
                             <CheckBox x:Name="ReplayEnabled" Content="Enable native replay viewer" />
                             <CheckBox x:Name="DisableHidden" Content="Disable Hidden mod in viewer" />
-                        </UniformGrid>
+                        </StackPanel>
 
-                        <TextBlock Text="Skin path" Style="{StaticResource SettingsLabel}" />
+                        <Label Content="Skin path" Target="{Binding ElementName=SkinPath}" Style="{StaticResource SettingsFieldLabel}" />
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SkinPath" />
-                            <Button Grid.Column="1" Content="Browse" Click="BrowseSkin_Click" Margin="8,0,0,0" />
-                            <Button Grid.Column="2" Content="Clear" Click="ClearSkin_Click" Margin="8,0,0,0" />
+                            <TextBox x:Name="SkinPath" AutomationProperties.Name="Replay viewer skin path" />
+                            <Button Grid.Column="1" Content="Browse" Click="BrowseSkin_Click" Margin="8,0,0,0" AutomationProperties.Name="Browse for replay viewer skin" />
+                            <Button Grid.Column="2" Content="Clear" Click="ClearSkin_Click" Margin="8,0,0,0" AutomationProperties.Name="Use built-in replay viewer skin" />
                         </Grid>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <WrapPanel Margin="0,0,0,12">
                             <Button Content="Skin library" Click="SkinLibrary_Click" Margin="0,0,8,0" />
                             <Button Content="Delete imported skin" Click="DeleteSkin_Click" />
-                        </StackPanel>
+                        </WrapPanel>
                     </StackPanel>
                 </Border>
 
@@ -388,18 +440,18 @@
                     <StackPanel>
                         <TextBlock Text="Tracking And Capture" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Controls what Kumori stores while you play." Style="{StaticResource SettingsHint}" />
-                        <UniformGrid Columns="2">
+                        <StackPanel>
                             <CheckBox x:Name="TrackingEnabled" Content="Log plays with tosu metadata" />
                             <CheckBox x:Name="LazerReplayFrameEnabled" Content="Capture osu! replay frames (stable and lazer)" />
                             <CheckBox x:Name="RunAtLogin" Content="Run Kumori when Windows starts" />
                             <CheckBox x:Name="StartMinimized"
                                       Content="Start minimized to tray"
                                       IsEnabled="{Binding IsChecked, ElementName=RunAtLogin}" />
-                        </UniformGrid>
-                        <TextBlock Text="Minimum play duration (seconds)" Style="{StaticResource SettingsLabel}" />
-                        <TextBox x:Name="MinimumAttemptSeconds" Width="120" HorizontalAlignment="Left" ToolTip="Whole seconds from 1 to 300. Shorter plays are not saved." />
-                        <TextBlock Text="Retention days" Style="{StaticResource SettingsLabel}" />
-                        <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" />
+                        </StackPanel>
+                        <Label Content="Minimum play duration (seconds)" Target="{Binding ElementName=MinimumAttemptSeconds}" Style="{StaticResource SettingsFieldLabel}" />
+                        <TextBox x:Name="MinimumAttemptSeconds" Width="120" HorizontalAlignment="Left" Margin="0,0,0,10" ToolTip="Whole seconds from 1 to 300. Shorter plays are not saved." AutomationProperties.Name="Minimum play duration in seconds" AutomationProperties.HelpText="Enter a whole number from 1 to 300" />
+                        <Label Content="Retention days" Target="{Binding ElementName=RetentionDays}" Style="{StaticResource SettingsFieldLabel}" />
+                        <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" AutomationProperties.Name="Tracking retention days" AutomationProperties.HelpText="Enter zero to keep tracking data indefinitely" />
                     </StackPanel>
                 </Border>
 
@@ -407,8 +459,8 @@
                     <StackPanel>
                         <TextBlock Text="Media" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Beatmap media mirror used for cached artwork and map files." Style="{StaticResource SettingsHint}" />
-                        <TextBlock Text="Primary mirror" Style="{StaticResource SettingsLabel}" />
-                        <TextBox x:Name="PrimaryMirror" />
+                        <Label Content="Primary mirror" Target="{Binding ElementName=PrimaryMirror}" Style="{StaticResource SettingsFieldLabel}" />
+                        <TextBox x:Name="PrimaryMirror" AutomationProperties.Name="Primary beatmap media mirror" />
                     </StackPanel>
                 </Border>
 
@@ -417,28 +469,34 @@
                         <TextBlock Text="Backups" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Create rotating local snapshots of tracking data and settings." Style="{StaticResource SettingsHint}" />
                         <CheckBox x:Name="AutomaticBackups" Content="Create automatic backups" />
-                        <WrapPanel><TextBlock Text="Interval hours" Style="{StaticResource SettingsLabel}" Margin="0,7,8,0"/><TextBox x:Name="BackupInterval" Width="70" Margin="0,0,18,8"/><TextBlock Text="Keep" Style="{StaticResource SettingsLabel}" Margin="0,7,8,0"/><TextBox x:Name="BackupRetention" Width="70"/></WrapPanel>
-                        <TextBlock Text="Custom backup directory (blank uses Kumori data folder)" Style="{StaticResource SettingsLabel}"/><TextBox x:Name="BackupDirectory"/>
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,6,0">
+                                <Label Content="Interval hours" Target="{Binding ElementName=BackupInterval}" Style="{StaticResource SettingsFieldLabel}" />
+                                <TextBox x:Name="BackupInterval" AutomationProperties.Name="Automatic backup interval in hours" AutomationProperties.HelpText="Enter a whole number from 1 to 720" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                <Label Content="Backups to keep" Target="{Binding ElementName=BackupRetention}" Style="{StaticResource SettingsFieldLabel}" />
+                                <TextBox x:Name="BackupRetention" AutomationProperties.Name="Number of automatic backups to keep" AutomationProperties.HelpText="Enter a whole number from 1 to 365" />
+                            </StackPanel>
+                        </Grid>
+                        <Label Content="Custom backup directory (blank uses the Kumori data folder)" Target="{Binding ElementName=BackupDirectory}" Style="{StaticResource SettingsFieldLabel}" />
+                        <TextBox x:Name="BackupDirectory" AutomationProperties.Name="Custom backup directory" />
                     </StackPanel>
                 </Border>
 
             </StackPanel>
         </ScrollViewer>
 
-        <Border Grid.Row="2" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="18,12">
+        <Border Grid.Row="2" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="14,10">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock x:Name="ErrorText"
-                           Foreground="{DynamicResource Brush.Negative}"
-                           VerticalAlignment="Center"
-                           TextWrapping="Wrap"
-                           Margin="0,0,14,0" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" />
-                    <Button Content="Save" Click="Save_Click" IsDefault="True" Style="{StaticResource Button.Primary}" />
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Border x:Name="StatusPanel" Visibility="Collapsed" Margin="0,0,0,8" Padding="9,7" CornerRadius="5" Background="{DynamicResource Brush.ControlBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
+                    <TextBlock x:Name="ErrorText" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                </Border>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" AutomationProperties.Name="Cancel settings changes" />
+                    <Button Content="Save" Click="Save_Click" IsDefault="True" Style="{StaticResource Button.Primary}" AutomationProperties.Name="Save settings changes" />
                 </StackPanel>
             </Grid>
         </Border>

@@ -5,6 +5,10 @@ namespace Kumori.App.ViewModels;
 
 public sealed class MapCardViewModel
 {
+    private readonly AttemptSummary _artworkSummary;
+    private bool _artworkResolved;
+    private string? _artworkSource;
+
     public MapCardViewModel(string mapKey, IReadOnlyList<AttemptSummary> attempts)
     {
         var ordered = attempts.OrderByDescending(attempt => attempt.Id).ToArray();
@@ -15,7 +19,7 @@ public sealed class MapCardViewModel
         Title = representative.Title;
         Difficulty = representative.Difficulty;
         Mapper = representative.Mapper;
-        ArtworkSource = row.ArtworkSource;
+        _artworkSummary = representative;
         PlayCount = ordered.Length;
         BestPp = ordered.Max(attempt => attempt.Pp);
         BestAccuracy = ordered
@@ -24,6 +28,7 @@ public sealed class MapCardViewModel
             .DefaultIfEmpty(0)
             .Max();
         BestCombo = ordered.Max(attempt => attempt.Combo);
+        BeatmapMaxCombo = ordered.Max(attempt => attempt.BeatmapMaxCombo);
         AverageAccuracy = ordered.Average(attempt => attempt.Accuracy);
         AveragePp = ordered.Average(attempt => attempt.Pp);
         AverageCombo = ordered.Average(attempt => attempt.Combo);
@@ -53,11 +58,12 @@ public sealed class MapCardViewModel
             Stars = map.Stars,
         };
         var row = new AttemptRowViewModel(representative);
-        ArtworkSource = row.ArtworkSource;
+        _artworkSummary = representative;
         PlayCount = map.PlayCount;
         BestPp = map.BestPp;
         BestAccuracy = map.BestAccuracy;
         BestCombo = map.BestCombo;
+        BeatmapMaxCombo = map.BeatmapMaxCombo;
         AverageAccuracy = map.AverageAccuracy;
         AveragePp = map.AveragePp;
         AverageCombo = map.AverageCombo;
@@ -71,11 +77,24 @@ public sealed class MapCardViewModel
     public string Title { get; }
     public string Difficulty { get; }
     public string Mapper { get; }
-    public string? ArtworkSource { get; }
+    public string? ArtworkSource
+    {
+        get
+        {
+            if (!_artworkResolved)
+            {
+                _artworkSource = BeatmapArtworkResolver.Resolve(_artworkSummary);
+                _artworkResolved = true;
+            }
+
+            return _artworkSource;
+        }
+    }
     public int PlayCount { get; }
     public double BestPp { get; }
     public double BestAccuracy { get; }
     public int BestCombo { get; }
+    public int BeatmapMaxCombo { get; }
     public double AverageAccuracy { get; }
     public double AveragePp { get; }
     public double AverageCombo { get; }
@@ -83,6 +102,13 @@ public sealed class MapCardViewModel
     public string LastPlayed { get; }
     public string Stars { get; }
     public string PlayCountText => Invariant($"{PlayCount:N0} plays");
+    public string AveragePerformanceText => Invariant($"{AverageAccuracy:0.00}%  ·  {AveragePp:0.0}pp");
+    public string BestPerformanceText => Invariant($"{BestAccuracy:0.00}%  ·  {BestPp:0.0}pp");
+    public string ComboText => BeatmapMaxCombo > 0
+        ? Invariant($"{BestCombo:N0}/{BeatmapMaxCombo:N0}")
+        : Invariant($"{BestCombo:N0}x");
+    public string BestStats => Invariant($"{BestAccuracy:0.00}%  ·  {BestPp:0.0}pp  ·  {BestCombo:N0}x");
+    public string AverageStats => Invariant($"{AverageAccuracy:0.00}%  ·  {AveragePp:0.0}pp  ·  {AverageCombo:0}x");
     public string BestLine => Invariant($"BEST  {BestAccuracy:0.00}%  ·  {BestPp:0.0}pp  ·  {BestCombo:N0}x");
     public string AverageLine => Invariant($"AVG  {AverageAccuracy:0.00}%  ·  {AveragePp:0.0}pp  ·  {AverageCombo:0}x");
     public string CompletionText => Invariant($"{CompletionRate:0}% completed");

@@ -77,6 +77,7 @@ internal static class OsrComparisonImporter
             Accuracy = score.Accuracy * 100,
             Score = score.TotalScore,
             Combo = score.MaxCombo,
+            MaxCombo = primary.MaxCombo,
             N300 = count(score, HitResult.Great),
             N100 = count(score, HitResult.Ok),
             N50 = count(score, HitResult.Meh),

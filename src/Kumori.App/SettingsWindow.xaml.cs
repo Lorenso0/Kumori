@@ -119,7 +119,7 @@ public partial class SettingsWindow : Window
             || !int.TryParse(BackupInterval.Text, out var backupInterval)
             || !int.TryParse(BackupRetention.Text, out var backupRetention))
         {
-            ErrorText.Text = "Check numeric values. Minimum play duration must be a whole number from 1 to 300 seconds.";
+            SetStatus("Check the numeric values. Minimum play duration must be a whole number from 1 to 300 seconds.", isError: true);
             return;
         }
 
@@ -161,7 +161,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            ErrorText.Text = $"Could not update Windows startup: {ex.Message}";
+            SetStatus($"Could not update Windows startup: {ex.Message}", isError: true);
             return;
         }
         _accepted = true;
@@ -175,10 +175,17 @@ public partial class SettingsWindow : Window
         CustomColorPickerPopup.IsOpen = false;
         _selectedColor = null;
         CustomThemeName.Text = theme.Name;
+        foreach (var row in _customColors)
+            row.PropertyChanged -= CustomColorRow_PropertyChanged;
         _customColors.Clear();
         foreach (var key in CustomThemePalette.ColorKeys)
-            _customColors.Add(new CustomColorRow(key, theme.Colors[key]));
+        {
+            var row = new CustomColorRow(key, theme.Colors[key]);
+            row.PropertyChanged += CustomColorRow_PropertyChanged;
+            _customColors.Add(row);
+        }
         CustomThemeError.Text = string.Empty;
+        UpdateContrastWarning();
     }
 
     private bool TryReadCustomTheme(out CustomThemeSettings theme, bool showError)
@@ -198,6 +205,12 @@ public partial class SettingsWindow : Window
             _themes?.PreviewCustom(theme);
     }
 
+    private void CustomColorRow_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CustomColorRow.Value))
+            UpdateContrastWarning();
+    }
+
     private void CustomSwatch_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: CustomColorRow row } button)
@@ -214,6 +227,28 @@ public partial class SettingsWindow : Window
             return;
         ShowColorPicker(row, border);
         e.Handled = true;
+    }
+
+    private void CustomColorRow_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not Border { DataContext: CustomColorRow row } border
+            || !ReferenceEquals(Keyboard.FocusedElement, border)
+            || e.Key is not (Key.Enter or Key.Space))
+        {
+            return;
+        }
+
+        ShowColorPicker(row, border);
+        e.Handled = true;
+    }
+
+    private void CustomColorRow_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is Border { DataContext: CustomColorRow row } border
+            && ReferenceEquals(e.NewFocus, border))
+        {
+            SelectColor(row);
+        }
     }
 
     private void ThemeColorScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -259,6 +294,93 @@ public partial class SettingsWindow : Window
         PreviewSelectionTitle.Text = row.Label;
         PreviewSelectionDescription.Text = row.Description;
         Dispatcher.BeginInvoke(() => HighlightPreview(row.Key), DispatcherPriority.Loaded);
+    }
+
+    private void UpdateContrastWarning()
+    {
+        if (!TryGetThemeColor("AppBackground", out var appBackground)
+            || !TryGetThemeColor("CardBackground", out var cardBackground)
+            || !TryGetThemeColor("CardSelectedBackground", out var selectedBackground)
+            || !TryGetThemeColor("ControlBackground", out var controlBackground)
+            || !TryGetThemeColor("SubtleBorder", out var subtleBorder)
+            || !TryGetThemeColor("TextMuted", out var mutedText))
+        {
+            CustomThemeContrastWarningPanel.Visibility = Visibility.Collapsed;
+            CustomThemeContrastWarning.Text = string.Empty;
+            return;
+        }
+
+        var opaqueCanvas = Composite(appBackground, MediaColor.FromRgb(0, 0, 0));
+        var card = Composite(cardBackground, opaqueCanvas);
+        var selectedCard = Composite(selectedBackground, opaqueCanvas);
+        var control = Composite(controlBackground, opaqueCanvas);
+        var mutedOnCard = ContrastRatio(Composite(mutedText, card), card);
+        var mutedOnSelectedCard = ContrastRatio(Composite(mutedText, selectedCard), selectedCard);
+        var borderOnControl = ContrastRatio(Composite(subtleBorder, control), control);
+        var warnings = new List<string>();
+
+        if (mutedOnCard < 4.5 || mutedOnSelectedCard < 4.5)
+        {
+            warnings.Add(
+                $"Muted text is {mutedOnCard:0.0}:1 on standard cards and {mutedOnSelectedCard:0.0}:1 on selected cards; 4.5:1 is recommended for small text.");
+        }
+
+        if (borderOnControl < 3)
+        {
+            warnings.Add(
+                $"Subtle borders are {borderOnControl:0.0}:1 against controls; 3:1 makes control boundaries easier to distinguish.");
+        }
+
+        CustomThemeContrastWarning.Text = warnings.Count == 0
+            ? string.Empty
+            : $"Contrast advisory: {string.Join(" ", warnings)} This does not prevent saving or exporting the theme.";
+        CustomThemeContrastWarningPanel.Visibility = warnings.Count == 0
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private bool TryGetThemeColor(string key, out MediaColor color)
+    {
+        var value = _customColors.FirstOrDefault(row => row.Key.Equals(key, StringComparison.OrdinalIgnoreCase))?.Value;
+        if (value is not null && CustomThemePalette.TryNormalizeHex(value, out var normalized))
+        {
+            color = (MediaColor)MediaColorConverter.ConvertFromString(normalized);
+            return true;
+        }
+
+        color = default;
+        return false;
+    }
+
+    private static MediaColor Composite(MediaColor foreground, MediaColor background)
+    {
+        var alpha = foreground.A / 255d;
+        return MediaColor.FromRgb(
+            (byte)Math.Round((foreground.R * alpha) + (background.R * (1 - alpha))),
+            (byte)Math.Round((foreground.G * alpha) + (background.G * (1 - alpha))),
+            (byte)Math.Round((foreground.B * alpha) + (background.B * (1 - alpha))));
+    }
+
+    private static double ContrastRatio(MediaColor first, MediaColor second)
+    {
+        var lighter = Math.Max(RelativeLuminance(first), RelativeLuminance(second));
+        var darker = Math.Min(RelativeLuminance(first), RelativeLuminance(second));
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double RelativeLuminance(MediaColor color)
+    {
+        static double Linearize(byte component)
+        {
+            var value = component / 255d;
+            return value <= 0.04045
+                ? value / 12.92
+                : Math.Pow((value + 0.055) / 1.055, 2.4);
+        }
+
+        return (0.2126 * Linearize(color.R))
+               + (0.7152 * Linearize(color.G))
+               + (0.0722 * Linearize(color.B));
     }
 
     private void HighlightPreview(string key)
@@ -324,7 +446,7 @@ public partial class SettingsWindow : Window
             _loading = false;
             CustomTheme.IsChecked = true;
             _themes?.PreviewCustom(theme);
-            ErrorText.Text = $"Imported theme ‘{theme.Name}’. Save to keep it.";
+            SetStatus($"Imported theme ‘{theme.Name}’. Choose Save to keep it.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -353,7 +475,7 @@ public partial class SettingsWindow : Window
         try
         {
             File.WriteAllText(dialog.FileName, CustomThemePalette.Export(theme));
-            ErrorText.Text = $"Exported theme ‘{theme.Name}’.";
+            SetStatus($"Exported theme ‘{theme.Name}’.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -369,7 +491,7 @@ public partial class SettingsWindow : Window
         _loading = false;
         CustomTheme.IsChecked = true;
         _themes?.PreviewCustom(theme);
-        ErrorText.Text = "Custom colors reset to Refined Kumori defaults. Save to keep them.";
+        SetStatus("Custom colors reset to Refined Kumori defaults. Choose Save to keep them.");
     }
 
     private void BrowseOtd_Click(object sender, RoutedEventArgs e)
@@ -391,11 +513,11 @@ public partial class SettingsWindow : Window
         var detected = OpenTabletDriverService.Detect(OtdPath.Text.Trim());
         if (detected is null)
         {
-            ErrorText.Text = "OpenTabletDriver was not found.";
+            SetStatus("OpenTabletDriver was not found.", isError: true);
             return;
         }
         OtdPath.Text = detected.ExecutablePath;
-        ErrorText.Text = $"OpenTabletDriver {detected.VersionOrUnknown()} found.";
+        SetStatus($"OpenTabletDriver {detected.VersionOrUnknown()} found.");
     }
 
     private async void BrowseSkin_Click(object sender, RoutedEventArgs e)
@@ -408,15 +530,15 @@ public partial class SettingsWindow : Window
         if (dialog.ShowDialog() == true)
         {
             IsEnabled = false;
-            ErrorText.Text = "Importing skin...";
+            SetStatus("Importing skin…");
             try
             {
                 SkinPath.Text = await Task.Run(() => SkinLibraryService.ImportFile(dialog.FileName));
-                ErrorText.Text = "Skin imported.";
+                SetStatus("Skin imported.");
             }
             catch (Exception ex)
             {
-                ErrorText.Text = ex.Message;
+                SetStatus(ex.Message, isError: true);
             }
             finally
             {
@@ -434,7 +556,7 @@ public partial class SettingsWindow : Window
     private void ClearSkin_Click(object sender, RoutedEventArgs e)
     {
         SkinPath.Text = "";
-        ErrorText.Text = "Argon Pro will be used.";
+        SetStatus("The built-in Argon Pro skin will be used.");
     }
 
     private void DeleteSkin_Click(object sender, RoutedEventArgs e)
@@ -442,17 +564,28 @@ public partial class SettingsWindow : Window
         var path = SkinPath.Text.Trim();
         if (SkinLibraryService.IsBuiltInPath(path))
         {
-            ErrorText.Text = "Argon Pro is built in and cannot be deleted.";
+            SetStatus("Argon Pro is built in and cannot be deleted.");
             return;
         }
         if (!File.Exists(path) && !Directory.Exists(path))
         {
-            ErrorText.Text = "The selected imported skin no longer exists.";
+            SetStatus("The selected imported skin no longer exists.", isError: true);
             return;
         }
         SkinLibraryService.DeleteImported(path);
         SkinPath.Text = "";
-        ErrorText.Text = "Imported skin deleted.";
+        SetStatus("Imported skin deleted. The built-in Argon Pro skin will be used.");
+    }
+
+    private void SetStatus(string message, bool isError = false)
+    {
+        ErrorText.Text = message;
+        ErrorText.SetResourceReference(
+            TextBlock.ForegroundProperty,
+            isError ? "Brush.Negative" : "Brush.TextSecondary");
+        StatusPanel.Visibility = string.IsNullOrWhiteSpace(message)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 
     private sealed class CustomColorRow : INotifyPropertyChanged

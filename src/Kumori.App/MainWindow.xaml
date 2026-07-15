@@ -30,8 +30,8 @@
             <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}" />
             <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
             <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
-            <Setter Property="Height" Value="28" />
-            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="MinHeight" Value="32" />
             <Setter Property="Padding" Value="12,0" />
             <Setter Property="FontSize" Value="12" />
         </Style>
@@ -58,21 +58,112 @@
         </Style>
 
         <Style x:Key="FilterChipButton" TargetType="Button" BasedOn="{StaticResource TopActionButton}">
-            <Setter Property="Height" Value="25" />
-            <Setter Property="MinHeight" Value="25" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
             <Setter Property="Padding" Value="11,0" />
             <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+
+        <Style x:Key="FilterRadioButton" TargetType="RadioButton">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="Margin" Value="0,0,4,0" />
             <Setter Property="FontSize" Value="10" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Margin="0,3"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Brush.AccentPink}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.StrongBorder}" />
+                                <Setter TargetName="Chrome" Property="BorderThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="FilterToggleButton" TargetType="ToggleButton">
-            <Setter Property="Height" Value="25"/><Setter Property="MinHeight" Value="25"/>
-            <Setter Property="Padding" Value="10,0"/><Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Height" Value="30"/><Setter Property="MinHeight" Value="30"/>
+            <Setter Property="Padding" Value="8,0"/><Setter Property="Margin" Value="0,0,4,0"/>
             <Setter Property="FontSize" Value="10"/><Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}"/>
             <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}"/>
-            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/></Trigger><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="5" Margin="0,3" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}"/></Trigger><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/><Setter Property="FontWeight" Value="SemiBold"/><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}"/><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource Brush.StrongBorder}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="2"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+        </Style>
+
+        <Style x:Key="ChartLegendCheckBox" TargetType="CheckBox">
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="MinWidth" Value="24" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Background="Transparent" MinHeight="{TemplateBinding MinHeight}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border x:Name="Box"
+                                        Width="12"
+                                        Height="12"
+                                        Margin="0,0,5,0"
+                                        Background="{DynamicResource Brush.ControlBackground}"
+                                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                                        BorderThickness="1"
+                                        CornerRadius="1">
+                                    <Path x:Name="Check"
+                                          Data="M 2 6 L 5 9 L 10 3"
+                                          Stroke="{DynamicResource Brush.TextPrimary}"
+                                          StrokeThickness="1.5"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          Visibility="Collapsed" />
+                                </Border>
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.AccentPink}" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.StrongBorder}" />
+                                <Setter TargetName="Box" Property="BorderThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="WorkspaceTabControl" TargetType="TabControl">
@@ -82,9 +173,10 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TabControl">
                         <Grid KeyboardNavigation.TabNavigation="Local">
-                            <Grid.RowDefinitions><RowDefinition Height="38"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                            <Border Background="{DynamicResource Brush.PanelBackground}"
-                                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                            <Grid.RowDefinitions><RowDefinition x:Name="TabHeaderRow" Height="38"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Border x:Name="TabHeader"
+                                    Background="{DynamicResource Brush.PanelBackground}"
+                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
                                     BorderThickness="0,0,0,1">
                                 <TabPanel IsItemsHost="True" Margin="8,5,8,0" />
                             </Border>
@@ -93,6 +185,12 @@
                                               HorizontalAlignment="Stretch"
                                               VerticalAlignment="Stretch" />
                         </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Tag" Value="Single">
+                                <Setter TargetName="TabHeaderRow" Property="Height" Value="0" />
+                                <Setter TargetName="TabHeader" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -134,7 +232,7 @@
 
         <Style TargetType="{x:Type controls:HitTimingGraph}">
             <Setter Property="PointBrush" Value="{DynamicResource Brush.AccentPink}" />
-            <Setter Property="GridBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="GridBrush" Value="{DynamicResource Brush.BorderSubtle}" />
             <Setter Property="MeanBrush" Value="{DynamicResource Brush.AccentPurple}" />
             <Setter Property="HoverBrush" Value="{DynamicResource Brush.TextMuted}" />
             <Setter Property="AxisTextBrush" Value="{DynamicResource Brush.TextMuted}" />
@@ -143,7 +241,7 @@
         <Style TargetType="{x:Type controls:MapPressureGraph}">
             <Setter Property="FillBrush" Value="{DynamicResource Brush.CardSelectedBackground}" />
             <Setter Property="LineBrush" Value="{DynamicResource Brush.AccentPurple}" />
-            <Setter Property="BaselineBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="BaselineBrush" Value="{DynamicResource Brush.BorderSubtle}" />
             <Setter Property="MissBrush" Value="{DynamicResource Brush.Danger}" />
             <Setter Property="BreakBrush" Value="{DynamicResource Brush.Warning}" />
             <Setter Property="UrBrush" Value="{DynamicResource Brush.AccentPink}" />
@@ -153,7 +251,7 @@
         <!-- Metrics strip: panel cells with a single right divider -->
         <Style x:Key="MetricCellCompact" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Brush.MetricBackground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="{DynamicResource Radius.ThemeCard}" />
             <Setter Property="Padding" Value="8,5" />
@@ -175,29 +273,29 @@
         <!-- Bordered (not filled) stat grid cells for the inspector -->
         <Style x:Key="StatCellPrimary" TargetType="Border">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
             <Setter Property="BorderThickness" Value="0,0,1,0" />
             <Setter Property="Padding" Value="6,9" />
         </Style>
 
         <Style x:Key="StatCellSecondary" TargetType="Border">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
             <Setter Property="BorderThickness" Value="0,0,1,0" />
             <Setter Property="Padding" Value="5,8" />
         </Style>
 
         <Style x:Key="CompactRowGhostButton" TargetType="Button" BasedOn="{StaticResource RowGhostButton}">
-            <Setter Property="Width" Value="22" />
-            <Setter Property="Height" Value="22" />
-            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
             <Setter Property="FontSize" Value="13" />
         </Style>
 
         <Style x:Key="HeaderChevronButton" TargetType="Button">
-            <Setter Property="Width" Value="28" />
-            <Setter Property="Height" Value="28" />
-            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="MinHeight" Value="32" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
@@ -229,50 +327,15 @@
             </Setter>
         </Style>
 
-        <Style TargetType="CheckBox">
+        <Style x:Key="HeaderCloseButton" TargetType="Button" BasedOn="{StaticResource HeaderChevronButton}">
             <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="CheckBox">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border x:Name="Box"
-                                    Width="11"
-                                    Height="11"
-                                    Background="{DynamicResource Brush.ControlBackground}"
-                                    BorderBrush="{DynamicResource Brush.SubtleBorder}"
-                                    BorderThickness="1"
-                                    CornerRadius="0"
-                                    Margin="0,0,5,0">
-                                <Path x:Name="Check"
-                                      Width="7"
-                                      Height="6"
-                                      HorizontalAlignment="Center"
-                                      VerticalAlignment="Center"
-                                      Data="M 0.5 3 L 2.7 5.2 L 6.5 0.8"
-                                      Stroke="{DynamicResource Brush.TextPrimary}"
-                                      StrokeThickness="1.25"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      Visibility="Collapsed" />
-                            </Border>
-                            <ContentPresenter VerticalAlignment="Center" />
-                        </StackPanel>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.AccentPink}" />
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
-                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Brush.Danger}" />
+                    <Setter Property="Foreground" Value="White" />
+                    <Setter Property="Opacity" Value="1" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <DataTemplate x:Key="PlayCardTemplate">
@@ -324,6 +387,8 @@
                                ToolTip="{Binding DifficultyLine}" />
                     <ItemsControl Grid.Row="2"
                                   ItemsSource="{Binding ModEntries}"
+                                  Focusable="False"
+                                  IsTabStop="False"
                                   MinHeight="25"
                                   HorizontalAlignment="Stretch"
                                   VerticalAlignment="Center">
@@ -378,15 +443,15 @@
                     </ItemsControl>
                 </Grid>
                     <Border Grid.Column="1"
-                            Width="260"
+                            Width="198"
                             Margin="5,8,12,8"
                             Padding="8,0"
                             Background="{DynamicResource Brush.ControlBackground}"
-                            BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                            BorderBrush="{DynamicResource Brush.BorderSubtle}"
                             BorderThickness="1"
                             CornerRadius="6"
                             Visibility="{Binding DataContext.IsWideHistoryLayout, RelativeSource={RelativeSource AncestorType=Window}, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
-                        <UniformGrid Columns="4" VerticalAlignment="Center">
+                        <UniformGrid Columns="3" VerticalAlignment="Center">
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="SCORE" Style="{StaticResource Text.LabelUpper}" FontSize="10" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding ScoreText}" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,3,0,0"/>
@@ -399,10 +464,6 @@
                                 <TextBlock Text="MISSES" Style="{StaticResource Text.LabelUpper}" FontSize="10" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding MissesText}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Danger}" HorizontalAlignment="Center" Margin="0,3,0,0"/>
                             </StackPanel>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="STATUS" Style="{StaticResource Text.LabelUpper}" FontSize="10" HorizontalAlignment="Center"/>
-                                <TextBlock Text="{Binding OutcomeWithProgress}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,3,0,0"><TextBlock.Foreground><SolidColorBrush Color="{Binding OutcomeColor}"/></TextBlock.Foreground></TextBlock>
-                            </StackPanel>
                         </UniformGrid>
                     </Border>
                 </Grid>
@@ -411,7 +472,7 @@
                         Margin="4,6,5,6"
                         Padding="7,6"
                         Background="{DynamicResource Brush.ControlBackground}"
-                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
                         BorderThickness="1"
                         CornerRadius="6">
                     <Grid>
@@ -420,7 +481,7 @@
                                                     HorizontalAlignment="Left" VerticalAlignment="Center"
                                                     RankText="{Binding Grade}" Progress="{Binding GradeProgress}"
                                                     AccentBrush="{DynamicResource Brush.AccentPink}"
-                                                    TrackBrush="{DynamicResource Brush.SubtleBorder}"
+                                                    TrackBrush="{DynamicResource Brush.BorderSubtle}"
                                                     BackgroundBrush="{DynamicResource Brush.CardBackground}"
                                                     TextBrush="{DynamicResource Brush.TextPrimary}" />
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
@@ -470,7 +531,7 @@
 
         <Border Grid.Row="0" Grid.ColumnSpan="2"
                 Background="{DynamicResource Brush.TopBarBackground}"
-                BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                BorderBrush="{DynamicResource Brush.BorderSubtle}"
                 BorderThickness="0,0,0,1">
             <Grid Margin="13,0,0,0">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -486,9 +547,9 @@
                     <TextBlock Text="{Binding TosuChipText}" FontSize="11" Foreground="{DynamicResource Brush.TextSecondary}"/>
                     <Button Content="{Binding UpdateAvailableText}"
                             Command="{Binding OpenAvailableUpdateCommand}"
-                            Style="{StaticResource TopActionButtonOutline}"
-                            Height="24"
-                            MinHeight="24"
+                             Style="{StaticResource TopActionButtonOutline}"
+                             Height="28"
+                             MinHeight="28"
                             Padding="9,0"
                             Margin="12,0,0,0"
                             FontSize="10"
@@ -502,9 +563,9 @@
                                FontSize="11"
                                VerticalAlignment="Center"
                                Margin="0,0,8,0" />
-                    <Button Click="MinimizeWindow_Click" Style="{StaticResource HeaderChevronButton}" Width="44" Height="38" ToolTip="Minimize" AutomationProperties.Name="Minimize window"><Path Data="M 1 6 L 11 6" Width="12" Height="12" Stretch="None" Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.2"/></Button>
-                    <Button Click="MaximizeWindow_Click" Style="{StaticResource HeaderChevronButton}" Width="44" Height="38" ToolTip="Maximize or restore" AutomationProperties.Name="Maximize or restore window"><Path Data="M 1.5 1.5 L 10.5 1.5 L 10.5 10.5 L 1.5 10.5 Z" Width="12" Height="12" Stretch="None" Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.2"/></Button>
-                    <Button Click="CloseWindow_Click" Style="{StaticResource HeaderChevronButton}" Width="44" Height="38" ToolTip="Close" AutomationProperties.Name="Close window"><Path Data="M 2 2 L 10 10 M 10 2 L 2 10" Width="12" Height="12" Stretch="None" Stroke="{DynamicResource Brush.TextSecondary}" StrokeThickness="1.2" StrokeStartLineCap="Round"/></Button>
+                    <Button Click="MinimizeWindow_Click" Style="{StaticResource HeaderChevronButton}" Width="44" Height="38" ToolTip="Minimize" AutomationProperties.Name="Minimize window"><Path Data="M 1 6 L 11 6" Width="12" Height="12" Stretch="None" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"/></Button>
+                    <Button x:Name="MaximizeWindowButton" Click="MaximizeWindow_Click" Style="{StaticResource HeaderChevronButton}" Width="44" Height="38" ToolTip="Maximize" AutomationProperties.Name="Maximize window"><Path x:Name="MaximizeGlyph" Data="M 1.5 1.5 L 10.5 1.5 L 10.5 10.5 L 1.5 10.5 Z" Width="12" Height="12" Stretch="None" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"/></Button>
+                    <Button Click="CloseWindow_Click" Style="{StaticResource HeaderCloseButton}" Width="44" Height="38" ToolTip="Close to tray" AutomationProperties.Name="Close window to tray"><Path Data="M 2 2 L 10 10 M 10 2 L 2 10" Width="12" Height="12" Stretch="None" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" StrokeStartLineCap="Round"/></Button>
                 </StackPanel>
             </Grid>
         </Border>
@@ -535,7 +596,7 @@
         <!-- ============ ROW 0: STATUS / ACTIONS ============ -->
         <Border Grid.Row="0"
                 Background="{DynamicResource Brush.TopBarBackground}"
-                BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                BorderBrush="{DynamicResource Brush.BorderSubtle}"
                 BorderThickness="0,0,0,1"
                 Padding="14,0">
             <Grid>
@@ -710,7 +771,7 @@
 
             <!-- LEFT: PLAY LIST -->
             <Border x:Name="HistoryPane" Grid.Column="0" Background="{DynamicResource Brush.PanelBackground}"
-                    BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1"
+                    BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1"
                     CornerRadius="{DynamicResource Radius.ThemeCard}" Padding="0">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -719,7 +780,7 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,1" Padding="8,6">
+                    <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,1,0,1" Padding="8,6">
                         <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="30"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -727,6 +788,8 @@
                             <Grid VerticalAlignment="Center" Margin="0,0,7,0">
                                 <TextBox Tag="Search plays or maps..."
                                          Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.Name="Search play history"
+                                         AutomationProperties.HelpText="Search by map title, artist, difficulty, or mapper"
                                          Padding="24,0,10,0"
                                          Height="28"
                                          MinHeight="28"
@@ -752,14 +815,25 @@
                                     ToolTip="Clear search and filters"
                                     Command="{Binding ClearFiltersCommand}"
                                     Margin="0"/>
-                            <WrapPanel Grid.Row="1" VerticalAlignment="Bottom">
-                                <Button Content="All" Tag="All" Click="FilterChip_Click" Style="{StaticResource FilterChipButton}"/>
-                                <Button Content="Completed" Tag="Completed" Click="FilterChip_Click" Style="{StaticResource FilterChipButton}"/>
-                                <Button Content="Failed" Tag="Failed" Click="FilterChip_Click" Style="{StaticResource FilterChipButton}"/>
-                                <Button Content="Retried" Tag="Retried" Click="FilterChip_Click" Style="{StaticResource FilterChipButton}"/>
-                                <Button Content="Quit" Tag="Quit" Click="FilterChip_Click" Style="{StaticResource FilterChipButton}"/>
+                            <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" VerticalAlignment="Bottom">
+                                <RadioButton Content="All" Tag="All" GroupName="HistoryOutcome" Click="FilterChip_Click">
+                                    <RadioButton.Style><Style TargetType="RadioButton" BasedOn="{StaticResource FilterRadioButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedFilterMode}" Value="All"><Setter Property="IsChecked" Value="True"/></DataTrigger></Style.Triggers></Style></RadioButton.Style>
+                                </RadioButton>
+                                <RadioButton Content="Completed" Tag="Completed" GroupName="HistoryOutcome" Click="FilterChip_Click">
+                                    <RadioButton.Style><Style TargetType="RadioButton" BasedOn="{StaticResource FilterRadioButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedFilterMode}" Value="Completed"><Setter Property="IsChecked" Value="True"/></DataTrigger></Style.Triggers></Style></RadioButton.Style>
+                                </RadioButton>
+                                <RadioButton Content="Failed" Tag="Failed" GroupName="HistoryOutcome" Click="FilterChip_Click">
+                                    <RadioButton.Style><Style TargetType="RadioButton" BasedOn="{StaticResource FilterRadioButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedFilterMode}" Value="Failed"><Setter Property="IsChecked" Value="True"/></DataTrigger></Style.Triggers></Style></RadioButton.Style>
+                                </RadioButton>
+                                <RadioButton Content="Retried" Tag="Retried" GroupName="HistoryOutcome" Click="FilterChip_Click">
+                                    <RadioButton.Style><Style TargetType="RadioButton" BasedOn="{StaticResource FilterRadioButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedFilterMode}" Value="Retried"><Setter Property="IsChecked" Value="True"/></DataTrigger></Style.Triggers></Style></RadioButton.Style>
+                                </RadioButton>
+                                <RadioButton Content="Quit" Tag="Quit" GroupName="HistoryOutcome" Click="FilterChip_Click">
+                                    <RadioButton.Style><Style TargetType="RadioButton" BasedOn="{StaticResource FilterRadioButton}"><Style.Triggers><DataTrigger Binding="{Binding SelectedFilterMode}" Value="Quit"><Setter Property="IsChecked" Value="True"/></DataTrigger></Style.Triggers></Style></RadioButton.Style>
+                                </RadioButton>
                                 <ToggleButton Content="Group sessions"
                                               IsChecked="{Binding IsGroupSessions}"
+                                              AutomationProperties.Name="Group plays into sessions"
                                               Style="{StaticResource FilterToggleButton}" />
                             </WrapPanel>
                             <CheckBox x:Name="GroupRepeatsCheckBox" Visibility="Collapsed" Content="Group repeats" IsChecked="{Binding IsGroupRepeats}" />
@@ -791,8 +865,14 @@
                                    VerticalAlignment="Center" />
                     </Grid>
 
-                    <ListBox Grid.Row="2"
+                    <Grid Grid.Row="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                    <ListBox Grid.Row="0"
                              x:Name="HistoryList"
+                             AutomationProperties.Name="Play history"
                              Style="{StaticResource HistoryListBox}"
                              ItemContainerStyle="{StaticResource HistoryListBoxItem}"
                              ItemsSource="{Binding Rows}"
@@ -809,7 +889,7 @@
                                         Height="44"
                                         Padding="6,0,4,0"
                                         Background="{DynamicResource Brush.CardBackground}"
-                                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
                                         BorderThickness="0,1,0,1"
                                         CornerRadius="4"
                                         ToolTip="{Binding StatsLine}">
@@ -829,7 +909,8 @@
                                                 Grid.RowSpan="2"
                                                 Click="SessionToggle_Click"
                                                 Style="{StaticResource HeaderChevronButton}"
-                                                ToolTip="Collapse session">
+                                                ToolTip="{Binding ToggleLabel}"
+                                                AutomationProperties.Name="{Binding ToggleLabel}">
                                             <Path Width="8"
                                                   Height="8"
                                                   Stretch="Uniform"
@@ -870,14 +951,14 @@
                                                    Foreground="{DynamicResource Brush.TextSecondary}" />
                                         <TextBlock Grid.Column="2"
                                                    Text="{Binding HeaderLine}"
-                                                   FontSize="11"
+                                                   FontSize="10"
                                                    Foreground="{DynamicResource Brush.TextSecondary}"
                                                    TextTrimming="CharacterEllipsis"
                                                    VerticalAlignment="Center" />
                                         <TextBlock Grid.Column="2"
                                                    Grid.Row="1"
                                                    Text="{Binding StatsLine}"
-                                                   FontSize="11"
+                                                   FontSize="10"
                                                    Foreground="{DynamicResource Brush.TextMuted}"
                                                    TextTrimming="CharacterEllipsis"
                                                    VerticalAlignment="Center"
@@ -966,7 +1047,7 @@
                                                                     RankText="{Binding Grade}"
                                                                     Progress="{Binding GradeProgress}"
                                                                     AccentBrush="{DynamicResource Brush.AccentPink}"
-                                                                    TrackBrush="{DynamicResource Brush.SubtleBorder}"
+                                                                    TrackBrush="{DynamicResource Brush.BorderSubtle}"
                                                                     BackgroundBrush="{DynamicResource Brush.CardBackground}"
                                                                     TextBrush="{DynamicResource Brush.TextPrimary}">
                                             <controls:RankProgressBadge.Style>
@@ -1035,7 +1116,7 @@
                                                     ClipToBounds="True"
                                                     HorizontalAlignment="Stretch"
                                                     VerticalAlignment="Top">
-                                                <ItemsControl ItemsSource="{Binding ModEntries}" VerticalAlignment="Center">
+                                                <ItemsControl ItemsSource="{Binding ModEntries}" VerticalAlignment="Center" Focusable="False" IsTabStop="False">
                                                     <ItemsControl.ItemsPanel>
                                                         <ItemsPanelTemplate>
                                                             <StackPanel Orientation="Horizontal" />
@@ -1142,6 +1223,73 @@
                             </DataTemplate>
                         </ListBox.Resources>
                     </ListBox>
+                        <Border Grid.Row="0"
+                                Background="{DynamicResource Brush.PanelBackground}"
+                                Panel.ZIndex="10">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Rows.Count}" Value="0">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        MaxWidth="360"
+                                        Margin="24">
+                                <TextBlock Text="{Binding HistoryStatus}"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.LiveSetting="Polite" />
+                                <TextBlock Text="Try refreshing, adjust the filters, or check tracking in Settings &amp; tools."
+                                           Foreground="{DynamicResource Brush.TextSecondary}"
+                                           FontSize="12"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           Margin="0,7,0,14" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <Button Content="Try again" Command="{Binding RefreshCommand}" Style="{StaticResource TopActionButton}" Margin="0,0,8,0" />
+                                    <Button Content="Open Settings" Command="{Binding OpenSettingsCommand}" Style="{StaticResource TopActionButton}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Row="1"
+                                BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                BorderThickness="0,1,0,0"
+                                Padding="8,6"
+                                Visibility="{Binding LoadOlderVisible, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
+                            <Grid>
+                                <TextBlock Text="More history is available"
+                                           Foreground="{DynamicResource Brush.TextSecondary}"
+                                           VerticalAlignment="Center" />
+                                <Button Content="Load older plays"
+                                        Command="{Binding LoadOlderCommand}"
+                                        HorizontalAlignment="Right"
+                                        AutomationProperties.Name="Load older play history">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource TopActionButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsLoadingMore}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <TextBlock Text="Loading older plays…"
+                                           Foreground="{DynamicResource Brush.TextSecondary}"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           Visibility="{Binding IsLoadingMore, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -1149,14 +1297,14 @@
 
             <!-- RIGHT: PLAY INSPECTOR -->
             <Border x:Name="InspectorPane" Grid.Column="2" Background="{DynamicResource Brush.PanelBackground}"
-                    BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1"
+                    BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1"
                     CornerRadius="{DynamicResource Radius.ThemeCard}" Padding="0">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="36" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Border Grid.Row="0" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,0,0,1">
+                    <Border Grid.Row="0" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,0,0,1">
                         <TextBlock x:Name="InspectorHeaderTitle" Text="Selected Play" FontSize="14" FontWeight="SemiBold"
                                    VerticalAlignment="Center" Margin="11,0" />
                     </Border>
@@ -1175,13 +1323,35 @@
                                Style="{StaticResource Text.Header}"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
-                               Visibility="{Binding Inspector.Details, Converter={x:Static vm:NullToVisibleConverter.Instance}}" />
+                               Visibility="{Binding Inspector.ShowEmptyState, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
                     <TextBlock Text="Loading..."
                                Grid.Row="1"
                                Style="{StaticResource Text.Header}"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
+                               AutomationProperties.LiveSetting="Polite"
                                Visibility="{Binding Inspector.IsLoading, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
+                    <Border Grid.Row="1"
+                            Background="{DynamicResource Brush.PanelBackground}"
+                            Panel.ZIndex="5"
+                            Visibility="{Binding Inspector.HasLoadError, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360" Margin="24">
+                            <TextBlock Text="Could not load this play"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="{Binding Inspector.LoadError}"
+                                       Foreground="{DynamicResource Brush.TextSecondary}"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       Margin="0,7,0,14"
+                                       AutomationProperties.LiveSetting="Assertive" />
+                            <Button Content="Try again"
+                                    Command="{Binding Inspector.RetryLoadCommand}"
+                                    Style="{StaticResource TopActionButton}"
+                                    HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
 
                     <Grid Grid.Row="1" DataContext="{Binding Inspector}"
                           Visibility="{Binding Details, Converter={x:Static vm:NullToCollapsedConverter.Instance}}">
@@ -1197,7 +1367,7 @@
                             <StackPanel>
                                 <!-- a. header banner -->
                                 <Border x:Name="InspectorHero" Height="122" Margin="10,2,10,0" CornerRadius="8" ClipToBounds="True"
-                                        BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1">
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1">
                                 <Grid ClipToBounds="True">
                                     <Border Background="{DynamicResource Brush.CardBackground}" />
                                     <Border Opacity="0.96"
@@ -1230,13 +1400,13 @@
                                                                     RankText="{Binding Grade}"
                                                                     Progress="{Binding GradeProgress}"
                                                                     AccentBrush="{DynamicResource Brush.AccentPink}"
-                                                                    TrackBrush="{DynamicResource Brush.SubtleBorder}"
+                                                                    TrackBrush="{DynamicResource Brush.BorderSubtle}"
                                                                     BackgroundBrush="{DynamicResource Brush.CardBackground}"
                                                                     TextBrush="{DynamicResource Brush.TextPrimary}" />
                                         <Border Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Top" MaxWidth="390"
                                                 Margin="0,2,12,0" Padding="10,7"
                                                 Background="{DynamicResource Brush.OverlayBackground}"
-                                                BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="6">
+                                                BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1" CornerRadius="6">
                                         <StackPanel>
                                             <TextBlock Text="{Binding MapTitle}"
                                                        FontSize="13"
@@ -1289,7 +1459,10 @@
                                 </Grid>
                                 </Border>
 
-                                <Border Style="{StaticResource PagePanel}" Padding="8" Margin="10,6,10,0">
+                                <Border Style="{StaticResource PagePanel}"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        Padding="8"
+                                        Margin="10,6,10,0">
                                     <UniformGrid Columns="7">
                                         <StackPanel><TextBlock Text="CS" Style="{StaticResource Text.LabelUpper}" HorizontalAlignment="Center"/><TextBlock Text="{Binding CsDisplay}" HorizontalAlignment="Center" FontWeight="SemiBold" Margin="0,3,0,0"/></StackPanel>
                                         <StackPanel><TextBlock Text="AR" Style="{StaticResource Text.LabelUpper}" HorizontalAlignment="Center"/><TextBlock Text="{Binding ArDisplay}" HorizontalAlignment="Center" FontWeight="SemiBold" Margin="0,3,0,0"/></StackPanel>
@@ -1308,7 +1481,7 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <ItemsControl Grid.Column="0" Visibility="Collapsed" ItemsSource="{Binding Details.Mods}" Margin="12,0,9,0" VerticalAlignment="Center">
+                                    <ItemsControl Grid.Column="0" Visibility="Collapsed" ItemsSource="{Binding Details.Mods}" Margin="12,0,9,0" VerticalAlignment="Center" Focusable="False" IsTabStop="False">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <StackPanel Orientation="Horizontal" />
@@ -1385,7 +1558,7 @@
                                 </Border>
 
                                 <!-- c/d. primary + secondary bordered stat rows (shared outer border) -->
-                                <Border Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="8" Margin="10,8,10,0">
+                                <Border Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1" CornerRadius="8" Margin="10,8,10,0">
                                     <StackPanel>
                                         <UniformGrid Columns="4">
                                             <Border Style="{StaticResource StatCellPrimary}">
@@ -1393,7 +1566,7 @@
                                                     <controls:RankProgressBadge Width="44" Height="44" HorizontalAlignment="Center"
                                                                                 RankText="{Binding Grade}" Progress="{Binding GradeProgress}"
                                                                                 AccentBrush="{DynamicResource Brush.AccentPink}"
-                                                                                TrackBrush="{DynamicResource Brush.SubtleBorder}"
+                                                                                TrackBrush="{DynamicResource Brush.BorderSubtle}"
                                                                                 BackgroundBrush="{DynamicResource Brush.CardBackground}"
                                                                                 TextBrush="{DynamicResource Brush.TextPrimary}" />
                                                     <TextBlock Text="GRADE" Style="{StaticResource Text.LabelUpper}" FontSize="10" HorizontalAlignment="Center" />
@@ -1420,7 +1593,7 @@
                                             </Border>
                                         </UniformGrid>
 
-                                        <Border BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0">
+                                        <Border BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,1,0,0">
                                             <UniformGrid Columns="6">
                                                 <Border Style="{StaticResource StatCellSecondary}"><StackPanel><TextBlock Text="300" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Cyan}" HorizontalAlignment="Center" ToolTip="GREAT judgement"/><TextBlock Text="{Binding N300Text}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
                                                 <Border Style="{StaticResource StatCellSecondary}"><StackPanel><TextBlock Text="100" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}" HorizontalAlignment="Center" ToolTip="OK judgement"/><TextBlock Text="{Binding N100Text}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
@@ -1431,7 +1604,7 @@
                                             </UniformGrid>
                                         </Border>
 
-                                        <Border BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0">
+                                        <Border BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,1,0,0">
                                         <Grid Height="48">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/>
@@ -1440,7 +1613,22 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.ColumnSpan="2" VerticalAlignment="Center" Margin="10,0">
                                             <TextBlock Text="MODS" Style="{StaticResource Text.LabelUpper}" FontSize="10" Margin="1,0,0,1" />
-                                            <ItemsControl ItemsSource="{Binding DisplayMods}" Height="36">
+                                            <ItemsControl x:Name="SelectedPlayMods"
+                                                          ItemsSource="{Binding DisplayMods}"
+                                                          Height="36"
+                                                          Focusable="False"
+                                                          IsTabStop="False"
+                                                          AutomationProperties.Name="Active modifications">
+                                                <ItemsControl.Style>
+                                                    <Style TargetType="ItemsControl">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasDisplayMods}" Value="False">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ItemsControl.Style>
                                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
@@ -1471,8 +1659,26 @@
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
+                                            <TextBlock x:Name="NoModsText"
+                                                       Text="None"
+                                                       Margin="1,4,0,0"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource Brush.TextSecondary}"
+                                                       AutomationProperties.Name="No active modifications">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasDisplayMods}" Value="False">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
                                             </StackPanel>
-                                            <Border Grid.Column="2" Grid.ColumnSpan="2" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1,0" Padding="10,4">
+                                            <Border Grid.Column="2" Grid.ColumnSpan="2" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1,0" Padding="10,4">
                                                 <Grid VerticalAlignment="Center">
                                                     <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -1491,7 +1697,7 @@
                                         </Grid>
                                         </Border>
 
-                                        <Expander Header="Additional score data" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="8,4">
+                                        <Expander Header="Additional score data" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,1,0,0" Padding="8,4">
                                             <UniformGrid Columns="4" Opacity="{Binding SliderStatsOpacity}" ToolTip="{Binding SliderStatsToolTip}">
                                                 <StackPanel><TextBlock Text="PROGRESS" Style="{StaticResource Text.LabelUpper}" HorizontalAlignment="Center"/><TextBlock Text="{Binding ProgressValue}" HorizontalAlignment="Center" Margin="0,3,0,0"/></StackPanel>
                                                 <StackPanel><TextBlock Text="UR" Style="{StaticResource Text.LabelUpper}" HorizontalAlignment="Center"/><TextBlock Text="{Binding UrText}" HorizontalAlignment="Center" Margin="0,3,0,0"/></StackPanel>
@@ -1566,8 +1772,8 @@
                                                                FontSize="11"
                                                                VerticalAlignment="Center"
                                                                Margin="0,0,10,0" />
-                                                    <CheckBox Content="UR" IsChecked="{Binding ShowUr}" Margin="0,0,7,0" />
-                                                    <CheckBox Content="Miss" IsChecked="{Binding ShowMiss}" />
+                                                    <CheckBox Content="UR" IsChecked="{Binding ShowUr}" Style="{StaticResource ChartLegendCheckBox}" Margin="0,0,7,0" />
+                                                    <CheckBox Content="Miss" IsChecked="{Binding ShowMiss}" Style="{StaticResource ChartLegendCheckBox}" />
                                                 </StackPanel>
                                             </Grid>
                                             <Grid Grid.Row="1">
@@ -1641,8 +1847,8 @@
                                                        FontSize="11"
                                                        VerticalAlignment="Center"
                                                        Margin="0,0,10,0" />
-                                            <CheckBox Content="UR" IsChecked="{Binding ShowUr}" Margin="0,0,7,0" />
-                                            <CheckBox Content="Miss" IsChecked="{Binding ShowMiss}" />
+                                            <CheckBox Content="UR" IsChecked="{Binding ShowUr}" Style="{StaticResource ChartLegendCheckBox}" Margin="0,0,7,0" />
+                                            <CheckBox Content="Miss" IsChecked="{Binding ShowMiss}" Style="{StaticResource ChartLegendCheckBox}" />
                                         </StackPanel>
                                     </Grid>
                                     <controls:MapPressureGraph x:Name="PinnedMapPressureGraph"
@@ -1672,9 +1878,12 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Border BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Grid.ColumnSpan="3" />
+                            <Border BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,1,0,0" Grid.ColumnSpan="3" />
                             <Expander x:Name="TechnicalDetailsExpander"
                                       Header="Technical details"
+                                      IsExpanded="False"
+                                      Expanded="TechnicalDetailsExpander_Expanded"
+                                      Collapsed="TechnicalDetailsExpander_Collapsed"
                                       Margin="12,4,12,0"
                                       VerticalAlignment="Center">
                                 <Expander.Style>
@@ -1690,6 +1899,7 @@
                                                                           DockPanel.Dock="Top"
                                                                           Content="{TemplateBinding Header}"
                                                                           IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                                                          MinHeight="24"
                                                                           Foreground="{DynamicResource Brush.TextSecondary}"
                                                                           Background="Transparent"
                                                                           BorderThickness="0"
@@ -1790,9 +2000,9 @@
                                                 Padding="14,0"
                                                 HorizontalAlignment="Right" />
                                     </Grid>
-                                    <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="{DynamicResource Radius.ThemeCard}" Padding="10,9" Background="{DynamicResource Brush.PanelBackground}">
+                                    <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1" CornerRadius="{DynamicResource Radius.ThemeCard}" Padding="10,9" Background="{DynamicResource Brush.PanelBackground}">
                                         <UniformGrid Columns="3">
-                                            <Border BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,7,0" Background="{DynamicResource Brush.PanelBackground}">
+                                            <Border BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,7,0" Background="{DynamicResource Brush.PanelBackground}">
                                                 <StackPanel>
                                                     <TextBlock Text="INPUT" Style="{StaticResource Text.LabelUpper}" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Brush.AccentPink}" Margin="0,0,0,6" />
                                                     <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="K1 presses" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" /><TextBlock Grid.Column="1" Text="{Binding TechnicalKey1Presses}" Foreground="{DynamicResource Brush.AccentPink}" FontSize="11" FontWeight="SemiBold" /></Grid>
@@ -1804,7 +2014,7 @@
                                                     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="hold time K2" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" /><TextBlock Grid.Column="1" Text="{Binding TechnicalKey2Hold}" Foreground="{DynamicResource Brush.AccentPink}" FontSize="11" FontWeight="SemiBold" /></Grid>
                                                 </StackPanel>
                                             </Border>
-                                            <Border BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="7,0" Background="{DynamicResource Brush.PanelBackground}">
+                                            <Border BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="7,0" Background="{DynamicResource Brush.PanelBackground}">
                                                 <StackPanel>
                                                     <TextBlock Text="RECORDING" Style="{StaticResource Text.LabelUpper}" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Brush.AccentPink}" Margin="0,0,0,6" />
                                                     <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="source" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" /><TextBlock Grid.Column="1" Text="{Binding TechnicalRecordingSource}" Foreground="{DynamicResource Brush.AccentPink}" FontSize="11" FontWeight="SemiBold" /></Grid>
@@ -1830,7 +2040,7 @@
                                                     </Button>
                                                 </StackPanel>
                                             </Border>
-                                            <Border BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="7,0,0,0" Background="{DynamicResource Brush.PanelBackground}">
+                                            <Border BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="7,0,0,0" Background="{DynamicResource Brush.PanelBackground}">
                                                 <StackPanel>
                                                     <TextBlock Text="MAP" Style="{StaticResource Text.LabelUpper}" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Brush.AccentPink}" Margin="0,0,0,6" />
                                                     <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="duration" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" /><TextBlock Grid.Column="1" Text="{Binding TechnicalDuration}" Foreground="{DynamicResource Brush.TextPrimary}" FontSize="11" FontWeight="SemiBold" /></Grid>
@@ -1980,19 +2190,22 @@
         </Grid>
 
         <Grid x:Name="WorkspacePage" Grid.Row="1" Grid.Column="1" Visibility="Collapsed" Margin="16" MaxWidth="1920">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Border Style="{StaticResource PagePanel}" Padding="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="WorkspaceNavigationColumn" Width="210"/>
+                <ColumnDefinition x:Name="WorkspaceGapColumn" Width="10"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border x:Name="WorkspaceNavigationPanel" Style="{StaticResource PagePanel}" Padding="10">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <StackPanel>
                         <TextBlock Text="Settings &amp; tools" FontSize="18" FontWeight="SemiBold" Margin="6,4,6,2"/>
                         <TextBlock Text="Everything stays inside Kumori" Foreground="{DynamicResource Brush.TextMuted}" FontSize="10" TextWrapping="Wrap" Margin="6,0,6,10"/>
                     </StackPanel>
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Settings and tools navigation">
                     <StackPanel Margin="0,0,0,8">
                         <TextBlock Text="SETTINGS" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
                         <Button Content="Appearance &amp; application" Command="{Binding OpenSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
@@ -2017,6 +2230,7 @@
                         </Button>
                         <TextBlock Text="SUPPORT" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
                         <Button Content="Changelog" Command="{Binding OpenChangelogCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                        <Button Content="Join the Kumori Discord ↗" Click="DiscordNavigation_Click" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5" AutomationProperties.HelpText="Opens an external website"/>
                         <Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Report a problem" Command="{Binding ExportProblemReportCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Open app folders…" Click="ActionsButton_Click" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left">
@@ -2027,29 +2241,26 @@
                                 </ContextMenu>
                             </Button.ContextMenu>
                         </Button>
+                        <Border BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Margin="0,10,0,10" />
+                        <TextBlock Text="DEVELOPER" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
+                        <Button Content="Developer settings" Command="{Binding OpenDeveloperSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                        <Button Content="tosu diagnostics" Command="{Binding OpenTosuDiagnosticsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                        <Button Content="Replay capture diagnostics…" Click="ActionsButton_Click" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left">
+                            <Button.ContextMenu>
+                                <ContextMenu Placement="Right">
+                                    <MenuItem Header="Lazer frame debug" Command="{Binding OpenLazerFrameDebugCommand}" />
+                                    <MenuItem Header="Stable frame debug" Command="{Binding OpenStableFrameDebugCommand}" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
                     </StackPanel>
                     </ScrollViewer>
-                    <Border Grid.Row="2" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
-                        <StackPanel>
-                            <TextBlock Text="DEVELOPER" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
-                            <Button Content="Developer settings" Command="{Binding OpenDeveloperSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                            <Button Content="tosu diagnostics" Command="{Binding OpenTosuDiagnosticsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                            <Button Content="Replay capture diagnostics…" Click="ActionsButton_Click" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left">
-                                <Button.ContextMenu>
-                                    <ContextMenu Placement="Right">
-                                        <MenuItem Header="Lazer frame debug" Command="{Binding OpenLazerFrameDebugCommand}" />
-                                        <MenuItem Header="Stable frame debug" Command="{Binding OpenStableFrameDebugCommand}" />
-                                    </ContextMenu>
-                                </Button.ContextMenu>
-                            </Button>
-                        </StackPanel>
-                    </Border>
                 </Grid>
             </Border>
             <Border Grid.Column="2" Style="{StaticResource PagePanel}" Padding="0" ClipToBounds="True">
                 <Grid>
                     <TextBlock x:Name="WorkspaceEmptyText" Text="Choose a settings or tools page" Foreground="{DynamicResource Brush.TextMuted}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    <TabControl x:Name="WorkspaceTabs" Style="{StaticResource WorkspaceTabControl}" Visibility="Collapsed"/>
+                    <TabControl x:Name="WorkspaceTabs" Style="{StaticResource WorkspaceTabControl}" Visibility="Collapsed" AutomationProperties.Name="Open settings and tools"/>
                 </Grid>
             </Border>
         </Grid>
@@ -2058,14 +2269,14 @@
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel><TextBlock Text="Performance" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Your long-term play quality, consistency and activity" Foreground="{DynamicResource Brush.TextSecondary}" Margin="0,3,0,14"/></StackPanel>
-                <Border Grid.Column="1" Style="{StaticResource PagePanel}" Padding="12,7" VerticalAlignment="Top"><TextBlock Text="All recorded plays" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/></Border>
+                <StackPanel><TextBlock Text="Performance" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Your long-term play quality, consistency and activity" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" Margin="0,3,12,14"/></StackPanel>
+                <Border x:Name="PerformanceScopeBadge" Grid.Column="1" Style="{StaticResource PagePanel}" Padding="12,7" VerticalAlignment="Top"><TextBlock Text="All recorded plays" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/></Border>
             </Grid>
-            <UniformGrid Grid.Row="1" Columns="4" Margin="-4,0,-4,12">
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="TOTAL PLAYS" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalAttemptsMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="COMPLETION RATE" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalCompletionMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}" Margin="0,6,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="AVERAGE ACCURACY" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalAccuracyMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="BEST PERFORMANCE" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalBestPpMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AccentPink}" Margin="0,6,0,0"/></Grid></Border>
+            <UniformGrid x:Name="PerformanceMetrics" Grid.Row="1" Columns="4" Margin="-4,0,-4,12">
+                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="TOTAL PLAYS" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalAttemptsMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
+                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="COMPLETION RATE" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalCompletionMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}" Margin="0,6,0,0"/></Grid></Border>
+                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="AVERAGE ACCURACY" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalAccuracyMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
+                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="BEST PERFORMANCE" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalBestPpMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AccentPink}" Margin="0,6,0,0"/></Grid></Border>
                 <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="COMPLETED" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalCompletedMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
                 <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="FAILED" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalFailedMetric}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Danger}" Margin="0,5,0,0"/></Grid></Border>
                 <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="TOTAL SCORE" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalScoreMetric}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,5,0,0"/></Grid></Border>
@@ -2076,10 +2287,11 @@
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <Grid Margin="16,14,16,11"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Daily performance" Style="{StaticResource PageSectionTitle}"/><TextBlock Text="The latest 30 recorded days" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,3,0,0"/></StackPanel><TextBlock Grid.Column="1" Text="Completion bars show finished plays" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" VerticalAlignment="Center"/></Grid>
                     <Grid Grid.Row="1" Height="28" Background="{DynamicResource Brush.ControlBackground}" Margin="1,0"><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="0.7*"/><ColumnDefinition Width="1.15*"/><ColumnDefinition Width="0.85*"/><ColumnDefinition Width="0.85*"/></Grid.ColumnDefinitions><TextBlock Text="DATE" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center" Margin="15,0,0,0"/><TextBlock Grid.Column="1" Text="PLAYS" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center"/><TextBlock Grid.Column="2" Text="COMPLETION" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center"/><TextBlock Grid.Column="3" Text="AVG ACCURACY" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center"/><TextBlock Grid.Column="4" Text="BEST PP" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,16,0"/></Grid>
-                    <ListBox Grid.Row="2" ItemsSource="{Binding PerformanceDays}" BorderThickness="0" Background="Transparent" Padding="8,5" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,5"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/></Style></ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate><DataTemplate><Border Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="6" Padding="8,7"><Grid Height="50"><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="0.7*"/><ColumnDefinition Width="1.15*"/><ColumnDefinition Width="0.85*"/><ColumnDefinition Width="0.85*"/></Grid.ColumnDefinitions><StackPanel Margin="6,0,0,0" VerticalAlignment="Center"><TextBlock Text="{Binding DateText}" FontWeight="SemiBold" FontSize="12"/><TextBlock Text="{Binding DayText}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,2,0,0"/></StackPanel><StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding PlaysText}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="{Binding CompletedText, StringFormat={}{0} completed}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,2,0,0"/></StackPanel><Grid Grid.Column="2" Margin="0,4,18,4"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="{Binding CompletionText}" FontSize="11" FontWeight="SemiBold"/><ProgressBar Grid.Row="1" Minimum="0" Maximum="100" Value="{Binding CompletionRate}" Height="4" Margin="0,5,0,0" Foreground="{DynamicResource Brush.Success}" Background="{DynamicResource Brush.ControlBackground}" BorderThickness="0"/></Grid><TextBlock Grid.Column="3" Text="{Binding AccuracyText}" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold"/><TextBlock Grid.Column="4" Text="{Binding BestPpText}" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="{DynamicResource Brush.AccentPink}" FontSize="12" FontWeight="SemiBold" Margin="0,0,7,0"/></Grid></Border></DataTemplate></ListBox.ItemTemplate>
-                    </ListBox>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8,5" AutomationProperties.Name="Daily performance history">
+                        <ItemsControl ItemsSource="{Binding PerformanceDays}" Focusable="False" IsTabStop="False" AutomationProperties.Name="Daily performance entries">
+                            <ItemsControl.ItemTemplate><DataTemplate><Border Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="6" Padding="8,7" Margin="0,0,0,5"><Grid Height="50"><Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="0.7*"/><ColumnDefinition Width="1.15*"/><ColumnDefinition Width="0.85*"/><ColumnDefinition Width="0.85*"/></Grid.ColumnDefinitions><StackPanel Margin="6,0,0,0" VerticalAlignment="Center"><TextBlock Text="{Binding DateText}" FontWeight="SemiBold" FontSize="12"/><TextBlock Text="{Binding DayText}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,2,0,0"/></StackPanel><StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding PlaysText}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="{Binding CompletedText, StringFormat={}{0} completed}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel><Grid Grid.Column="2" Margin="0,4,18,4"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="{Binding CompletionText}" FontSize="11" FontWeight="SemiBold"/><ProgressBar Grid.Row="1" Minimum="0" Maximum="100" Value="{Binding CompletionRate}" Height="4" Margin="0,5,0,0" Foreground="{DynamicResource Brush.Success}" Background="{DynamicResource Brush.ControlBackground}" BorderThickness="0" AutomationProperties.Name="Completion rate"/></Grid><TextBlock Grid.Column="3" Text="{Binding AccuracyText}" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="4" Text="{Binding BestPpText}" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="{DynamicResource Brush.AccentPink}" FontSize="12" FontWeight="SemiBold" Margin="0,0,7,0" TextTrimming="CharacterEllipsis"/></Grid></Border></DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                     <Border Grid.RowSpan="3" Background="{DynamicResource Brush.PanelBackground}" Visibility="{Binding HasNoPerformanceData, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="430"><TextBlock Text="No performance data yet" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock Text="Complete a tracked osu!standard play to start building daily performance trends." FontSize="12" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,7,0,14"/><Button Content="Open Settings" Command="{Binding OpenSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalAlignment="Center"/></StackPanel>
                     </Border>
@@ -2089,28 +2301,78 @@
 
         <Grid x:Name="MapsPage" Grid.Row="1" Grid.Column="1" Visibility="Collapsed" Margin="22,18" MaxWidth="1920">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Grid Margin="0,0,0,14">
+            <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel><TextBlock Text="Maps" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Your most-played beatmaps, with performance averages across every recorded play" Foreground="{DynamicResource Brush.TextSecondary}" Margin="0,3,0,0"/></StackPanel>
-                <Border Grid.Column="1" Style="{StaticResource PagePanel}" Padding="12,7" VerticalAlignment="Center"><TextBlock Text="Sorted by play count" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/></Border>
+                <StackPanel><TextBlock Text="Maps" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Your most-played beatmaps and performance averages" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" Margin="0,3,12,0"/></StackPanel>
+                <Border x:Name="MapsSortBadge" Grid.Column="1" Style="{StaticResource PagePanel}" Padding="12,7" VerticalAlignment="Center"><TextBlock Text="Sorted by play count" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/></Border>
             </Grid>
             <Grid Grid.Row="1">
-            <ListBox ItemsSource="{Binding MapCards}" Background="Transparent" BorderThickness="0"
+            <ListBox ItemsSource="{Binding MapRows}" MaxWidth="1120" Background="Transparent" BorderThickness="0"
+                     Focusable="False" IsTabStop="False" AutomationProperties.Name="Recorded maps"
                      ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
-                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style></ListBox.ItemContainerStyle>
+                     ScrollViewer.CanContentScroll="True"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel">
+                <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Stretch"/><Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style></ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate><DataTemplate>
-                    <Button Click="MapCard_Click" MaxWidth="900" Height="172" Padding="0" Margin="0,0,12,12" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" ToolTip="Show every recorded play on this map">
+                    <ItemsControl ItemsSource="{Binding Cards}" Focusable="False" IsTabStop="False">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate><DataTemplate>
+                    <Button Click="MapCard_Click" Height="160" Padding="0" Margin="0,0,8,8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" ToolTip="Show every recorded play on this map" AutomationProperties.Name="{Binding Title}" AutomationProperties.HelpText="Show every recorded play on this map">
                         <Border Style="{StaticResource PagePanel}" Padding="0" ClipToBounds="True">
                             <Grid>
-                                <Grid.RowDefinitions><RowDefinition Height="88"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                <Border Background="{DynamicResource Brush.CardSelectedBackground}" CornerRadius="8,8,0,0" ClipToBounds="True">
-                                    <Grid><Image Source="{Binding ArtworkSource, Converter={x:Static vm:PanelArtworkSourceConverter.Instance}}" Stretch="UniformToFill" Opacity="0.72"/><Border Background="#9A09070B"/><Grid Margin="14,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Bottom"><TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Artist}" Foreground="{DynamicResource Brush.TextSecondary}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Difficulty}" Foreground="{DynamicResource Brush.AccentPink}" FontSize="11" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/></StackPanel><Border Grid.Column="1" Background="{DynamicResource Brush.CardSelectedBackground}" BorderBrush="{DynamicResource Brush.AccentPink}" BorderThickness="1" CornerRadius="12" Padding="9,4" VerticalAlignment="Top"><TextBlock Text="{Binding PlayCountText}" FontWeight="SemiBold" FontSize="11"/></Border></Grid></Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="66"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <Border CornerRadius="8,8,0,0" ClipToBounds="True" Background="{DynamicResource Brush.CardSelectedBackground}">
+                                    <Grid>
+                                        <Image Source="{Binding ArtworkSource, Converter={x:Static vm:PanelArtworkSourceConverter.Instance}}" Stretch="UniformToFill" Opacity="0.8" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                        <Border Background="#8A09070B"/>
+                                        <Grid Margin="12,8">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                                                <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}"/>
+                                                <TextBlock Margin="0,4,0,0" FontSize="10.5" TextTrimming="CharacterEllipsis">
+                                                    <Run Text="{Binding Artist, Mode=OneWay}" Foreground="{DynamicResource Brush.TextSecondary}"/>
+                                                    <Run Text="  ·  " Foreground="{DynamicResource Brush.TextMuted}"/>
+                                                    <Run Text="{Binding Difficulty, Mode=OneWay}" Foreground="{DynamicResource Brush.AccentPink}"/>
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <Border Grid.Column="1" Background="{DynamicResource Brush.CardSelectedBackground}" BorderBrush="{DynamicResource Brush.AccentPink}" BorderThickness="1" CornerRadius="11" Padding="8,3" VerticalAlignment="Top">
+                                                <TextBlock Text="{Binding PlayCountText}" FontWeight="SemiBold" FontSize="10.5"/>
+                                            </Border>
+                                        </Grid>
+                                    </Grid>
                                 </Border>
-                                <Grid Grid.Row="1" Margin="14,9,14,10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="{Binding AverageLine}" Foreground="{DynamicResource Brush.TextPrimary}" FontSize="11" FontWeight="SemiBold"/><TextBlock Grid.Row="1" Text="{Binding BestLine}" Foreground="{DynamicResource Brush.AccentPink}" FontSize="11" Margin="0,4,0,0"/><Grid Grid.Row="2" Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding CompletionText}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/><TextBlock Grid.Column="1" Text="{Binding LastPlayed}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/></Grid></Grid>
+                                <Grid Grid.Row="1">
+                                    <Grid.RowDefinitions><RowDefinition Height="56"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                    <UniformGrid Columns="3" Margin="12,8,12,4">
+                                        <StackPanel ToolTip="{Binding AverageLine}">
+                                            <TextBlock Text="AVERAGE" Style="{StaticResource Text.LabelUpper}"/>
+                                            <TextBlock Text="{Binding AveragePerformanceText}" Margin="0,5,6,0" FontSize="10.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <StackPanel ToolTip="{Binding BestLine}">
+                                            <TextBlock Text="BEST" Style="{StaticResource Text.LabelUpper}" Foreground="{DynamicResource Brush.AccentPink}"/>
+                                            <TextBlock Text="{Binding BestPerformanceText}" Margin="0,5,6,0" Foreground="{DynamicResource Brush.AccentPink}" FontSize="10.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <StackPanel ToolTip="Best recorded combo / beatmap maximum combo">
+                                            <TextBlock Text="BEST COMBO" Style="{StaticResource Text.LabelUpper}"/>
+                                            <TextBlock Text="{Binding ComboText}" Margin="0,5,0,0" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <Grid Grid.Row="1" Margin="12,0,12,9">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Grid Margin="0,0,14,0" VerticalAlignment="Center">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                            <TextBlock Text="{Binding CompletionText}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="10.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <ProgressBar Grid.Row="1" Minimum="0" Maximum="100" Value="{Binding CompletionRate, Mode=OneWay}" Height="3" Margin="0,5,0,0" Foreground="{DynamicResource Brush.Success}" Background="{DynamicResource Brush.ControlBackground}" BorderThickness="0" AutomationProperties.Name="Completion rate"/>
+                                        </Grid>
+                                        <TextBlock Grid.Column="1" Text="{Binding LastPlayed}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="10" VerticalAlignment="Center" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis"/>
+                                    </Grid>
+                                </Grid>
                             </Grid>
                         </Border>
                     </Button>
+                        </DataTemplate></ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </DataTemplate></ListBox.ItemTemplate>
             </ListBox>
                 <Border Background="{DynamicResource Brush.AppBackground}" Visibility="{Binding HasNoMapData, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
@@ -2123,6 +2385,9 @@
               Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
               Panel.ZIndex="200"
               Background="{DynamicResource Brush.AppBackground}"
+              FocusManager.IsFocusScope="True"
+              KeyboardNavigation.TabNavigation="Cycle"
+              KeyboardNavigation.ControlTabNavigation="Cycle"
               Visibility="Collapsed">
             <Border Margin="18"
                     MaxWidth="1180"

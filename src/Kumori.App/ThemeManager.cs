@@ -1,10 +1,12 @@
 using System.Windows;
+using System.ComponentModel;
 using Kumori.Core.Settings;
 using Kumori.Native;
 using System.Windows.Interop;
 using System.Windows.Media;
 using MediaColor = System.Windows.Media.Color;
 using MediaColorConverter = System.Windows.Media.ColorConverter;
+using SystemColors = System.Windows.SystemColors;
 
 namespace Kumori.App;
 
@@ -24,11 +26,13 @@ public sealed class ThemeManager
     ];
 
     private readonly SettingsService _settings;
+    private ResourceDictionary? _accessibilityPalette;
 
     public ThemeManager(SettingsService settings)
     {
         _settings = settings;
         Current = Resolve(settings.Current.Appearance.ThemeId);
+        SystemParameters.StaticPropertyChanged += SystemParameters_StaticPropertyChanged;
     }
 
     public ThemeDescriptor Current { get; private set; }
@@ -90,10 +94,70 @@ public sealed class ThemeManager
             ApplyCustomResources(palette, customTheme);
         merged.Insert(0, palette);
 
+        if (_accessibilityPalette is not null)
+            merged.Remove(_accessibilityPalette);
+        _accessibilityPalette = SystemParameters.HighContrast ? CreateHighContrastPalette() : null;
+        if (_accessibilityPalette is not null)
+            merged.Insert(Math.Min(1, merged.Count), _accessibilityPalette);
+
         Current = selected;
         DarkTitleBar.UseMica = selected.Id == "windows-fluent";
         foreach (Window window in application.Windows)
             DarkTitleBar.Apply(new WindowInteropHelper(window).Handle);
+    }
+
+    private void SystemParameters_StaticPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(SystemParameters.HighContrast)
+            || Application.Current is not { } application)
+        {
+            return;
+        }
+
+        application.Dispatcher.BeginInvoke(ApplyCurrent);
+    }
+
+    private static ResourceDictionary CreateHighContrastPalette()
+    {
+        var window = SystemColors.WindowBrush;
+        var control = SystemColors.ControlBrush;
+        var text = SystemColors.WindowTextBrush;
+        var border = SystemColors.WindowTextBrush;
+        var accent = SystemColors.HighlightBrush;
+        var muted = SystemColors.GrayTextBrush;
+        var palette = new ResourceDictionary
+        {
+            ["Brush.AppBackground"] = window,
+            ["Brush.PanelBackground"] = window,
+            ["Brush.CardBackground"] = control,
+            ["Brush.CardHoverBackground"] = control,
+            ["Brush.CardSelectedBackground"] = control,
+            ["Brush.ControlBackground"] = window,
+            ["Brush.ControlHoverBackground"] = control,
+            ["Brush.SubtleBorder"] = border,
+            ["Brush.StrongBorder"] = accent,
+            ["Brush.AccentPink"] = accent,
+            ["Brush.AccentPurple"] = accent,
+            ["Brush.TextPrimary"] = text,
+            ["Brush.TextSecondary"] = text,
+            ["Brush.TextMuted"] = muted,
+            ["Brush.Success"] = accent,
+            ["Brush.Warning"] = accent,
+            ["Brush.Danger"] = accent,
+            ["Brush.Cyan"] = accent,
+            ["Brush.BackgroundPrimary"] = window,
+            ["Brush.BackgroundSecondary"] = window,
+            ["Brush.Border"] = border,
+            ["Brush.BorderSubtle"] = border,
+            ["Brush.Negative"] = accent,
+            ["Brush.NavigationBackground"] = window,
+            ["Brush.TopBarBackground"] = window,
+            ["Brush.OverlayBackground"] = window,
+            ["Brush.MetricBackground"] = control,
+            ["Color.AccentPink"] = SystemColors.HighlightColor,
+            ["Color.AccentPurple"] = SystemColors.HotTrackColor,
+        };
+        return palette;
     }
 
     private static void ApplyCustomResources(ResourceDictionary palette, CustomThemeSettings? theme)
@@ -109,8 +173,23 @@ public sealed class ThemeManager
         palette["Brush.BackgroundPrimary"] = FrozenBrush((MediaColor)palette["Color.AppBackground"]);
         palette["Brush.BackgroundSecondary"] = FrozenBrush((MediaColor)palette["Color.PanelBackground"]);
         palette["Brush.Border"] = FrozenBrush((MediaColor)palette["Color.SubtleBorder"]);
-        palette["Brush.BorderSubtle"] = FrozenBrush((MediaColor)palette["Color.SubtleBorder"]);
+        palette["Brush.BorderSubtle"] = FrozenBrush(Blend(
+            (MediaColor)palette["Color.PanelBackground"],
+            (MediaColor)palette["Color.SubtleBorder"],
+            0.40));
         palette["Brush.Negative"] = FrozenBrush((MediaColor)palette["Color.Danger"]);
+    }
+
+    private static MediaColor Blend(MediaColor background, MediaColor foreground, double foregroundAmount)
+    {
+        static byte Mix(byte background, byte foreground, double amount)
+            => (byte)Math.Round(background + ((foreground - background) * amount));
+
+        return MediaColor.FromArgb(
+            255,
+            Mix(background.R, foreground.R, foregroundAmount),
+            Mix(background.G, foreground.G, foregroundAmount),
+            Mix(background.B, foreground.B, foregroundAmount));
     }
 
     private static SolidColorBrush FrozenBrush(MediaColor color)

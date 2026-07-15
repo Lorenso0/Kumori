@@ -8,7 +8,7 @@ namespace Kumori.Native;
 /// Reads the replay state already maintained by osu!. Official tosu currently
 /// reads the same state internally but does not publish it through v2.
 /// </summary>
-public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
+public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector, IDisposable
 {
     private static readonly byte?[] StableReplayPattern =
     [
@@ -18,6 +18,7 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
     private readonly object gate = new();
     private readonly LazerMemoryReplayFrameSource lazer;
+    private readonly CancellationTokenSource lifetimeCts = new();
     private DateTimeOffset lastCheck;
     private OsuClientKind lastKind;
     private bool lastResult;
@@ -36,6 +37,7 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
     private long lazerCheckGeneration;
     private bool lazerLastResult;
     private long replayStateGeneration;
+    private bool disposed;
 
     public OsuReplayPlaybackDetector(LazerMemoryReplayFrameSource? lazer = null)
     {
@@ -55,6 +57,9 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
             return Volatile.Read(ref lastResult);
         try
         {
+            if (disposed)
+                return false;
+
             var now = DateTimeOffset.UtcNow;
             if (clientKind == lastKind && now - lastCheck < PollInterval)
                 return lastResult;
@@ -79,6 +84,9 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
     {
         lock (gate)
         {
+            if (disposed)
+                return;
+
             replayStateGeneration++;
             lastCheck = DateTimeOffset.MinValue;
             lastKind = clientKind;
@@ -122,7 +130,7 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
         {
             lock (gate)
             {
-                if (lazerCheckGeneration == replayStateGeneration)
+                if (!disposed && lazerCheckGeneration == replayStateGeneration)
                 {
                     lazerLastResult = result;
                     if (lastKind == OsuClientKind.Lazer)
@@ -166,7 +174,7 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
         {
             lock (gate)
             {
-                if (stableCheckGeneration == replayStateGeneration)
+                if (!disposed && stableCheckGeneration == replayStateGeneration)
                 {
                     stableLastResult = result;
                     if (lastKind == OsuClientKind.Stable)
@@ -215,7 +223,7 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
 
     private void startStableDiscoveryLocked(DateTimeOffset now)
     {
-        if (stableDiscoveryRunning || now < nextStableProcessSearch)
+        if (disposed || stableDiscoveryRunning || now < nextStableProcessSearch)
             return;
 
         stableDiscoveryRunning = true;
@@ -262,14 +270,17 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
             }
 
             memory = ProcessMemory.Open(process);
-            nint replayFlag = findStableReplayFlagIncrementally(memory, process);
+            nint replayFlag = findStableReplayFlagIncrementally(
+                memory,
+                process,
+                lifetimeCts.Token);
             bool exited;
             try { exited = process.HasExited; }
             catch { exited = true; }
 
             lock (gate)
             {
-                if (exited || stableReplayFlag != 0)
+                if (disposed || exited || stableReplayFlag != 0)
                     return;
 
                 if (replayFlag == 0)
@@ -335,7 +346,10 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
         return null;
     }
 
-    private static nint findStableReplayFlagIncrementally(ProcessMemory memory, Process process)
+    private static nint findStableReplayFlagIncrementally(
+        ProcessMemory memory,
+        Process process,
+        CancellationToken cancellationToken)
     {
         const int maximumBytesPerStep = 64 * 1024;
         const int maximumCandidatesPerStep = 8;
@@ -350,9 +364,13 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
         {
             foreach (var region in memory.Regions().Where(region => region.Executable))
             {
+                if (cancellationToken.IsCancellationRequested)
+                    return 0;
                 long offset = 0;
                 while (offset < region.RegionSize)
                 {
+                    if (cancellationToken.IsCancellationRequested)
+                        return 0;
                     try { if (process.HasExited) return 0; }
                     catch { return 0; }
 
@@ -364,6 +382,8 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
                     int candidatesThisStep = 0;
                     for (int index = 0; index <= readSize - StableReplayPattern.Length; index++)
                     {
+                        if ((index & 0xff) == 0 && cancellationToken.IsCancellationRequested)
+                            return 0;
                         // Retain the current buffer/index while yielding the worker.
                         // No step monopolizes CPU for more than a few milliseconds.
                         if ((index & 0xff) == 0 && step.Elapsed >= TimeSpan.FromMilliseconds(3))
@@ -429,5 +449,22 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector
         stableMemory = null;
         stableProcess?.Dispose();
         stableProcess = null;
+    }
+
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            if (disposed)
+                return;
+            disposed = true;
+            replayStateGeneration++;
+            lifetimeCts.Cancel();
+            lastResult = false;
+            lazerLastResult = false;
+            stableLastResult = false;
+            resetStable();
+        }
+        lazer.Dispose();
     }
 }

@@ -1,5 +1,37 @@
 [
   {
+    "version": "0.4.2",
+    "date": "2026-07-15",
+    "major": [
+      "Hardened Kumori's native capture, tracking database, backup, updater, and shutdown paths for release reliability",
+      "Refined the dashboard and selected-play experience across full, compact, and minimum window sizes"
+    ],
+    "features": [
+      "Added a DPI-aware 720 x 480 minimum window size and a dedicated single-pane compact layout",
+      "Added an intentional no-mod score state with compatibility fallback for older play records"
+    ],
+    "improvements": [
+      "Reduced dashboard visual clutter with quieter panels, compact controls, and a clearer responsive hierarchy",
+      "Restored Changelog and Discord shortcuts to the sidebar while keeping them in Settings & tools",
+      "Upgraded Kumori and its build and release workflows to .NET 10 with dependency vulnerability checks and replay-viewer compatibility validation",
+      "Improved keyboard focus, accessible hit targets, automation labels, onboarding, empty states, and text fitting",
+      "Made the development launcher location-independent and able to reactivate an existing Debug tray instance",
+      "Redesigned Maps as compact side-by-side cards with average and best performance, completion, play count, and best combo against the map maximum"
+    ],
+    "fixes": [
+      "Corrected 64-bit native memory reads and hardened process identity checks so Kumori cannot corrupt itself or stop an unrelated process",
+      "Prevented tracking ID collisions, partial maintenance writes, unsafe database moves, and unbounded compressed-data expansion",
+      "Sanitized restored executable settings and strengthened backup validation",
+      "Kept updater rollback data until the replacement build proves healthy and made startup and shutdown failures visible and bounded",
+      "Prevented text clipping and broken layout at compact boundaries and the minimum window size",
+      "Made Technical details collapse predictably when changing plays while preserving it for refreshes of the same play",
+      "Prevented older modded plays with missing detailed mod rows from appearing as no-mod",
+      "Made the development launcher propagate failures correctly instead of returning stale success codes",
+      "Kept large map libraries responsive with virtualized two-card rows and on-demand artwork loading",
+      "Removed duplicate play status from expanded history statistics so status appears only in the right-hand result summary"
+    ]
+  },
+  {
     "version": "0.4.1",
     "date": "2026-07-15",
     "major": [

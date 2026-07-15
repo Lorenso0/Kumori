@@ -26,7 +26,7 @@ public partial class TosuDiagnosticsWindow : Window
         _ = RefreshAsync(force: true);
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _refreshTimer.Tick += async (_, _) => await RefreshAsync();
+        _refreshTimer.Tick += RefreshTimer_Tick;
         _refreshTimer.Start();
     }
 
@@ -39,8 +39,11 @@ public partial class TosuDiagnosticsWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _refreshTimer.Stop();
+        _refreshTimer.Tick -= RefreshTimer_Tick;
         base.OnClosed(e);
     }
+
+    private async void RefreshTimer_Tick(object? sender, EventArgs e) => await RefreshAsync();
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync(force: true);
 
@@ -56,7 +59,10 @@ public partial class TosuDiagnosticsWindow : Window
 
     private async Task RefreshAsync(bool force = false)
     {
-        if (_refreshing || (!force && !IsVisible))
+        // This Window is used as a content owner for an embedded workspace tab
+        // and is never itself shown. The hosted tab content is the meaningful
+        // visibility signal.
+        if (_refreshing || (!force && !Tabs.IsVisible))
             return;
 
         _refreshing = true;

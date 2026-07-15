@@ -63,8 +63,9 @@
     </Style>
 
     <Style x:Key="Button.Icon" TargetType="Button" BasedOn="{StaticResource Button.Chrome}">
-        <Setter Property="Width" Value="28" />
-        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="MinHeight" Value="32" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="FontSize" Value="13" />
     </Style>
@@ -251,6 +252,10 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
                         </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.StrongBorder}" />
+                            <Setter TargetName="Box" Property="BorderThickness" Value="2" />
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -268,8 +273,8 @@
     </Style>
 
     <Style TargetType="ScrollBar">
-        <Setter Property="Width" Value="8" />
-        <Setter Property="MinWidth" Value="8" />
+        <Setter Property="Width" Value="12" />
+        <Setter Property="MinWidth" Value="12" />
         <Setter Property="Height" Value="Auto" />
         <Setter Property="MinHeight" Value="0" />
         <Setter Property="Background" Value="Transparent" />
@@ -279,7 +284,10 @@
                     <Grid Background="{TemplateBinding Background}">
                         <Track x:Name="PART_Track" IsDirectionReversed="True">
                             <Track.DecreaseRepeatButton>
-                                <RepeatButton IsEnabled="False" Opacity="0" />
+                                <RepeatButton x:Name="DecreaseTrackButton"
+                                              Command="{x:Static ScrollBar.PageUpCommand}"
+                                              Focusable="False"
+                                              Opacity="0" />
                             </Track.DecreaseRepeatButton>
                             <Track.Thumb>
                                 <Thumb>
@@ -287,13 +295,13 @@
                                         <ControlTemplate TargetType="Thumb">
                                             <Border x:Name="ThumbRoot"
                                                     Width="5"
-                                                    Margin="1"
+                                                    Margin="3"
                                                     CornerRadius="3"
                                                     Background="{DynamicResource Brush.SubtleBorder}" />
                                             <ControlTemplate.Triggers>
                                                 <DataTrigger Binding="{Binding Orientation, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="Horizontal">
                                                     <Setter TargetName="ThumbRoot" Property="Width" Value="Auto" />
-                                                    <Setter TargetName="ThumbRoot" Property="Height" Value="3" />
+                                                    <Setter TargetName="ThumbRoot" Property="Height" Value="5" />
                                                 </DataTrigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -301,7 +309,10 @@
                                 </Thumb>
                             </Track.Thumb>
                             <Track.IncreaseRepeatButton>
-                                <RepeatButton IsEnabled="False" Opacity="0" />
+                                <RepeatButton x:Name="IncreaseTrackButton"
+                                              Command="{x:Static ScrollBar.PageDownCommand}"
+                                              Focusable="False"
+                                              Opacity="0" />
                             </Track.IncreaseRepeatButton>
                         </Track>
                     </Grid>
@@ -309,8 +320,10 @@
                         <Trigger Property="Orientation" Value="Horizontal">
                             <Setter Property="Width" Value="Auto" />
                             <Setter Property="MinWidth" Value="0" />
-                            <Setter Property="Height" Value="6" />
-                            <Setter Property="MinHeight" Value="6" />
+                            <Setter Property="Height" Value="12" />
+                            <Setter Property="MinHeight" Value="12" />
+                            <Setter TargetName="DecreaseTrackButton" Property="Command" Value="{x:Static ScrollBar.PageLeftCommand}" />
+                            <Setter TargetName="IncreaseTrackButton" Property="Command" Value="{x:Static ScrollBar.PageRightCommand}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -517,7 +530,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Separator">
-                    <Border Height="1" Margin="4,2" Background="{DynamicResource Brush.SubtleBorder}" />
+                    <Border Height="1" Margin="4,2" Background="{DynamicResource Brush.BorderSubtle}" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

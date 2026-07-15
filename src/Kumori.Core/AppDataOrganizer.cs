@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+
 namespace Kumori.Core;
 
 public static class AppDataOrganizer
@@ -229,67 +232,452 @@ public static class AppDataOrganizer
     private static void MoveTrackingDatabaseSet(string root, string databaseName)
     {
         var trackingDir = Path.Combine(root, "data", "tracking");
-        var source = Path.Combine(root, databaseName);
-        if (!File.Exists(source))
-        {
-            return;
-        }
-
         Directory.CreateDirectory(trackingDir);
-        var destination = Path.Combine(trackingDir, databaseName);
-        if (!File.Exists(destination))
+        RecoverOwnedDatabaseMigrations(root, trackingDir, databaseName);
+
+        var sourceMain = Path.Combine(root, databaseName);
+        if (!File.Exists(sourceMain))
         {
-            MoveDatabaseSidecars(root, trackingDir, databaseName);
             return;
         }
 
-        var sourceLength = SafeLength(source);
-        var destinationLength = SafeLength(destination);
-        if (sourceLength > destinationLength)
+        var canonicalMain = Path.Combine(trackingDir, databaseName);
+        var targetMain = File.Exists(canonicalMain)
+            ? UniqueDatabasePath(
+                trackingDir,
+                $"{Path.GetFileNameWithoutExtension(databaseName)}.legacy-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}",
+                Path.GetExtension(databaseName))
+            : canonicalMain;
+
+        if (!File.Exists(canonicalMain)
+            && DatabaseSuffixes.Skip(1).Any(suffix => File.Exists(canonicalMain + suffix)))
         {
-            MoveExistingDatabaseAside(trackingDir, databaseName);
-            MoveDatabaseSidecars(root, trackingDir, databaseName);
-            return;
+            throw new IOException(
+                $"Cannot migrate '{databaseName}' because incomplete destination sidecars already exist.");
         }
 
-        MoveDatabaseSidecars(root, trackingDir, databaseName, legacy: true);
+        CopyDatabaseSetAtomically(root, databaseName, targetMain);
     }
 
-    private static void MoveDatabaseSidecars(string sourceDir, string destinationDir, string databaseName, bool legacy = false)
+    private static void CopyDatabaseSetAtomically(
+        string sourceDirectory,
+        string databaseName,
+        string targetMain)
     {
-        foreach (var suffix in new[] { "", "-wal", "-shm" })
+        var sources = DatabaseSuffixes
+            .Select(suffix => (Suffix: suffix, Path: Path.Combine(sourceDirectory, databaseName + suffix)))
+            .Where(item => File.Exists(item.Path))
+            .ToArray();
+        if (sources.Length == 0 || !sources.Any(item => item.Suffix.Length == 0))
         {
-            var source = Path.Combine(sourceDir, databaseName + suffix);
-            if (!File.Exists(source))
+            throw new IOException($"Tracking database '{databaseName}' has no main database file.");
+        }
+
+        var targetDirectory = Path.GetDirectoryName(targetMain)!;
+        Directory.CreateDirectory(targetDirectory);
+        var targetPaths = sources.ToDictionary(
+            item => item.Suffix,
+            item => targetMain + item.Suffix,
+            StringComparer.Ordinal);
+        if (targetPaths.Values.Any(File.Exists))
+        {
+            throw new IOException($"Tracking database destination '{targetMain}' already exists.");
+        }
+
+        var migrationId = Guid.NewGuid().ToString("N");
+        var temporaryPaths = targetPaths.ToDictionary(
+            item => item.Key,
+            item => $"{item.Value}.migrating-{migrationId}",
+            StringComparer.Ordinal);
+        var journalPath = $"{targetMain}.migration-{migrationId}.json";
+        var sourceStreams = new List<FileStream>(sources.Length);
+        var promoted = new List<string>(sources.Length);
+        DatabaseMigrationJournal? journal = null;
+        try
+        {
+            // Holding every member with FileShare.None prevents a companion
+            // process from changing the main database or WAL mid-copy.
+            foreach (var source in sources)
+            {
+                sourceStreams.Add(new FileStream(
+                    source.Path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None,
+                    bufferSize: 64 * 1024,
+                    FileOptions.SequentialScan));
+            }
+
+            for (var index = 0; index < sources.Length; index++)
+            {
+                var source = sources[index];
+                using var destination = new FileStream(
+                    temporaryPaths[source.Suffix],
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 64 * 1024,
+                    FileOptions.WriteThrough);
+                sourceStreams[index].CopyTo(destination);
+                destination.Flush(flushToDisk: true);
+                if (destination.Length != sourceStreams[index].Length)
+                {
+                    throw new IOException($"Tracking database copy verification failed for '{source.Path}'.");
+                }
+            }
+
+            journal = new DatabaseMigrationJournal(
+                Version: DatabaseMigrationJournalVersion,
+                DatabaseName: databaseName,
+                TargetFileName: Path.GetFileName(targetMain),
+                MigrationId: migrationId,
+                Members: sources.Select(source =>
+                {
+                    var temporary = temporaryPaths[source.Suffix];
+                    return new DatabaseMigrationMember(
+                        source.Suffix,
+                        new FileInfo(temporary).Length,
+                        ComputeSha256(temporary));
+                }).ToArray());
+            WriteMigrationJournal(journalPath, journal);
+
+            // Publish sidecars first and the main file last. Until the final
+            // rename succeeds, consumers cannot observe a partial database set.
+            foreach (var suffix in DatabaseSuffixes.Skip(1).Append(string.Empty))
+            {
+                if (!temporaryPaths.TryGetValue(suffix, out var temporary))
+                {
+                    continue;
+                }
+                var target = targetPaths[suffix];
+                File.Move(temporary, target);
+                promoted.Add(target);
+            }
+        }
+        catch
+        {
+            RollBackOwnedMigration(journalPath, journal, temporaryPaths, targetPaths, promoted);
+            throw;
+        }
+        finally
+        {
+            foreach (var stream in sourceStreams)
+            {
+                stream.Dispose();
+            }
+        }
+
+        // The complete destination is durable before any source member is
+        // removed. Delete the main file last so an interrupted cleanup leaves
+        // either a usable source set or an already-usable destination set.
+        foreach (var source in sources
+                     .OrderBy(item => item.Suffix.Length == 0 ? 1 : 0))
+        {
+            File.Delete(source.Path);
+        }
+        File.Delete(journalPath);
+    }
+
+    private static void RecoverOwnedDatabaseMigrations(
+        string sourceDirectory,
+        string trackingDirectory,
+        string databaseName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(databaseName);
+        var extension = Path.GetExtension(databaseName);
+        var journalPaths = Directory.EnumerateFiles(
+                trackingDirectory,
+                $"{databaseName}.migration-*.json",
+                SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(
+                trackingDirectory,
+                $"{stem}.legacy-*{extension}.migration-*.json",
+                SearchOption.TopDirectoryOnly))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        foreach (var journalPath in journalPaths)
+        {
+            DatabaseMigrationJournal journal;
+            try
+            {
+                if (new FileInfo(journalPath).Length > MaxDatabaseMigrationJournalBytes)
+                {
+                    throw new IOException(
+                        $"Migration journal '{journalPath}' is oversized and was preserved for safety.");
+                }
+                using var journalStream = new FileStream(
+                    journalPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    bufferSize: 16 * 1024,
+                    FileOptions.SequentialScan);
+                journal = JsonSerializer.Deserialize<DatabaseMigrationJournal>(
+                    journalStream)
+                    ?? throw new IOException($"Migration journal '{journalPath}' is empty.");
+            }
+            catch (Exception ex) when (ex is JsonException or NotSupportedException)
+            {
+                throw new IOException(
+                    $"Migration journal '{journalPath}' is invalid and was preserved for safety.",
+                    ex);
+            }
+
+            if (!string.Equals(journal.DatabaseName, databaseName, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            var destinationName = legacy
-                ? $"{Path.GetFileNameWithoutExtension(databaseName)}.legacy-{DateTimeOffset.Now:yyyyMMddHHmmss}{Path.GetExtension(databaseName)}{suffix}"
-                : databaseName + suffix;
-            MoveIfMissing(source, Path.Combine(destinationDir, destinationName));
+            ValidateMigrationJournal(trackingDirectory, journalPath, journal);
+            RecoverOwnedDatabaseMigration(sourceDirectory, trackingDirectory, journalPath, journal);
         }
     }
 
-    private static void MoveExistingDatabaseAside(string trackingDir, string databaseName)
+    private static void RecoverOwnedDatabaseMigration(
+        string sourceDirectory,
+        string trackingDirectory,
+        string journalPath,
+        DatabaseMigrationJournal journal)
     {
-        foreach (var suffix in new[] { "", "-wal", "-shm" })
+        var targetMain = Path.Combine(trackingDirectory, journal.TargetFileName);
+        var members = journal.Members.ToDictionary(member => member.Suffix, StringComparer.Ordinal);
+        var targetMainPublished = File.Exists(targetMain);
+
+        // Validate every path before deleting anything. A name match is not proof
+        // of ownership: only bytes recorded in our durable journal may be removed.
+        foreach (var suffix in DatabaseSuffixes)
         {
-            var path = Path.Combine(trackingDir, databaseName + suffix);
+            var target = targetMain + suffix;
+            var temporary = $"{target}.migrating-{journal.MigrationId}";
+            if (File.Exists(target))
+            {
+                if (!members.TryGetValue(suffix, out var member) || !FileMatches(target, member))
+                {
+                    throw new IOException(
+                        $"Migration destination conflict '{target}' was preserved for safety.");
+                }
+            }
+            if (File.Exists(temporary)
+                && (!members.TryGetValue(suffix, out var temporaryMember)
+                    || !FileMatches(temporary, temporaryMember)))
+            {
+                throw new IOException(
+                    $"Migration temporary-file conflict '{temporary}' was preserved for safety.");
+            }
+        }
+
+        if (targetMainPublished)
+        {
+            foreach (var member in journal.Members)
+            {
+                var target = targetMain + member.Suffix;
+                if (!File.Exists(target) || !FileMatches(target, member))
+                {
+                    throw new IOException(
+                        $"Published migration destination '{target}' is incomplete or changed.");
+                }
+            }
+
+            foreach (var member in journal.Members)
+            {
+                DeleteRequired($"{targetMain}{member.Suffix}.migrating-{journal.MigrationId}");
+            }
+
+            // Source cleanup may itself have been interrupted. Delete the
+            // remaining subset only when every remaining byte still matches the
+            // journal. A changed source is left for normal legacy archiving.
+            var remainingSources = DatabaseSuffixes
+                .Select(suffix => (Suffix: suffix, Path: Path.Combine(sourceDirectory, journal.DatabaseName + suffix)))
+                .Where(item => File.Exists(item.Path))
+                .ToArray();
+            var sourceStillOwned = remainingSources.All(source =>
+                members.TryGetValue(source.Suffix, out var member)
+                && FileMatches(source.Path, member));
+            if (sourceStillOwned)
+            {
+                foreach (var source in remainingSources.OrderBy(item => item.Suffix.Length == 0 ? 1 : 0))
+                {
+                    DeleteRequired(source.Path);
+                }
+            }
+
+            DeleteRequired(journalPath);
+            return;
+        }
+
+        // Main is the publication marker. Without it, any matching promoted
+        // sidecars are an interrupted copy and can be removed before retrying.
+        foreach (var member in journal.Members.OrderByDescending(member => member.Suffix.Length))
+        {
+            DeleteRequired(targetMain + member.Suffix);
+            DeleteRequired($"{targetMain}{member.Suffix}.migrating-{journal.MigrationId}");
+        }
+        DeleteRequired(journalPath);
+    }
+
+    private static void ValidateMigrationJournal(
+        string trackingDirectory,
+        string journalPath,
+        DatabaseMigrationJournal journal)
+    {
+        if (journal.Version != DatabaseMigrationJournalVersion
+            || string.IsNullOrWhiteSpace(journal.DatabaseName)
+            || string.IsNullOrWhiteSpace(journal.TargetFileName)
+            || !string.Equals(Path.GetFileName(journal.TargetFileName), journal.TargetFileName, StringComparison.Ordinal)
+            || journal.MigrationId is null
+            || journal.MigrationId.Length != 32
+            || journal.MigrationId.Any(character => !Uri.IsHexDigit(character))
+            || journal.Members is null
+            || journal.Members.Count == 0
+            || journal.Members.Any(member =>
+                member is null
+                || member.Suffix is null
+                || member.Sha256 is null
+                || !DatabaseSuffixes.Contains(member.Suffix, StringComparer.Ordinal)
+                || member.Length < 0
+                || member.Sha256.Length != 64
+                || member.Sha256.Any(character => !Uri.IsHexDigit(character)))
+            || !journal.Members.Any(member => member.Suffix.Length == 0)
+            || journal.Members.Select(member => member.Suffix).Distinct(StringComparer.Ordinal).Count() != journal.Members.Count
+            )
+        {
+            throw new IOException(
+                $"Migration journal '{journalPath}' is invalid and was preserved for safety.");
+        }
+
+        var expectedJournalPath = Path.GetFullPath(
+            Path.Combine(trackingDirectory, journal.TargetFileName)
+            + $".migration-{journal.MigrationId}.json");
+        if (!string.Equals(
+                Path.GetFullPath(journalPath),
+                expectedJournalPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException(
+                $"Migration journal '{journalPath}' does not own its claimed destination.");
+        }
+    }
+
+    private static void RollBackOwnedMigration(
+        string journalPath,
+        DatabaseMigrationJournal? journal,
+        IReadOnlyDictionary<string, string> temporaryPaths,
+        IReadOnlyDictionary<string, string> targetPaths,
+        IReadOnlyCollection<string> promoted)
+    {
+        if (journal is null)
+        {
+            foreach (var temporary in temporaryPaths.Values)
+            {
+                try { File.Delete(temporary); } catch { }
+            }
+            return;
+        }
+
+        var members = journal.Members.ToDictionary(member => member.Suffix, StringComparer.Ordinal);
+        var safeToRemoveJournal = true;
+        foreach (var (suffix, path) in temporaryPaths.Concat(
+                     targetPaths.Where(item => promoted.Contains(item.Value))))
+        {
             if (!File.Exists(path))
             {
                 continue;
             }
+            if (!members.TryGetValue(suffix, out var member) || !FileMatches(path, member))
+            {
+                safeToRemoveJournal = false;
+                continue;
+            }
+            try { File.Delete(path); } catch { safeToRemoveJournal = false; }
+        }
 
-            MoveToUniqueName(path, Path.Combine(trackingDir, $"{Path.GetFileNameWithoutExtension(databaseName)}.pre-migration{Path.GetExtension(databaseName)}{suffix}"));
+        if (safeToRemoveJournal)
+        {
+            try { File.Delete(journalPath); } catch { }
         }
     }
 
-    private static long SafeLength(string path)
+    private static void WriteMigrationJournal(
+        string journalPath,
+        DatabaseMigrationJournal journal)
     {
-        try { return new FileInfo(path).Length; } catch { return 0; }
+        using var stream = new FileStream(
+            journalPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 16 * 1024,
+            FileOptions.WriteThrough);
+        JsonSerializer.Serialize(stream, journal);
+        stream.Flush(flushToDisk: true);
     }
+
+    private static bool FileMatches(string path, DatabaseMigrationMember member)
+    {
+        try
+        {
+            return new FileInfo(path).Length == member.Length
+                && string.Equals(ComputeSha256(path), member.Sha256, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string ComputeSha256(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.SequentialScan);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    private static void DeleteRequired(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+
+    private const int DatabaseMigrationJournalVersion = 1;
+    private const int MaxDatabaseMigrationJournalBytes = 64 * 1024;
+
+    private sealed record DatabaseMigrationJournal(
+        int Version,
+        string DatabaseName,
+        string TargetFileName,
+        string MigrationId,
+        IReadOnlyList<DatabaseMigrationMember> Members);
+
+    private sealed record DatabaseMigrationMember(
+        string Suffix,
+        long Length,
+        string Sha256);
+
+    private static string UniqueDatabasePath(string directory, string stem, string extension)
+    {
+        for (var index = 0; ; index++)
+        {
+            var suffix = index == 0 ? string.Empty : $"-{index}";
+            var candidate = Path.Combine(directory, $"{stem}{suffix}{extension}");
+            if (DatabaseSuffixes.All(sidecar => !File.Exists(candidate + sidecar)))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private static readonly string[] DatabaseSuffixes = ["", "-wal", "-shm"];
 
     private static void DeleteRootMatches(string root, string pattern)
     {

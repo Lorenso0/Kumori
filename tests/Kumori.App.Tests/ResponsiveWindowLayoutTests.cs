@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
@@ -18,6 +19,11 @@ namespace Kumori.App.Tests;
 
 public sealed class ResponsiveWindowLayoutTests
 {
+    // WPF rounds window and text geometry to physical pixels. Depending on the
+    // active monitor DPI, the corresponding DIP values can differ by slightly
+    // more than one unit without any visual displacement or clipping.
+    private const double LayoutTolerance = 2;
+
     [Fact]
     public void MainWindowMeasuresAcrossSupportedSizeMatrix()
     {
@@ -53,6 +59,61 @@ public sealed class ResponsiveWindowLayoutTests
                         AverageAccuracy = 96.25,
                         BestPp = 180.5,
                     }));
+                    var stressMap = new MapCardViewModel("layout-map", new[]
+                    {
+                        new AttemptSummary
+                        {
+                            Id = 2,
+                            Artist = "A deliberately long beatmap artist name",
+                            Title = "A deliberately long beatmap title used to exercise the compact maps layout",
+                            Difficulty = "Extraordinarily Long Difficulty Name",
+                            Mapper = "Layout tester",
+                            StartedAt = DateTimeOffset.Now.AddHours(-4).ToString("O"),
+                            Outcome = "completed",
+                            Accuracy = 98.75,
+                            Combo = 1_234,
+                            BeatmapMaxCombo = 2_000,
+                            Pp = 321.5,
+                        },
+                        new AttemptSummary
+                        {
+                            Id = 1,
+                            Artist = "A deliberately long beatmap artist name",
+                            Title = "A deliberately long beatmap title used to exercise the compact maps layout",
+                            Difficulty = "Extraordinarily Long Difficulty Name",
+                            Mapper = "Layout tester",
+                            StartedAt = DateTimeOffset.Now.AddDays(-1).ToString("O"),
+                            Outcome = "failed",
+                            Accuracy = 84.25,
+                            Combo = 456,
+                            BeatmapMaxCombo = 2_000,
+                            Pp = 120,
+                        },
+                    });
+                    vm.MapCards.Add(stressMap);
+                    foreach (var index in Enumerable.Range(1, 200))
+                    {
+                        vm.MapCards.Add(new MapCardViewModel($"layout-map-{index}", new[]
+                        {
+                            new AttemptSummary
+                            {
+                                Id = index + 2,
+                                Artist = $"Layout artist {index}",
+                                Title = $"Compact map row {index}",
+                                Difficulty = index % 2 == 0 ? "Insane" : "Expert",
+                                Mapper = "Layout tester",
+                                StartedAt = DateTimeOffset.Now.AddDays(-index).ToString("O"),
+                                Outcome = index % 3 == 0 ? "failed" : "completed",
+                                Accuracy = 99 - index,
+                                Combo = 1_000 - index * 50,
+                                BeatmapMaxCombo = 1_200,
+                                Pp = 300 - index * 12,
+                            },
+                        }));
+                    }
+                    Assert.Equal(101, vm.MapRows.Count);
+                    Assert.Equal(2, vm.MapRows[0].Cards.Count);
+                    Assert.Single(vm.MapRows[^1].Cards);
                     var stressAttempt = new AttemptRowViewModel(new AttemptSummary
                     {
                         Id = 1,
@@ -98,11 +159,16 @@ public sealed class ResponsiveWindowLayoutTests
                         ModsKey = "NM",
                     });
                     vm.Rows.Add(noModAttempt);
-                    vm.Inspector.Details = new AttemptDetails
+                    var stressDetails = new AttemptDetails
                     {
                         Summary = stressAttempt.Model,
                         Mods = stressAttempt.ModEntries,
                     };
+                    var noModDetails = new AttemptDetails
+                    {
+                        Summary = noModAttempt.Model,
+                    };
+                    vm.Inspector.Details = stressDetails;
                     var window = new MainWindow(vm, settings);
                     window.ShowInTaskbar = false;
                     window.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -112,7 +178,8 @@ public sealed class ResponsiveWindowLayoutTests
 
                     (double Width, double Height)[] sizes =
                     [
-                        (720, 480), (800, 600), (900, 600), (1280, 720),
+                        (720, 480), (800, 600), (900, 600), (1023, 650), (1024, 680),
+                        (1100, 720), (1280, 720), (1386, 947),
                         (1920, 1080), (2560, 1440), (3840, 2160),
                     ];
                     foreach (var size in sizes)
@@ -128,10 +195,10 @@ public sealed class ResponsiveWindowLayoutTests
                         // actually realize (which may extend behind the taskbar).
                         var attainableWidth = Math.Min(size.Width, SystemParameters.MaximumWindowTrackWidth);
                         var attainableHeight = Math.Min(size.Height, SystemParameters.MaximumWindowTrackHeight);
-                        Assert.InRange(root.ActualWidth, attainableWidth - 32, attainableWidth);
-                        Assert.InRange(root.ActualHeight, attainableHeight - 64, attainableHeight);
-                        Assert.True(root.DesiredSize.Width <= root.ActualWidth + 0.5);
-                        Assert.True(root.DesiredSize.Height <= root.ActualHeight + 0.5);
+                        Assert.InRange(root.ActualWidth, attainableWidth - 32, attainableWidth + LayoutTolerance);
+                        Assert.InRange(root.ActualHeight, attainableHeight - 64, attainableHeight + LayoutTolerance);
+                        Assert.True(root.DesiredSize.Width <= root.ActualWidth + LayoutTolerance);
+                        Assert.True(root.DesiredSize.Height <= root.ActualHeight + LayoutTolerance);
 
                         var metrics = Assert.IsType<UniformGrid>(window.FindName("MetricsGrid"));
                         foreach (var text in Descendants<TextBlock>(metrics).Where(text => text.IsVisible))
@@ -140,7 +207,7 @@ public sealed class ResponsiveWindowLayoutTests
                                 .First(border => ReferenceEquals(VisualTreeHelper.GetParent(border), metrics));
                             var bounds = text.TransformToAncestor(cell)
                                 .TransformBounds(new Rect(new Point(), text.RenderSize));
-                            Assert.True(bounds.Top >= -0.5 && bounds.Bottom <= cell.ActualHeight + 0.5,
+                            Assert.True(bounds.Top >= -LayoutTolerance && bounds.Bottom <= cell.ActualHeight + LayoutTolerance,
                                 $"Metric text '{text.Text}' is vertically clipped at {size.Width}x{size.Height}: bounds {bounds}, cell height {cell.ActualHeight}.");
                         }
 
@@ -152,6 +219,22 @@ public sealed class ResponsiveWindowLayoutTests
                         Assert.Equal(Visibility.Collapsed, dashboardLabel.Visibility);
                         Assert.InRange(navigation.ActualWidth, 56, 60);
                         Assert.All(navigationButtons.Where(button => button.Visibility == Visibility.Visible), button => Assert.True(button.ActualWidth >= 36));
+                        var changelogButton = Assert.IsType<Button>(navigation.FindName("ChangelogButton"));
+                        var discordButton = Assert.IsType<Button>(navigation.FindName("DiscordButton"));
+                        Assert.Equal(Visibility.Visible, changelogButton.Visibility);
+                        Assert.Equal(Visibility.Visible, discordButton.Visibility);
+                        Assert.True(changelogButton.ActualHeight >= 44);
+                        Assert.True(discordButton.ActualHeight >= 44);
+                        Assert.Equal("Changelog", AutomationProperties.GetName(changelogButton));
+                        Assert.Equal("Join the Kumori Discord", AutomationProperties.GetName(discordButton));
+                        Assert.Equal("Opens an external website", AutomationProperties.GetHelpText(discordButton));
+                        Assert.All(navigationButtons.Where(button => button.IsVisible), button =>
+                        {
+                            var bounds = button.TransformToAncestor(navigation)
+                                .TransformBounds(new Rect(new Point(), button.RenderSize));
+                            Assert.True(bounds.Top >= -LayoutTolerance && bounds.Bottom <= navigation.ActualHeight + LayoutTolerance,
+                                $"Navigation action '{AutomationProperties.GetName(button)}' is clipped at {size.Width}x{size.Height}: bounds {bounds}, rail height {navigation.ActualHeight}.");
+                        });
 
                         foreach (var pageName in new[] { "Performance", "Maps" })
                         {
@@ -160,8 +243,42 @@ public sealed class ResponsiveWindowLayoutTests
                             window.UpdateLayout();
                             var page = Assert.IsType<Grid>(window.FindName($"{pageName}Page"));
                             Assert.Equal(Visibility.Visible, page.Visibility);
-                            Assert.True(page.DesiredSize.Width <= page.ActualWidth + 0.5);
-                            Assert.True(page.DesiredSize.Height <= page.ActualHeight + 0.5);
+                            var allowedWidth = page.ActualWidth + LayoutTolerance;
+                            if (pageName == "Maps")
+                            {
+                                // A populated virtualized list contributes the page's own horizontal
+                                // margin to DesiredSize even though its rendered viewport stays bounded.
+                                allowedWidth += page.Margin.Left + page.Margin.Right;
+                            }
+                            Assert.True(page.DesiredSize.Width <= allowedWidth,
+                                $"{pageName} page overflows at {size.Width}x{size.Height}: desired {page.DesiredSize}, actual {page.RenderSize}.");
+                            if (pageName == "Maps")
+                            {
+                                var mapsList = Descendants<ListBox>(page).Single();
+                                Assert.True(mapsList.ActualHeight <= page.ActualHeight + LayoutTolerance);
+                                Assert.True(VirtualizingPanel.GetIsVirtualizing(mapsList));
+                                Assert.Equal(VirtualizationMode.Recycling, VirtualizingPanel.GetVirtualizationMode(mapsList));
+                                Assert.True(ScrollViewer.GetCanContentScroll(mapsList));
+                                var realizedMapCards = Descendants<Button>(mapsList)
+                                    .Count(button => button.DataContext is MapCardViewModel);
+                                Assert.InRange(realizedMapCards, 1, vm.MapCards.Count - 1);
+                            }
+                            else
+                            {
+                                Assert.True(page.DesiredSize.Height <= page.ActualHeight + LayoutTolerance);
+                            }
+                            if (pageName == "Maps")
+                            {
+                                var mapRow = Descendants<Button>(page)
+                                    .Single(button => ReferenceEquals(button.DataContext, stressMap));
+                                Assert.InRange(mapRow.ActualHeight, 158, 162);
+                                Assert.True(mapRow.DesiredSize.Width <= page.ActualWidth + LayoutTolerance);
+                                var mapsPanels = Descendants<UniformGrid>(page)
+                                    .Where(grid => grid.Columns == 2)
+                                    .ToArray();
+                                Assert.NotEmpty(mapsPanels);
+                                Assert.All(mapsPanels, panel => Assert.Equal(2, panel.Columns));
+                            }
                         }
                         var settingsButton = Assert.IsType<Button>(navigation.FindName("SettingsButton"));
                         settingsButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -197,14 +314,25 @@ public sealed class ResponsiveWindowLayoutTests
                                            || text.Text == stressAttempt.WhenRelative)
                             .Distinct()
                             .ToArray();
-                        Assert.Equal(vm.IsWideHistoryLayout ? 8 : 7, importantCardText.Length);
+                        Assert.Equal(7, importantCardText.Length);
+                        var visibleOutcome = Assert.Single(importantCardText
+                            .Where(text => text.Text == stressAttempt.OutcomeWithProgress));
+                        if (vm.IsWideHistoryLayout)
+                        {
+                            var stressRow = Ancestors<ListBoxItem>(visibleOutcome).First();
+                            var expandedStats = Descendants<UniformGrid>(stressRow)
+                                .Single(grid => grid.IsVisible && grid.Columns == 3);
+                            Assert.DoesNotContain(
+                                Descendants<TextBlock>(expandedStats),
+                                text => text.Text == stressAttempt.OutcomeWithProgress);
+                        }
                         Assert.All(importantCardText, text =>
                         {
                             var desiredTextWidth = Math.Max(0, text.DesiredSize.Width - text.Margin.Left - text.Margin.Right);
                             var desiredTextHeight = Math.Max(0, text.DesiredSize.Height - text.Margin.Top - text.Margin.Bottom);
-                            Assert.True(desiredTextWidth <= text.ActualWidth + 0.5,
+                            Assert.True(desiredTextWidth <= text.ActualWidth + LayoutTolerance,
                                 $"'{text.Text}' is horizontally clipped at {size.Width}x{size.Height}: desired text {desiredTextWidth}, actual {text.ActualWidth}.");
-                            Assert.True(desiredTextHeight <= text.ActualHeight + 0.5,
+                            Assert.True(desiredTextHeight <= text.ActualHeight + LayoutTolerance,
                                 $"'{text.Text}' is vertically clipped at {size.Width}x{size.Height}: desired text {desiredTextHeight}, actual {text.ActualHeight}.");
                         });
 
@@ -249,8 +377,53 @@ public sealed class ResponsiveWindowLayoutTests
 
                         var moddedTitle = importantCardText.Single(text => text.Text == stressAttempt.Title);
                         var moddedRow = Ancestors<ListBoxItem>(moddedTitle).First();
+                        Assert.True(moddedRow.ActualWidth <= history.ActualWidth + LayoutTolerance,
+                            $"A history row overflows its viewport at {size.Width}x{size.Height}: row {moddedRow.ActualWidth}, list {history.ActualWidth}.");
                         var moddedTitleTop = moddedTitle.TransformToAncestor(moddedRow).Transform(new Point()).Y;
-                        Assert.InRange(Math.Abs(noModTitleTop - moddedTitleTop), 0, 0.5);
+                        var titleOffset = Math.Abs(noModTitleTop - moddedTitleTop);
+                        Assert.True(titleOffset <= LayoutTolerance,
+                            $"No-mod and modded titles differ vertically by {titleOffset:0.###} DIP at {size.Width}x{size.Height}.");
+
+                        var selectedPlayMods = Assert.IsType<ItemsControl>(window.FindName("SelectedPlayMods"));
+                        var noModsText = Assert.IsType<TextBlock>(window.FindName("NoModsText"));
+                        Assert.Equal(Visibility.Visible, selectedPlayMods.Visibility);
+                        Assert.Equal(Visibility.Collapsed, noModsText.Visibility);
+
+                        vm.Inspector.Details = noModDetails;
+                        window.UpdateLayout();
+                        Assert.Equal(Visibility.Collapsed, selectedPlayMods.Visibility);
+                        Assert.Equal(Visibility.Visible, noModsText.Visibility);
+                        Assert.Equal("No active modifications", AutomationProperties.GetName(noModsText));
+                        if (size.Width > ResponsiveLayoutResolver.CompactMaximumWidth)
+                        {
+                            Assert.True(noModsText.IsVisible);
+                            var desiredNoModsWidth = Math.Max(
+                                0,
+                                noModsText.DesiredSize.Width - noModsText.Margin.Left - noModsText.Margin.Right);
+                            var desiredNoModsHeight = Math.Max(
+                                0,
+                                noModsText.DesiredSize.Height - noModsText.Margin.Top - noModsText.Margin.Bottom);
+                            Assert.True(desiredNoModsWidth <= noModsText.ActualWidth + LayoutTolerance);
+                            Assert.True(desiredNoModsHeight <= noModsText.ActualHeight + LayoutTolerance);
+                        }
+
+                        if (Environment.GetEnvironmentVariable("KUMORI_UI_AUDIT_SNAPSHOT_DIR") is { Length: > 0 } auditSnapshotDirectory
+                            && size.Width is 720 or 1023 or 1024 or 1386)
+                        {
+                            Directory.CreateDirectory(auditSnapshotDirectory);
+                            Descendants<ScrollViewer>(history).First().ScrollToTop();
+                            window.UpdateLayout();
+                            var state = size.Width <= ResponsiveLayoutResolver.CompactMaximumWidth
+                                ? "sidebar"
+                                : "no-mod";
+                            SaveSnapshot(
+                                root,
+                                Path.Combine(auditSnapshotDirectory, $"{state}-{size.Width:0}x{size.Height:0}.png"),
+                                1);
+                        }
+
+                        vm.Inspector.Details = stressDetails;
+                        window.UpdateLayout();
 
                         if (size.Width == 720
                             && Environment.GetEnvironmentVariable("KUMORI_UI_SCALE_SNAPSHOT_DIR") is { Length: > 0 } scaleSnapshotDirectory)

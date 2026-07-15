@@ -9,7 +9,8 @@
 
     <Style x:Key="HistoryListBoxItem" TargetType="ListBoxItem">
         <Setter Property="Padding" Value="0" />
-        <Setter Property="Margin" Value="0,0,6,4" />
+        <Setter Property="Margin" Value="0,0,0,4" />
+        <Setter Property="MaxWidth" Value="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="MinHeight" Value="62" />
         <Setter Property="Template">
@@ -21,7 +22,8 @@
                             BorderThickness="1"
                             CornerRadius="{DynamicResource Radius.ThemeCard}"
                             SnapsToDevicePixels="True">
-                        <ContentPresenter />
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -45,11 +47,12 @@
                 <Setter Property="Focusable" Value="False" />
                 <Setter Property="Height" Value="44" />
                 <Setter Property="MinHeight" Value="44" />
-                <Setter Property="Margin" Value="0,0,6,4" />
+                <Setter Property="Margin" Value="0,0,0,4" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListBoxItem">
-                            <ContentPresenter />
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
@@ -58,11 +61,12 @@
                 <Setter Property="Focusable" Value="False" />
                 <Setter Property="Height" Value="34" />
                 <Setter Property="MinHeight" Value="34" />
-                <Setter Property="Margin" Value="0,0,6,4" />
+                <Setter Property="Margin" Value="0,0,0,4" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListBoxItem">
-                            <ContentPresenter />
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>

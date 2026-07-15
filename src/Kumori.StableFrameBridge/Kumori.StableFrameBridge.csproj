@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <PlatformTarget>x86</PlatformTarget>
     <SelfContained>true</SelfContained>
@@ -17,5 +17,6 @@
     <Compile Include="..\Kumori.Native\StableLiveReplayFrameSource.cs" Link="StableClrReplayReader.cs" />
     <Compile Include="..\Kumori.Native\StableRawReplayReader.cs" Link="StableRawReplayReader.cs" />
     <Compile Include="..\Kumori.Native\StableReplayFrameEmissionCursor.cs" Link="StableReplayFrameEmissionCursor.cs" />
+    <Compile Include="..\Kumori.Native\ProcessMemoryPointerSearch.cs" Link="ProcessMemoryPointerSearch.cs" />
   </ItemGroup>
 </Project>
