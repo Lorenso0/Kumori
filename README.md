@@ -48,7 +48,7 @@ When replay capture is enabled, Kumori can open a play in its built-in Replay An
 - Compare compatible attempts on the same map or temporarily load a matching `.osr` replay.
 - Import an osu! skin for use in the replay viewer.
 
-The analyzer explains what the captured information suggests, but it cannot always know the exact reason for a mistake. Results may be less precise when a replay capture is incomplete. Replay capture for osu!lazer is experimental and may need updates when the game changes.
+The analyzer explains what the captured information suggests, but it cannot always know the exact reason for a mistake. Results may be less precise when a replay capture is incomplete. Replay capture for osu! is experimental and may need updates when the game changes.
 
 ## Your data stays yours
 
