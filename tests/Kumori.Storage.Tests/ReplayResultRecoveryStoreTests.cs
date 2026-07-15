@@ -306,6 +306,174 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     }
 
     [Fact]
+    public void ApplySimulation_PartialCaptureOwnsCoreResultWithoutChangingOutcome()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        AttemptFinalization final = Final(score: 0, accuracy: 0, combo: 0, n300: 0, n100: 0);
+        sink.Finalize(final with
+        {
+            Outcome = "quit",
+            Snapshot = final.Snapshot with { Progress = 0.42 },
+        });
+
+        var outcome = new ReplayResultRecoveryStore(factory).ApplySimulation(
+            id,
+            new ReplaySimulationResult
+            {
+                N300 = 73,
+                N100 = 6,
+                N50 = 2,
+                Misses = 3,
+                Accuracy = 90.674603,
+                Score = 123_456,
+                AchievedCombo = 41,
+                SliderBreaks = 1,
+                TimingOffsets = [-8, 3, 11],
+            },
+            simulationOwnsCoreResult: true,
+            tosuResultWasMissing: true);
+
+        Assert.True(outcome.Applied);
+        using var con = factory.Open();
+        using var values = con.CreateCommand();
+        values.CommandText = "SELECT outcome, progress, n300, n100, n50, misses, accuracy, combo, score FROM attempts WHERE id=@id";
+        values.Parameters.AddWithValue("@id", id);
+        using var reader = values.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("quit", reader.GetString(0));
+        Assert.Equal(0.42, reader.GetDouble(1), 4);
+        Assert.Equal(73, reader.GetInt32(2));
+        Assert.Equal(6, reader.GetInt32(3));
+        Assert.Equal(2, reader.GetInt32(4));
+        Assert.Equal(3, reader.GetInt32(5));
+        Assert.Equal(90.674603, reader.GetDouble(6), 4);
+        Assert.Equal(41, reader.GetInt32(7));
+        Assert.Equal(123_456, reader.GetInt64(8));
+
+        reader.Close();
+        var details = new AttemptDetailsRepository(factory).GetDetails(id);
+        Assert.NotNull(details);
+        Assert.True(details.ResultRecoveredFromReplay);
+        Assert.True(details.ResultRecoverySimulationCompleted);
+        using var personalBests = con.CreateCommand();
+        personalBests.CommandText = "SELECT COUNT(*) FROM personal_bests";
+        Assert.Equal(0L, (long)personalBests.ExecuteScalar()!);
+    }
+
+    [Fact]
+    public void ApplySimulation_MissingTosuResultReplacesPerfectAccuracyPlaceholder()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        AttemptFinalization final = Final(score: 0, accuracy: 100, combo: 0, n300: 0, n100: 0);
+        sink.Finalize(final with
+        {
+            Outcome = "quit",
+            Snapshot = final.Snapshot with { Progress = 0.42 },
+        });
+
+        new ReplayResultRecoveryStore(factory).ApplySimulation(
+            id,
+            new ReplaySimulationResult
+            {
+                N300 = 73,
+                N100 = 6,
+                N50 = 2,
+                Misses = 3,
+                Accuracy = 90.674603,
+            },
+            simulationOwnsCoreResult: true,
+            tosuResultWasMissing: true);
+
+        using var con = factory.Open();
+        using var values = con.CreateCommand();
+        values.CommandText = "SELECT accuracy, n300, n100, n50, misses FROM attempts WHERE id=@id";
+        values.Parameters.AddWithValue("@id", id);
+        using var reader = values.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(90.674603, reader.GetDouble(0), 4);
+        Assert.Equal(73, reader.GetInt32(1));
+        Assert.Equal(6, reader.GetInt32(2));
+        Assert.Equal(2, reader.GetInt32(3));
+        Assert.Equal(3, reader.GetInt32(4));
+    }
+
+    [Fact]
+    public void ApplySimulation_NormalPartialPlayPreservesTosuCoreResult()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        AttemptFinalization final = Final(score: 140_420, accuracy: 94.3389, combo: 98, n300: 82, n100: 4);
+        sink.Finalize(final with
+        {
+            Outcome = "quit",
+            Snapshot = final.Snapshot with { N50 = 0, Misses = 3, Progress = 0.25 },
+        });
+        using (var seed = factory.Open())
+        using (var miss = seed.CreateCommand())
+        {
+            miss.CommandText = """
+                INSERT INTO attempt_events(attempt_id, captured_at, map_time_ms, event_type, value, data_json)
+                VALUES(@id, '2026-07-15T18:40:00Z', 17000, 'miss', 3, '{}')
+                """;
+            miss.Parameters.AddWithValue("@id", id);
+            miss.ExecuteNonQuery();
+        }
+
+        new ReplayResultRecoveryStore(factory).ApplySimulation(id, new ReplaySimulationResult
+        {
+            N300 = 10,
+            N100 = 1,
+            N50 = 0,
+            Misses = 0,
+            Accuracy = 94.3389,
+            AchievedCombo = 98,
+            MaxPp = 250,
+            Judgements =
+            [
+                new ReplaySimulationJudgement { Kind = 2, RootStartTime = 2000, EventTime = 2010 },
+            ],
+        });
+
+        using var con = factory.Open();
+        using var values = con.CreateCommand();
+        values.CommandText = "SELECT n300, n100, n50, misses, score, accuracy, combo FROM attempts WHERE id=@id";
+        values.Parameters.AddWithValue("@id", id);
+        using var reader = values.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(82, reader.GetInt32(0));
+        Assert.Equal(4, reader.GetInt32(1));
+        Assert.Equal(0, reader.GetInt32(2));
+        Assert.Equal(3, reader.GetInt32(3));
+        Assert.Equal(140_420, reader.GetInt64(4));
+        Assert.Equal(94.3389, reader.GetDouble(5), 4);
+        Assert.Equal(98, reader.GetInt32(6));
+        reader.Close();
+        using var events = con.CreateCommand();
+        events.CommandText = "SELECT event_type, value, data_json FROM attempt_events WHERE attempt_id=@id";
+        events.Parameters.AddWithValue("@id", id);
+        using var eventReader = events.ExecuteReader();
+        Assert.True(eventReader.Read());
+        Assert.Equal("miss", eventReader.GetString(0));
+        Assert.Equal(3, eventReader.GetDouble(1));
+        Assert.Equal("{}", eventReader.GetString(2));
+        Assert.False(eventReader.Read());
+        eventReader.Close();
+
+        var details = new AttemptDetailsRepository(factory).GetDetails(id);
+        Assert.NotNull(details);
+        Assert.False(details.ResultRecoveredFromReplay);
+        Assert.True(details.ResultRecoverySimulationCompleted);
+    }
+
+    [Fact]
     public void ApplySimulation_FillsRichJudgementsAndTimingAndMarksProvenance()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);

@@ -33,6 +33,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
     private readonly ReplayResultRecoveryStore resultRecovery;
     private readonly Action<long>? movementReplaced;
     private readonly Action<ReplayResultRecoveryContext>? resultRecovered;
+    private readonly Action<long>? resultTelemetryMissing;
     private readonly bool recoverMovement;
     private readonly CancellationToken cancellationToken;
     private readonly GameplayWorkCoordinator? workCoordinator;
@@ -45,6 +46,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         Func<long?> attemptId,
         Action<long>? movementReplaced = null,
         Action<ReplayResultRecoveryContext>? resultRecovered = null,
+        Action<long>? resultTelemetryMissing = null,
         bool recoverMovement = true,
         CancellationToken cancellationToken = default,
         GameplayWorkCoordinator? workCoordinator = null)
@@ -55,6 +57,7 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         resultRecovery = new ReplayResultRecoveryStore(factory);
         this.movementReplaced = movementReplaced;
         this.resultRecovered = resultRecovered;
+        this.resultTelemetryMissing = resultTelemetryMissing;
         this.recoverMovement = recoverMovement;
         this.cancellationToken = cancellationToken;
         this.workCoordinator = workCoordinator;
@@ -116,6 +119,25 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
         _start = null;
         if (start is null || attemptId is null)
             return;
+        bool tosuResultWasMissing = LazerReplayFrameRecoverySink.HasMissingTosuResult(finalization);
+        if (tosuResultWasMissing)
+            resultTelemetryMissing?.Invoke(attemptId.Value);
+        bool requiresRetainedSimulation = LazerReplayFrameRecoverySink.IsPartialOutcome(finalization.Outcome)
+                                          || string.IsNullOrWhiteSpace(start.Checksum);
+        if (requiresRetainedSimulation)
+        {
+            if (recoverMovement)
+                StableReplayFrameDiagnostics.Update(status =>
+                {
+                    status.State = "existing_capture_preserved";
+                    status.Detail = string.IsNullOrWhiteSpace(start.Checksum)
+                        ? $"Attempt {attemptId} had no replay checksum; retained stable memory frames instead of risking a mismatched replay."
+                        : $"Attempt {attemptId} was partial; retained stable memory frames without matching a later saved score.";
+                    status.ActiveAttemptId = null;
+                });
+            StartRetainedSimulationRecovery(start, attemptId.Value, tosuResultWasMissing);
+            return;
+        }
 
         if (recoverMovement)
             StableReplayFrameDiagnostics.Update(status =>
@@ -137,6 +159,78 @@ internal sealed class StableReplayFrameRecoverySink : IAttemptSink
             finally
             {
                 activeRecoveries.TryRemove(attemptId.Value, out _);
+            }
+        }, CancellationToken.None);
+    }
+
+    private void StartRetainedSimulationRecovery(AttemptStart start, long attemptId, bool tosuResultWasMissing)
+    {
+        if (!activeRecoveries.TryAdd(attemptId, 0))
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                Task<bool> RunPass(int pass, CancellationToken token)
+                {
+                    token.ThrowIfCancellationRequested();
+                    string? beatmapPath = ResolveBeatmapPath(start);
+                    if (string.IsNullOrWhiteSpace(beatmapPath) || !File.Exists(beatmapPath))
+                        return Task.FromResult(true);
+
+                    var metadata = _repository.GetMetadata(attemptId, token);
+                    if (metadata is not { SampleCount: > 0 }
+                        || metadata.Source is not ("stable_memory" or "stable_live"))
+                        return Task.FromResult(pass == SearchPassCount - 1);
+
+                    IReadOnlyList<MovementSample> samples = _repository.GetSamples(attemptId, token);
+                    if (samples.Count == 0)
+                        return Task.FromResult(pass == SearchPassCount - 1);
+
+                    resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+                        attemptId,
+                        ReplayResultRecoveryOutcome.NoChanges,
+                        null,
+                        beatmapPath,
+                        Path.GetDirectoryName(beatmapPath),
+                        null,
+                        samples,
+                        RequiresSimulation: true,
+                        RequiresTosuRestart: false,
+                        SimulationOwnsCoreResult: tosuResultWasMissing,
+                        TosuResultWasMissing: tosuResultWasMissing));
+                    Log.Information(
+                        "Queued retained-frame stable ruleset simulation from {Count} frames for attempt {AttemptId}",
+                        samples.Count,
+                        attemptId);
+                    return Task.FromResult(true);
+                }
+
+                if (workCoordinator is not null)
+                {
+                    await workCoordinator.RunFairRetryLoopAsync(
+                        $"stable-partial-simulation-{attemptId}",
+                        SearchPassCount,
+                        SearchRetryDelay,
+                        RunPass,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await RunLocalRetryLoopAsync(RunPass, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Stable retained-frame simulation recovery failed for attempt {AttemptId}", attemptId);
+            }
+            finally
+            {
+                activeRecoveries.TryRemove(attemptId, out _);
             }
         }, CancellationToken.None);
     }

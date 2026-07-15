@@ -21,11 +21,13 @@ internal sealed class PersistedReplayReconciliationService
     private readonly ReplayResultRecoveryStore resultRecovery;
     private readonly Action<long>? movementReplaced;
     private readonly Action<ReplayResultRecoveryContext>? resultRecovered;
+    private readonly bool recoverMovement;
 
     public PersistedReplayReconciliationService(
         SqliteConnectionFactory factory,
         Action<long>? movementReplaced = null,
-        Action<ReplayResultRecoveryContext>? resultRecovered = null)
+        Action<ReplayResultRecoveryContext>? resultRecovered = null,
+        bool recoverMovement = true)
     {
         this.factory = factory;
         movement = new MovementCaptureStore(factory);
@@ -33,6 +35,7 @@ internal sealed class PersistedReplayReconciliationService
         resultRecovery = new ReplayResultRecoveryStore(factory);
         this.movementReplaced = movementReplaced;
         this.resultRecovered = resultRecovered;
+        this.recoverMovement = recoverMovement;
     }
 
     public void Run(CancellationToken cancellationToken = default)
@@ -60,6 +63,12 @@ internal sealed class PersistedReplayReconciliationService
 
     private void ReconcileStable(Candidate candidate, CancellationToken cancellationToken)
     {
+        if (LazerReplayFrameRecoverySink.IsPartialOutcome(candidate.Outcome)
+            || string.IsNullOrWhiteSpace(candidate.Checksum))
+        {
+            ReconcileRetainedStableCapture(candidate, cancellationToken);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(candidate.GameFolder)
             || string.IsNullOrWhiteSpace(candidate.BeatmapPath)
             || !File.Exists(candidate.BeatmapPath))
@@ -131,7 +140,8 @@ internal sealed class PersistedReplayReconciliationService
                     requiresSimulation));
                 resultNotified = true;
             }
-            if (!candidate.MovementSource.Equals("stable_replay", StringComparison.OrdinalIgnoreCase))
+            if (recoverMovement
+                && !candidate.MovementSource.Equals("stable_replay", StringComparison.OrdinalIgnoreCase))
                 Store(candidate.AttemptId, samples, "stable_replay", replay, "Data/r reconciliation", cancellationToken);
             if (!resultNotified && candidate.NeedsResultResimulation)
             {
@@ -149,12 +159,34 @@ internal sealed class PersistedReplayReconciliationService
         }
     }
 
+    private void ReconcileRetainedStableCapture(Candidate candidate, CancellationToken cancellationToken)
+    {
+        if (!candidate.NeedsPartialCaptureSimulation
+            || candidate.MovementSource is not ("stable_memory" or "stable_live")
+            || string.IsNullOrWhiteSpace(candidate.BeatmapPath)
+            || !File.Exists(candidate.BeatmapPath))
+            return;
+
+        NotifyPartialSimulation(
+            candidate,
+            candidate.BeatmapPath,
+            Path.GetDirectoryName(candidate.BeatmapPath),
+            null,
+            cancellationToken);
+    }
+
     private void ReconcileLazer(Candidate candidate, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var beatmap = LazerStorage.ResolveBeatmapAssets(candidate.BeatmapId, candidate.BeatmapSetId, candidate.Difficulty);
         if (beatmap is null)
             return;
+        if (LazerReplayFrameRecoverySink.IsPartialOutcome(candidate.Outcome)
+            || string.IsNullOrWhiteSpace(candidate.Checksum))
+        {
+            ReconcileRetainedLazerCapture(candidate, beatmap, cancellationToken);
+            return;
+        }
         foreach (string replay in LazerStorage.ResolveReplayFiles(candidate.Checksum, candidate.StartedAt, candidate.GameFolder, candidate.EndedAt))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -186,7 +218,8 @@ internal sealed class PersistedReplayReconciliationService
                     requiresSimulation));
                 resultNotified = true;
             }
-            if (!candidate.MovementSource.Equals("lazer_replay", StringComparison.OrdinalIgnoreCase))
+            if (recoverMovement
+                && !candidate.MovementSource.Equals("lazer_replay", StringComparison.OrdinalIgnoreCase))
                 Store(candidate.AttemptId, samples, "lazer_replay", replay, "client.realm reconciliation", cancellationToken);
             if (!resultNotified && candidate.NeedsResultResimulation)
             {
@@ -202,6 +235,48 @@ internal sealed class PersistedReplayReconciliationService
             }
             return;
         }
+    }
+
+    private void ReconcileRetainedLazerCapture(
+        Candidate candidate,
+        LazerBeatmapAssets beatmap,
+        CancellationToken cancellationToken)
+    {
+        if (!candidate.NeedsPartialCaptureSimulation
+            || candidate.MovementSource is not ("lazer_memory" or "lazer_replay_frame"))
+            return;
+
+        NotifyPartialSimulation(candidate, beatmap.BeatmapPath, null, beatmap.Files, cancellationToken);
+    }
+
+    private void NotifyPartialSimulation(
+        Candidate candidate,
+        string beatmapPath,
+        string? mediaDirectory,
+        IReadOnlyDictionary<string, string>? mediaPaths,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<MovementSample> retained = movementRepository.GetSamples(candidate.AttemptId, cancellationToken);
+        if (retained.Count == 0)
+            return;
+
+        resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+            candidate.AttemptId,
+            ReplayResultRecoveryOutcome.NoChanges,
+            null,
+            beatmapPath,
+            mediaDirectory,
+            mediaPaths,
+            retained,
+            RequiresSimulation: true,
+            RequiresTosuRestart: false,
+            SimulationOwnsCoreResult: candidate.PartialTosuResultWasMissing,
+            TosuResultWasMissing: candidate.PartialTosuResultWasMissing));
+        Log.Information(
+            "Queued startup retained-frame simulation from {Count} {Source} frames for attempt {AttemptId}",
+            retained.Count,
+            candidate.MovementSource,
+            candidate.AttemptId);
     }
 
     private void Store(
@@ -268,7 +343,9 @@ internal sealed class PersistedReplayReconciliationService
                    COALESCE(b.checksum, ''), COALESCE(b.beatmap_id, 0),
                    COALESCE(b.set_id, 0), COALESCE(b.difficulty, ''),
                    c.source_json, COALESCE(m.source, ''),
-                   a.accuracy, a.n100, a.n50, a.misses
+                   a.accuracy, a.n100, a.n50, a.misses,
+                   a.outcome, a.score, a.combo, a.n300,
+                   COALESCE((SELECT hit_count FROM attempt_timing t WHERE t.attempt_id=a.id), 0)
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
             JOIN attempt_context c ON c.attempt_id = a.id
@@ -305,14 +382,30 @@ internal sealed class PersistedReplayReconciliationService
                         reader.GetInt32(10),
                         reader.GetInt32(11),
                         reader.GetInt32(12));
-                    bool needsMovementRecovery = movementSource is "" or "stable_memory" or "stable_live" or "lazer_memory" or "lazer_replay_frame";
-                    if (!needsMovementRecovery && !needsResultResimulation && !needsAccuracyAuthorityRepair)
-                        continue;
+                    long score = reader.GetInt64(14);
+                    int combo = reader.GetInt32(15);
+                    int n300 = reader.GetInt32(16);
+                    int n100 = reader.GetInt32(10);
+                    int n50 = reader.GetInt32(11);
+                    int misses = reader.GetInt32(12);
+                    int timingCount = reader.GetInt32(17);
                     string checksum = reader.GetString(3);
-                    if (string.IsNullOrWhiteSpace(checksum)) continue;
+                    PartialSimulationDecision partial = DecideRetainedCaptureSimulation(
+                        reader.GetString(13), movementSource, checksum, score, combo,
+                        n300, n100, n50, misses, timingCount, source.RootElement);
+                    bool needsPartialCaptureSimulation = partial.ShouldSimulate;
+                    bool partialTosuResultWasMissing = partial.SimulationOwnsCoreResult;
+                    bool needsMovementRecovery = movementSource is "" or "stable_memory" or "stable_live" or "lazer_memory" or "lazer_replay_frame";
+                    if (!needsMovementRecovery && !needsResultResimulation && !needsAccuracyAuthorityRepair
+                        && !needsPartialCaptureSimulation)
+                        continue;
+                    // Persisted replay matching requires a checksum. Partial
+                    // and otherwise checksum-less retained-frame simulation do not.
+                    if (string.IsNullOrWhiteSpace(checksum) && !needsPartialCaptureSimulation) continue;
                     result.Add(new Candidate(reader.GetInt64(0), started, ended, checksum,
                         reader.GetInt64(4), reader.GetInt64(5), reader.GetString(6), client,
-                        beatmapPath, gameFolder, movementSource, needsResultResimulation, needsAccuracyAuthorityRepair));
+                        reader.GetString(13), beatmapPath, gameFolder, movementSource, needsResultResimulation,
+                        needsAccuracyAuthorityRepair, needsPartialCaptureSimulation, partialTosuResultWasMissing));
                 }
                 catch (JsonException) { }
             }
@@ -358,18 +451,77 @@ internal sealed class PersistedReplayReconciliationService
 
     internal static bool NeedsCurrentResultSimulation(JsonElement source)
     {
-        if (!source.TryGetProperty("result_recovery", out var recovery)
-            || !recovery.TryGetProperty("reason", out var reason)
-            || !string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal))
+        if (!source.TryGetProperty("result_recovery", out var recovery))
             return false;
 
-        return !recovery.TryGetProperty("simulation_schema", out var schema)
-               || !schema.TryGetInt32(out int version)
-               || version < ReplayResultRecoveryStore.CurrentSimulationSchema;
+        if (recovery.TryGetProperty("simulation_schema", out var schema)
+            && schema.TryGetInt32(out int version))
+            return version < ReplayResultRecoveryStore.CurrentSimulationSchema;
+
+        return recovery.TryGetProperty("reason", out var reason)
+               && string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal);
+    }
+
+    internal static bool HasCurrentResultSimulation(JsonElement source)
+        => source.TryGetProperty("result_recovery", out var recovery)
+           && recovery.TryGetProperty("simulation_schema", out var schema)
+           && schema.TryGetInt32(out int version)
+           && version >= ReplayResultRecoveryStore.CurrentSimulationSchema;
+
+    internal static bool ResultWasMissing(JsonElement source)
+        => source.TryGetProperty("result_recovery", out var recovery)
+           && recovery.TryGetProperty("reason", out var reason)
+           && string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal);
+
+    internal static PartialSimulationDecision DecidePartialSimulation(
+        string outcome,
+        string movementSource,
+        long score,
+        int combo,
+        int n300,
+        int n100,
+        int n50,
+        int misses,
+        int timingCount,
+        JsonElement source)
+    {
+        return DecideRetainedCaptureSimulation(
+            outcome, movementSource, "checksum-present", score, combo,
+            n300, n100, n50, misses, timingCount, source);
+    }
+
+    internal static PartialSimulationDecision DecideRetainedCaptureSimulation(
+        string outcome,
+        string movementSource,
+        string checksum,
+        long score,
+        int combo,
+        int n300,
+        int n100,
+        int n50,
+        int misses,
+        int timingCount,
+        JsonElement source)
+    {
+        bool cannotUsePersistedReplay = LazerReplayFrameRecoverySink.IsPartialOutcome(outcome)
+                                        || string.IsNullOrWhiteSpace(checksum);
+        bool retainedReplayFrames = movementSource is "lazer_memory" or "lazer_replay_frame"
+            or "stable_memory" or "stable_live";
+        int coreTotal = n300 + n100 + n50 + misses;
+        bool hasGameplayEvidence = score > 0 || combo > 0 || coreTotal > 0 || timingCount > 0;
+        bool resultWasMissing = ResultWasMissing(source)
+                                || score == 0 && combo == 0 && coreTotal == 0 && timingCount > 0;
+        bool shouldSimulate = cannotUsePersistedReplay
+                              && retainedReplayFrames
+                              && hasGameplayEvidence
+                              && !HasCurrentResultSimulation(source);
+        return new PartialSimulationDecision(shouldSimulate, shouldSimulate && resultWasMissing);
     }
 
     private sealed record Candidate(long AttemptId, DateTimeOffset StartedAt, DateTimeOffset EndedAt,
         string Checksum, long BeatmapId, long BeatmapSetId, string Difficulty, string ClientKind,
-        string? BeatmapPath, string? GameFolder, string MovementSource, bool NeedsResultResimulation,
-        bool NeedsAccuracyAuthorityRepair);
+        string Outcome, string? BeatmapPath, string? GameFolder, string MovementSource, bool NeedsResultResimulation,
+        bool NeedsAccuracyAuthorityRepair, bool NeedsPartialCaptureSimulation, bool PartialTosuResultWasMissing);
+
+    internal readonly record struct PartialSimulationDecision(bool ShouldSimulate, bool SimulationOwnsCoreResult);
 }

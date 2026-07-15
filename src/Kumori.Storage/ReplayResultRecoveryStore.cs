@@ -11,7 +11,10 @@ namespace Kumori.Storage;
 /// </summary>
 public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
 {
-    public const int CurrentSimulationSchema = 2;
+    // Schema 3 is produced by the scoring-safe replay pass. Schema 2 could
+    // skip short inputs at 100x and must be recomputed when retained frames or
+    // a persisted replay are still available.
+    public const int CurrentSimulationSchema = 3;
 
     public ReplayResultRecoveryOutcome Apply(
         long attemptId,
@@ -156,6 +159,8 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
     public ReplayResultRecoveryOutcome ApplySimulation(
         long attemptId,
         ReplaySimulationResult simulation,
+        bool simulationOwnsCoreResult = false,
+        bool tosuResultWasMissing = false,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -230,7 +235,7 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
             var fields = new List<string>();
             bool replayRecovery = IsReplayRecovery(sourceJson);
             int simulatedCoreTotal = simulation.N300 + simulation.N100 + simulation.N50 + simulation.Misses;
-            if (replayRecovery && simulatedCoreTotal > 0)
+            if ((replayRecovery || simulationOwnsCoreResult) && simulatedCoreTotal > 0)
             {
                 Replace(ref n300, simulation.N300, "300");
                 Replace(ref n100, simulation.N100, "100");
@@ -239,7 +244,12 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 // The replay decoder (or valid tosu telemetry) owns final accuracy.
                 // Re-simulation can produce different modern-lazer slider judgements,
                 // so its core 300/100/50/miss counts are not an accuracy substitute.
-                accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
+                if (simulationOwnsCoreResult && tosuResultWasMissing)
+                    ReplaceDouble(ref accuracy, simulation.Accuracy, "accuracy");
+                else
+                    accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
+                score = FillLong(score, simulation.Score, "score");
+                combo = FillInt(combo, simulation.AchievedCombo, "combo");
             }
             sliderBreaks = FillInt(sliderBreaks, simulation.SliderBreaks, "slider breaks");
             largeTickHits = FillInt(largeTickHits, simulation.LargeTickHits, "large tick hits");
@@ -271,7 +281,9 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 update.Transaction = tx;
                 update.CommandText = """
                 UPDATE attempts SET
+                    score=@score,
                     accuracy=@accuracy,
+                    combo=@combo,
                     n300=@n300,
                     n100=@n100,
                     n50=@n50,
@@ -292,7 +304,9 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 WHERE id=@id AND outcome <> 'active'
                 """;
                 update.Parameters.AddWithValue("@slider_breaks", sliderBreaks);
+                update.Parameters.AddWithValue("@score", score);
                 update.Parameters.AddWithValue("@accuracy", accuracy);
+                update.Parameters.AddWithValue("@combo", combo);
                 update.Parameters.AddWithValue("@n300", n300);
                 update.Parameters.AddWithValue("@n100", n100);
                 update.Parameters.AddWithValue("@n50", n50);
@@ -339,7 +353,7 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 UpsertSimulationTiming(con, tx, attemptId, simulation.TimingOffsets, cancellationToken);
                 fields.Add("timing offsets");
             }
-            if (replayRecovery)
+            if (replayRecovery || simulationOwnsCoreResult)
             {
                 UpsertScoreContext(
                     con, tx, attemptId, score, grade, n300, n100, n50, misses, geki, katu,
@@ -352,7 +366,7 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
             cancellationToken.ThrowIfCancellationRequested();
             UpsertSimulationContext(con, tx, attemptId, simulation);
             cancellationToken.ThrowIfCancellationRequested();
-            RecordSimulation(con, tx, attemptId, fields);
+            RecordSimulation(con, tx, attemptId, fields, tosuResultWasMissing);
             RebuildRecoveredPersonalBests(con, tx, attemptId, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             tx.Commit();
@@ -362,6 +376,13 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
             return new ReplayResultRecoveryOutcome(true, fields.Count > 0, fields);
 
             int FillInt(int current, int simulated, string field)
+            {
+                if (current != 0 || simulated == 0) return current;
+                fields.Add(field);
+                return simulated;
+            }
+
+            long FillLong(long current, long simulated, string field)
             {
                 if (current != 0 || simulated == 0) return current;
                 fields.Add(field);
@@ -388,6 +409,13 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
             void Replace(ref int current, int simulated, string field)
             {
                 if (current == simulated) return;
+                current = simulated;
+                fields.Add(field);
+            }
+
+            void ReplaceDouble(ref double current, double simulated, string field)
+            {
+                if (simulated < 0 || Math.Abs(current - simulated) <= 0.000001) return;
                 current = simulated;
                 fields.Add(field);
             }

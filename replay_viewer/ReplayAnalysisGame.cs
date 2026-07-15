@@ -63,7 +63,13 @@ internal partial class ReplayAnalysisGame : OsuGameBase
             Score score = ReplayScoreFactory.Create(contract, ruleset, workingBeatmap, disableHidden: false);
             sourceScore = score;
             SelectedMods.Value = score.ScoreInfo.Mods;
-            var player = new ReplaySimulationPlayer(score, ruleset, workingBeatmap, complete, fail)
+            var player = new ReplaySimulationPlayer(
+                score,
+                ruleset,
+                workingBeatmap,
+                contract.AnalysisCoverageEnd,
+                complete,
+                fail)
             {
                 RelativeSizeAxes = Axes.Both,
             };
@@ -163,16 +169,20 @@ internal partial class ReplayAnalysisGame : OsuGameBase
 
 internal partial class ReplaySimulationPlayer : ReplayPlayer
 {
+    private const double simulation_playback_rate = 10;
     private readonly Score sourceScore;
     private readonly OsuRuleset ruleset;
     private readonly WorkingBeatmap workingBeatmap;
+    private readonly double? coverageEnd;
     private readonly Action<IReadOnlyList<PreparedReplayJudgement>, PreparedReplaySimulationSummary> completed;
     private readonly Action<Exception> failed;
     private readonly List<PreparedReplayJudgement> badJudgements = [];
     private readonly HashSet<(double Root, double Object, KumoriTimelineMarkerKind Kind)> seen = [];
+    private readonly HashSet<(double Root, double Object, HitResult Result)> scored = [];
     private readonly Dictionary<HitResult, int> resultCounts = [];
     private readonly List<double> timingOffsets = [];
     private int sliderTailMisses;
+    private int maxCombo;
     private readonly Stopwatch stopwatch = Stopwatch.StartNew();
     private bool finished;
 
@@ -180,6 +190,7 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         Score score,
         OsuRuleset ruleset,
         WorkingBeatmap workingBeatmap,
+        double? coverageEnd,
         Action<IReadOnlyList<PreparedReplayJudgement>, PreparedReplaySimulationSummary> completed,
         Action<Exception> failed)
         : base(score, new PlayerConfiguration
@@ -194,6 +205,7 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         sourceScore = score;
         this.ruleset = ruleset;
         this.workingBeatmap = workingBeatmap;
+        this.coverageEnd = coverageEnd;
         this.completed = completed;
         this.failed = failed;
     }
@@ -217,24 +229,53 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         ScoreProcessor.NewJudgement += collect;
         if (GameplayClockContainer is MasterGameplayClockContainer master)
         {
-            master.UserPlaybackRate.MaxValue = 100;
-            master.UserPlaybackRate.Value = 100;
+            // At 100x the gameplay clock can cross an entire short key press
+            // between two ruleset updates. That makes lazer award a 300 for
+            // the surrounding slider while never emitting later bad results.
+            // 10x remains fast in the non-realtime headless host and keeps
+            // replay input transitions visible to the score processor.
+            master.UserPlaybackRate.MaxValue = simulation_playback_rate;
+            master.UserPlaybackRate.Value = simulation_playback_rate;
         }
         GameplayClockContainer.Start();
     }
 
     protected override void Update()
     {
+        if (!finished && coverageEnd is { } cutoff && LoadedBeatmapSuccessfully)
+        {
+            double remaining = cutoff - GameplayClockContainer.CurrentTime;
+            if (remaining <= 0)
+            {
+                finishSuccessfully();
+                return;
+            }
+
+            // Keep full-map recovery fast, but approach a partial capture's
+            // endpoint slowly enough that a render tick cannot score far past
+            // the final frame backed by real input.
+            if (GameplayClockContainer is MasterGameplayClockContainer master)
+            {
+                double rate = remaining switch
+                {
+                    <= 250 => 1,
+                    _ => simulation_playback_rate,
+                };
+                master.UserPlaybackRate.Value = Math.Clamp(
+                    rate,
+                    master.UserPlaybackRate.MinValue,
+                    master.UserPlaybackRate.MaxValue);
+            }
+        }
+
         base.Update();
         if (finished)
             return;
 
-        if (ScoreProcessor.HasCompleted.Value)
-        {
-            finished = true;
-            ScoreProcessor.NewJudgement -= collect;
-            completed(badJudgements, createSummary());
-        }
+        if (coverageEnd is { } end && GameplayClockContainer.CurrentTime >= end)
+            finishSuccessfully();
+        else if (ScoreProcessor.HasCompleted.Value)
+            finishSuccessfully();
         else if (stopwatch.Elapsed > TimeSpan.FromSeconds(30))
         {
             finishWithError(new TimeoutException("Replay analysis exceeded 30 seconds."));
@@ -243,8 +284,26 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
 
     private void collect(JudgementResult result)
     {
-        resultCounts[result.Type] = resultCounts.GetValueOrDefault(result.Type) + 1;
-        if (result.Type == HitResult.Miss && result.HitObject is SliderTailCircle)
+        if (coverageEnd is { } end && result.TimeAbsolute > end)
+            return;
+
+        HitObject root = DrawableRuleset.Objects.FirstOrDefault(candidate =>
+            ReferenceEquals(candidate, result.HitObject) || candidate.NestedHitObjects.Contains(result.HitObject))
+            ?? result.HitObject;
+        // Accelerated replay playback can publish the same final judgement on
+        // adjacent update frames. Inspector entries were already deduplicated;
+        // numeric totals must use the identical object-level guarantee.
+        if (!scored.Add((root.StartTime, result.HitObject.StartTime, result.Type)))
+            return;
+
+        bool isSliderTailMiss = result.Type == HitResult.Miss && result.HitObject is SliderTailCircle;
+        // Slider-tail failures are nested judgements. Keep them in their own
+        // statistic; counting them as root misses corrupts partial-play core
+        // result totals (for example 4 actual misses became 11).
+        if (!isSliderTailMiss)
+            resultCounts[result.Type] = resultCounts.GetValueOrDefault(result.Type) + 1;
+        maxCombo = Math.Max(maxCombo, result.ComboAfterJudgement);
+        if (isSliderTailMiss)
             sliderTailMisses++;
         if (result.Type is HitResult.Great or HitResult.Ok or HitResult.Meh
             && result.HitObject is HitCircle or SliderHeadCircle)
@@ -253,9 +312,6 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         if (KumoriTimelineMarkers.KindFromJudgement(result) is not { } kind)
             return;
 
-        HitObject root = DrawableRuleset.Objects.FirstOrDefault(candidate =>
-            ReferenceEquals(candidate, result.HitObject) || candidate.NestedHitObjects.Contains(result.HitObject))
-            ?? result.HitObject;
         if (!seen.Add((root.StartTime, result.HitObject.StartTime, kind)))
             return;
 
@@ -293,6 +349,15 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         var score = sourceScore.ScoreInfo.DeepClone();
         score.BeatmapInfo = workingBeatmap.BeatmapInfo;
         ScoreProcessor.PopulateScore(score);
+        if (coverageEnd is not null)
+        {
+            // PopulateScore includes everything the accelerated player happened
+            // to process in its final render tick. For an unfinished play only
+            // judgements at or before the capture boundary are authoritative.
+            score.Statistics = new Dictionary<HitResult, int>(resultCounts);
+            score.MaxCombo = maxCombo;
+            score.Accuracy = accuracyFrom(score.Statistics);
+        }
 
         DifficultyAttributes baseDifficulty = ruleset.CreateDifficultyCalculator(workingBeatmap).Calculate();
         DifficultyAttributes adjustedDifficulty = ruleset.CreateDifficultyCalculator(workingBeatmap).Calculate(score.Mods);
@@ -314,6 +379,8 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
             score.Statistics.GetValueOrDefault(HitResult.Meh),
             score.Statistics.GetValueOrDefault(HitResult.Miss),
             score.Accuracy * 100,
+            score.TotalScore,
+            score.MaxCombo,
             resultCounts.GetValueOrDefault(HitResult.ComboBreak),
             resultCounts.GetValueOrDefault(HitResult.LargeTickHit),
             resultCounts.GetValueOrDefault(HitResult.LargeTickMiss),
@@ -416,6 +483,15 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         finished = true;
         ScoreProcessor.NewJudgement -= collect;
         failed(ex);
+    }
+
+    private void finishSuccessfully()
+    {
+        if (finished)
+            return;
+        finished = true;
+        ScoreProcessor.NewJudgement -= collect;
+        completed(badJudgements, createSummary());
     }
 
     private static string objectType(HitObject judged, HitObject root) => judged switch

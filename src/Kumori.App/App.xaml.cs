@@ -243,10 +243,22 @@ public partial class App : Application
         Task DeferAttemptPersistence(string key, Func<CancellationToken, Task> work) =>
             gameplayWork.EnqueuePriority(key, work);
         AttemptSqliteSink trackingSink;
+        (int Attempts, int Sessions) recoveredTracking;
+        int repairedMissingResults;
+        int repairedPartialSimulationResults;
         try
         {
             trackingSink = await Task.Run(
                 () => new AttemptSqliteSink(factory, DeferAttemptPersistence),
+                _backgroundCts.Token);
+            recoveredTracking = await Task.Run(
+                () => new TrackingMaintenanceRepository(factory).RecoverInterruptedTracking(),
+                _backgroundCts.Token);
+            repairedMissingResults = await Task.Run(
+                () => new TrackingMaintenanceRepository(factory).RepairMissingTosuResults(),
+                _backgroundCts.Token);
+            repairedPartialSimulationResults = await Task.Run(
+                () => new TrackingMaintenanceRepository(factory).RepairPartialSimulationCoreResults(),
                 _backgroundCts.Token);
         }
         catch (OperationCanceledException) when (_backgroundCts.IsCancellationRequested)
@@ -270,6 +282,25 @@ public partial class App : Application
                 _mainWindow.ForceClose = true;
             Shutdown();
             return;
+        }
+        if (recoveredTracking is not (0, 0))
+        {
+            Log.Information(
+                "Recovered {AttemptCount} interrupted attempt(s) and {SessionCount} interrupted session(s) from an earlier app run",
+                recoveredTracking.Attempts,
+                recoveredTracking.Sessions);
+        }
+        if (repairedMissingResults > 0)
+        {
+            Log.Warning(
+                "Neutralized {AttemptCount} broken tosu result row(s) while persisted replay recovery remains pending",
+                repairedMissingResults);
+        }
+        if (repairedPartialSimulationResults > 0)
+        {
+            Log.Warning(
+                "Restored tosu hit totals and judgement events for {AttemptCount} partial play(s) damaged by replay simulation",
+                repairedPartialSimulationResults);
         }
         _attemptPersistence = trackingSink;
         // Visible read-only data is core startup work. It must not wait behind
@@ -555,11 +586,12 @@ public partial class App : Application
                 });
             void OnReplayResultRecovered(ReplayResultRecoveryContext recovery)
             {
-                // Recovered result data proves the live tosu stream was broken.
-                // Restarting tosu is mandatory even when replay simulation is
-                // unnecessary; coalescing prevents a burst of recoveries from
-                // serially restarting the same companion several times.
-                RequestRecoveryTosuRestart(recovery.AttemptId);
+                // Exact header recovery proves that live tosu data was broken.
+                // A normal partial-play simulation uses the retained capture
+                // without implying companion failure.
+                if (recovery.RequiresTosuRestart
+                    && (recovery.TosuResultWasMissing || recovery.HeaderRecovery.RecoveredCoreResult))
+                    RequestRecoveryTosuRestart(recovery.AttemptId);
                 TrackBackground(
                     gameplayWork.Enqueue(
                         $"replay-result-completion-{recovery.AttemptId}",
@@ -587,7 +619,9 @@ public partial class App : Application
                         new ReplayResultRecoveryStore(factory).ApplySimulation(
                             recovery.AttemptId,
                             simulation,
-                            operationToken);
+                            simulationOwnsCoreResult: recovery.SimulationOwnsCoreResult,
+                            tosuResultWasMissing: recovery.TosuResultWasMissing,
+                            cancellationToken: operationToken);
                     }
                     catch (OperationCanceledException) when (operationToken.IsCancellationRequested)
                     {
@@ -645,6 +679,7 @@ public partial class App : Application
                             () => trackingSink.CurrentAttemptId,
                             QueueMovementUiRefresh,
                             OnReplayResultRecovered,
+                            RequestRecoveryTosuRestart,
                             recoverMovement: true,
                             cancellationToken: _backgroundCts.Token,
                             workCoordinator: gameplayWork),
@@ -656,6 +691,7 @@ public partial class App : Application
                             () => trackingSink.CurrentAttemptId,
                             QueueMovementUiRefresh,
                             OnReplayResultRecovered,
+                            RequestRecoveryTosuRestart,
                             recoverMovement: true,
                             cancellationToken: _backgroundCts.Token,
                             workCoordinator: gameplayWork),
@@ -703,6 +739,7 @@ public partial class App : Application
                             factory,
                             () => trackingSink.CurrentAttemptId,
                             resultRecovered: OnReplayResultRecovered,
+                            resultTelemetryMissing: RequestRecoveryTosuRestart,
                             recoverMovement: false,
                             cancellationToken: _backgroundCts.Token,
                             workCoordinator: gameplayWork),
@@ -712,6 +749,7 @@ public partial class App : Application
                             factory,
                             () => trackingSink.CurrentAttemptId,
                             resultRecovered: OnReplayResultRecovered,
+                            resultTelemetryMissing: RequestRecoveryTosuRestart,
                             recoverMovement: false,
                             cancellationToken: _backgroundCts.Token,
                             workCoordinator: gameplayWork),
@@ -748,17 +786,15 @@ public partial class App : Application
                 replayPlaybackDetector: replayPlaybackDetector);
             _tracking.ClientKindObserved += StartReplayCaptureFor;
             _tracking.Start();
-            if (runtimeSettings.Capture.LazerReplayFrameEnabled)
-            {
-                var reconciliation = new PersistedReplayReconciliationService(
-                    factory,
-                    QueueMovementUiRefresh,
-                    OnReplayResultRecovered);
-                TrackBackground(gameplayWork.Enqueue(
-                    "persisted-replay-reconciliation",
-                    token => Task.Run(() => reconciliation.Run(token), token)),
-                    "persisted replay reconciliation");
-            }
+            var reconciliation = new PersistedReplayReconciliationService(
+                factory,
+                QueueMovementUiRefresh,
+                OnReplayResultRecovered,
+                recoverMovement: runtimeSettings.Capture.LazerReplayFrameEnabled);
+            TrackBackground(gameplayWork.Enqueue(
+                "persisted-replay-reconciliation",
+                token => Task.Run(() => reconciliation.Run(token), token)),
+                "persisted replay reconciliation");
             viewModel.SetEndLiveSessionHandler(() => Task.Run(() => _tracking?.EndSession() ?? false));
             EnsureTosuForOsu(store);
             return Task.CompletedTask;

@@ -297,6 +297,88 @@ internal static class MissAnalysisBuilder
         return new MissAnalysisModel(entries);
     }
 
+    /// <summary>
+    /// Keeps lazer's exact object/timing analysis, while restoring any event
+    /// occurrences that an incomplete simulation pass failed to emit.
+    /// </summary>
+    public static MissAnalysisModel MergeAuthoritative(
+        MissAnalysisModel captured,
+        MissAnalysisModel simulated,
+        IReadOnlyDictionary<KumoriTimelineMarkerKind, int>? authoritativeCounts = null)
+    {
+        List<MissAnalysisEntry> merged = [];
+
+        foreach (KumoriTimelineMarkerKind kind in Enum.GetValues<KumoriTimelineMarkerKind>())
+        {
+            List<MissAnalysisEntry> capturedForKind = captured.Entries
+                .Where(entry => entry.Kind == kind)
+                .OrderBy(entry => entry.TargetStartTime)
+                .ThenBy(entry => entry.EventTime)
+                .ToList();
+            List<MissAnalysisEntry> unmatchedSimulated = simulated.Entries
+                .Where(entry => entry.Kind == kind)
+                .OrderBy(entry => entry.TargetStartTime)
+                .ThenBy(entry => entry.EventTime)
+                .ToList();
+            List<MissAnalysisEntry> selected = [];
+
+            // Pair each captured occurrence to the nearest simulated result.
+            // The simulated entry owns exact lazer geometry; captured entries
+            // only fill occurrences the simulation did not produce.
+            foreach (MissAnalysisEntry evidence in capturedForKind)
+            {
+                if (unmatchedSimulated.Count == 0)
+                    selected.Add(evidence);
+                else
+                {
+                    MissAnalysisEntry nearest = unmatchedSimulated
+                        .MinBy(entry => Math.Abs(entry.TargetStartTime - evidence.TargetStartTime))!;
+                    unmatchedSimulated.Remove(nearest);
+                    selected.Add(nearest);
+                }
+            }
+
+            if (authoritativeCounts?.TryGetValue(kind, out int authoritativeCount) == true)
+            {
+                authoritativeCount = Math.Max(0, authoritativeCount);
+                if (selected.Count > authoritativeCount)
+                    selected = selected.Take(authoritativeCount).ToList();
+                else if (selected.Count < authoritativeCount)
+                    selected.AddRange(unmatchedSimulated.Take(authoritativeCount - selected.Count));
+            }
+            else
+            {
+                // Slider breaks have no final counter in the viewer contract,
+                // and entirely missing tosu results have no trustworthy core
+                // cap. In those cases retain additional simulated evidence.
+                selected.AddRange(unmatchedSimulated);
+            }
+
+            merged.AddRange(selected);
+        }
+
+        MissAnalysisEntry[] ordered = merged
+            .OrderBy(entry => entry.EventTime)
+            .ThenBy(entry => entry.TargetStartTime)
+            .Select((entry, index) => entry with { Index = index + 1 })
+            .ToArray();
+        return new MissAnalysisModel(ordered);
+    }
+
+    public static IReadOnlyDictionary<KumoriTimelineMarkerKind, int>? AuthoritativeCoreCounts(ViewerContract contract)
+    {
+        FinalHitsContract? hits = contract.FinalHits;
+        if (hits is null || hits.N300 + hits.N100 + hits.N50 + hits.Misses <= 0)
+            return null;
+
+        return new Dictionary<KumoriTimelineMarkerKind, int>
+        {
+            [KumoriTimelineMarkerKind.Miss] = hits.Misses,
+            [KumoriTimelineMarkerKind.Meh] = hits.N50,
+            [KumoriTimelineMarkerKind.Ok] = hits.N100,
+        };
+    }
+
     internal static MissReplayFrameSample[] isolateContiguousFrames(
         IEnumerable<MissReplayFrameSample> source,
         double startTime,
@@ -337,7 +419,10 @@ internal static class MissAnalysisBuilder
         if (elapsed <= 0 || elapsed > 50)
             return false;
 
-        float maximumDistance = 12 + (float)elapsed * 2.5f;
+        // Match the renderer's plausibility threshold. Fast DT/HR aim can
+        // legitimately exceed 2.5 px/ms; classifying that as a seek split the
+        // real trajectory into tiny fragments before it reached the panel.
+        float maximumDistance = 16 + (float)elapsed * 5;
         return (current.Position - previous.Position).Length <= maximumDistance;
     }
 
@@ -355,16 +440,17 @@ internal static class MissAnalysisBuilder
             .Where(item => item.Distance <= maximumDistance)
             .ToArray();
 
-        if (local.Length == 0)
-        {
-            MissReplayFrameSample closest = frames
-                .OrderBy(frame => (frame.Position - target).Length)
-                .ThenBy(frame => Math.Abs(frame.Time - anchorTime))
-                .First();
-            return [closest];
-        }
-
-        var pivot = local
+        // A genuine miss can remain outside the local-radius threshold for
+        // the entire object window. Returning only the closest sample in that
+        // case leaves the analyzer with two endpoint arrows and no cursor
+        // stroke. Keep a small, contiguous trajectory around closest approach
+        // so the panel still shows where the cursor actually travelled.
+        var pivot = (local.Length > 0
+                ? local
+                : frames.Select((frame, index) => (
+                    Frame: frame,
+                    Index: index,
+                    Distance: (frame.Position - target).Length)).ToArray())
             .OrderBy(item => item.Distance)
             .ThenBy(item => Math.Abs(item.Frame.Time - anchorTime))
             .First();
@@ -379,6 +465,34 @@ internal static class MissAnalysisBuilder
                && (frames[end + 1].Position - target).Length <= maximumDistance
                && framesAreContinuous(frames[end], frames[end + 1]))
             end++;
+
+        // Preserve enough neighbouring replay frames to render direction and
+        // curvature. The input has already been restricted to one continuous,
+        // object-owned segment, so this cannot bridge a seek/capture jump or
+        // pull movement from another hit object into the graph.
+        const int minimumTrajectorySamples = 7;
+        while (end - start + 1 < minimumTrajectorySamples
+               && (start > 0 || end + 1 < frames.Count))
+        {
+            bool canExtendBefore = start > 0 && framesAreContinuous(frames[start - 1], frames[start]);
+            bool canExtendAfter = end + 1 < frames.Count && framesAreContinuous(frames[end], frames[end + 1]);
+            if (!canExtendBefore && !canExtendAfter)
+                break;
+
+            if (canExtendBefore && canExtendAfter)
+            {
+                double beforeDistance = Math.Abs(frames[start - 1].Time - anchorTime);
+                double afterDistance = Math.Abs(frames[end + 1].Time - anchorTime);
+                if (beforeDistance <= afterDistance)
+                    start--;
+                else
+                    end++;
+            }
+            else if (canExtendBefore)
+                start--;
+            else
+                end++;
+        }
 
         return frames.Skip(start).Take(end - start + 1).ToArray();
     }

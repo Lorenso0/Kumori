@@ -63,6 +63,188 @@ public sealed class TrackingMaintenanceRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void StartupRecoveryFinalizesOnlyInterruptedOpenTrackingRows()
+    {
+        var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
+        _ = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        using (var connection = factory.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO sessions(id, started_at, started_at_utc_ms, ended_at, ended_at_utc_ms, interrupted)
+                VALUES
+                    (1, '2026-07-14T10:00:00Z', 1784023200000, NULL, NULL, 0),
+                    (2, '2026-07-14T11:00:00Z', 1784026800000, NULL, NULL, 0),
+                    (3, '2026-07-14T12:00:00Z', 1784030400000, '2026-07-14T12:10:00Z', 1784031000000, 0);
+                INSERT INTO beatmaps(id, identity) VALUES(1, 'map-a');
+                INSERT INTO attempts(
+                    id, session_id, beatmap_id, started_at, started_at_utc_ms,
+                    ended_at, ended_at_utc_ms, outcome, termination_evidence)
+                VALUES
+                    (1, 1, 1, '2026-07-14T10:01:00Z', 1784023260000,
+                     NULL, NULL, 'active', NULL),
+                    (2, 2, 1, '2026-07-14T11:01:00Z', 1784026860000,
+                     '2026-07-14T11:05:00Z', 1784027100000, 'completed', 'results'),
+                    (3, 3, 1, '2026-07-14T12:01:00Z', 1784030460000,
+                     '2026-07-14T12:05:00Z', 1784030700000, 'completed', 'results');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var repository = new TrackingMaintenanceRepository(factory);
+        var recovered = repository.RecoverInterruptedTracking();
+
+        Assert.Equal((1, 2), recovered);
+        using var verification = factory.Open();
+        using var rows = verification.CreateCommand();
+        rows.CommandText = """
+            SELECT s.id, s.ended_at, s.ended_at_utc_ms, s.interrupted,
+                   a.outcome, a.termination_evidence
+            FROM sessions s
+            LEFT JOIN attempts a ON a.session_id=s.id
+            ORDER BY s.id
+            """;
+        using var reader = rows.ExecuteReader();
+
+        Assert.True(reader.Read());
+        Assert.Equal(1, reader.GetInt64(0));
+        Assert.Equal("2026-07-14T10:01:00Z", reader.GetString(1));
+        Assert.Equal(1784023260000, reader.GetInt64(2));
+        Assert.Equal(1, reader.GetInt64(3));
+        Assert.Equal("abandoned", reader.GetString(4));
+        Assert.Equal("startup_recovery", reader.GetString(5));
+
+        Assert.True(reader.Read());
+        Assert.Equal(2, reader.GetInt64(0));
+        Assert.Equal("2026-07-14T11:05:00Z", reader.GetString(1));
+        Assert.Equal(1784027100000, reader.GetInt64(2));
+        Assert.Equal(1, reader.GetInt64(3));
+        Assert.Equal("completed", reader.GetString(4));
+        Assert.Equal("results", reader.GetString(5));
+
+        Assert.True(reader.Read());
+        Assert.Equal(3, reader.GetInt64(0));
+        Assert.Equal("2026-07-14T12:10:00Z", reader.GetString(1));
+        Assert.Equal(1784031000000, reader.GetInt64(2));
+        Assert.Equal(0, reader.GetInt64(3));
+        Assert.Equal("completed", reader.GetString(4));
+        Assert.Equal("results", reader.GetString(5));
+        Assert.False(reader.Read());
+        reader.Close();
+
+        Assert.Equal((0, 0), repository.RecoverInterruptedTracking());
+        Assert.Equal(1, repository.DeleteSession(1));
+    }
+
+    [Fact]
+    public void StartupRepairNeutralizesMissingTosuResultAndRemovesFalsePersonalBests()
+    {
+        var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
+        _ = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        using (var connection = factory.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO sessions(id, started_at, ended_at)
+                VALUES(1, '2026-07-15T10:00:00Z', '2026-07-15T10:10:00Z');
+                INSERT INTO beatmaps(id, identity) VALUES(1, 'map-a');
+                INSERT INTO attempts(
+                    id, session_id, beatmap_id, started_at, ended_at, outcome,
+                    termination_evidence, score, accuracy, grade, combo,
+                    n300, n100, n50, misses)
+                VALUES(1, 1, 1, '2026-07-15T10:01:00Z', '2026-07-15T10:01:10Z',
+                       'failed', 'state_transition', 0, 100, 'F', 0, 0, 0, 0, 0);
+                INSERT INTO attempt_timing(
+                    attempt_id, offsets_zlib, hit_count, early_count, late_count, mean, median, deviation)
+                VALUES(1, X'', 25, 10, 15, 0, 0, 0);
+                INSERT INTO personal_bests(beatmap_id, mods_key, metric, attempt_id, value)
+                VALUES(1, 'NM', 'accuracy', 1, 100);
+                INSERT INTO attempt_improvements(attempt_id, metric, new_value)
+                VALUES(1, 'accuracy', 100);
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var repository = new TrackingMaintenanceRepository(factory);
+
+        Assert.Equal(1, repository.RepairMissingTosuResults());
+        Assert.Equal(0, repository.RepairMissingTosuResults());
+        using var verification = factory.Open();
+        Assert.Equal(0d, Scalar<double>(verification, "SELECT accuracy FROM attempts WHERE id=1"));
+        Assert.Equal(0L, Scalar<long>(verification, "SELECT COUNT(*) FROM attempts WHERE grade IS NOT NULL"));
+        Assert.Contains("tosu_result_missing", Scalar<string>(verification, "SELECT termination_evidence FROM attempts WHERE id=1"));
+        Assert.Equal(0L, Scalar<long>(verification, "SELECT COUNT(*) FROM personal_bests"));
+        Assert.Equal(0L, Scalar<long>(verification, "SELECT COUNT(*) FROM attempt_improvements"));
+    }
+
+    [Fact]
+    public void StartupRepairRestoresPartialTosuCountsAndEventsOverwrittenBySimulation()
+    {
+        var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
+        _ = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        using (var connection = factory.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO sessions(id, started_at, ended_at)
+                VALUES(1, '2026-07-15T18:39:00Z', '2026-07-15T18:41:00Z');
+                INSERT INTO beatmaps(id, identity) VALUES(1, 'map-a');
+                INSERT INTO attempts(
+                    id, session_id, beatmap_id, started_at, ended_at, outcome,
+                    score, accuracy, combo, n300, n100, n50, misses)
+                VALUES(1, 1, 1, '2026-07-15T18:39:49Z', '2026-07-15T18:40:08Z',
+                       'quit', 140420, 94.3389, 98, 10, 1, 0, 0);
+                INSERT INTO attempt_context(attempt_id, source_json, score_json)
+                VALUES(1,
+                    '{"result_recovery":{"simulation":"completed","simulation_schema":2,"simulated_fields":["300","100","misses","max pp","judgement events"]}}',
+                    '{"hits":{"_300":10,"_100":1,"_50":0,"_0":0},"recovered_from_replay":true}');
+                INSERT INTO attempt_events(attempt_id, captured_at, map_time_ms, event_type, value, data_json)
+                VALUES
+                    (1, '2026-07-15T18:39:50Z', 8, 'checkpoint', 0,
+                     '{"n300":0,"n100":0,"n50":0,"misses":0,"slider_breaks":0}'),
+                    (1, '2026-07-15T18:39:56Z', 6000, 'checkpoint', 0,
+                     '{"n300":50,"n100":2,"n50":0,"misses":1,"slider_breaks":0}'),
+                    (1, '2026-07-15T18:40:08Z', 17031, 'checkpoint', 0,
+                     '{"n300":82,"n100":4,"n50":0,"misses":3,"slider_breaks":1}'),
+                    (1, '2026-07-15T18:40:09Z', 2121, 'hit_100', 1,
+                     '{"source":"replay_simulation"}');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var repository = new TrackingMaintenanceRepository(factory);
+        Assert.Equal(1, repository.RepairPartialSimulationCoreResults());
+        Assert.Equal(0, repository.RepairPartialSimulationCoreResults());
+
+        using var verification = factory.Open();
+        using (var values = verification.CreateCommand())
+        {
+            values.CommandText = "SELECT n300, n100, n50, misses FROM attempts WHERE id=1";
+            using var reader = values.ExecuteReader();
+            Assert.True(reader.Read());
+            Assert.Equal(82, reader.GetInt32(0));
+            Assert.Equal(4, reader.GetInt32(1));
+            Assert.Equal(0, reader.GetInt32(2));
+            Assert.Equal(3, reader.GetInt32(3));
+        }
+        Assert.Equal(3L, Scalar<long>(verification,
+            "SELECT COUNT(*) FROM attempt_events WHERE attempt_id=1 AND event_type='miss'"));
+        Assert.Equal(2L, Scalar<long>(verification,
+            "SELECT COUNT(*) FROM attempt_events WHERE attempt_id=1 AND event_type='hit_100'"));
+        Assert.Equal(1L, Scalar<long>(verification,
+            "SELECT COUNT(*) FROM attempt_events WHERE attempt_id=1 AND event_type='slider_break'"));
+        string sourceJson = Scalar<string>(verification,
+            "SELECT source_json FROM attempt_context WHERE attempt_id=1");
+        string scoreJson = Scalar<string>(verification,
+            "SELECT score_json FROM attempt_context WHERE attempt_id=1");
+        Assert.Contains("tosu_checkpoint", sourceJson);
+        Assert.DoesNotContain("\"300\"", sourceJson);
+        Assert.Contains("\"_300\":82", scoreJson);
+        Assert.Contains("\"_0\":3", scoreJson);
+        Assert.DoesNotContain("recovered_from_replay", scoreJson);
+    }
+
+    [Fact]
     public void DeleteShortPlaysUsesStrictBoundaryAndRemovesNewlyEmptyEndedSessions()
     {
         var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
@@ -244,6 +426,13 @@ public sealed class TrackingMaintenanceRepositoryTests : IDisposable
             zlib.Write(bytes);
         }
         return output.ToArray();
+    }
+
+    private static T Scalar<T>(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (T)Convert.ChangeType(command.ExecuteScalar()!, typeof(T));
     }
 
     public void Dispose()

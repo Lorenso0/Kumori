@@ -202,7 +202,8 @@ public static class TosuManager
     /// </summary>
     public static Task<Process> RestartAsync(
         CancellationToken cancellationToken = default,
-        Func<Func<Process>, Process>? processTransition = null)
+        Func<Func<Process>, Process>? processTransition = null,
+        string reason = "replay-based result recovery")
     {
         Task<Process> restart;
         lock (RestartTaskGate)
@@ -213,7 +214,7 @@ public static class TosuManager
             }
             else
             {
-                restart = RestartCoreAsync(cancellationToken, processTransition);
+                restart = RestartCoreAsync(cancellationToken, processTransition, reason);
                 _restartTask = restart;
                 _ = restart.ContinueWith(
                     completed =>
@@ -237,12 +238,13 @@ public static class TosuManager
 
     private static async Task<Process> RestartCoreAsync(
         CancellationToken cancellationToken,
-        Func<Func<Process>, Process>? processTransition)
+        Func<Func<Process>, Process>? processTransition,
+        string reason)
     {
         await RestartGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            Log.Warning("Restarting tosu after replay-based result recovery");
+            Log.Warning("Restarting tosu after {Reason}", reason);
             Exception? firstFailure = null;
             for (var attempt = 1; attempt <= 2; attempt++)
             {
@@ -291,6 +293,10 @@ public static class TosuManager
             process = _ownedProcess;
             _ownedProcess = null;
         }
+        // A previous Kumori process may have terminated without taking its
+        // managed tosu child with it. Never adopt that stale process for a new
+        // osu! client: its cached memory pointers belong to the earlier launch.
+        process ??= FindManagedProcess();
         if (process is null)
             return;
 
@@ -304,7 +310,7 @@ public static class TosuManager
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Failed to stop broken tosu process for mandatory restart");
+            Log.Warning(ex, "Failed to stop the previous managed tosu process");
         }
         finally
         {

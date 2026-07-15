@@ -66,7 +66,8 @@ public sealed partial class AttemptSqliteSink
         using var rowCmd = con.CreateCommand();
         rowCmd.Transaction = tx;
         rowCmd.CommandText = """
-            SELECT beatmap_id, mods_key, score, accuracy, pp, combo, misses
+            SELECT beatmap_id, mods_key, score, accuracy, pp, combo, misses,
+                   n300, n100, n50
             FROM attempts WHERE id = @id
             """;
         rowCmd.Parameters.AddWithValue("@id", attemptId);
@@ -78,6 +79,13 @@ public sealed partial class AttemptSqliteSink
 
         var beatmapId = reader.GetInt64(0);
         var modsKey = reader.GetString(1);
+        // A completed/failed standard play cannot have zero core judgements.
+        // This is the characteristic broken-tosu placeholder row; keep it out
+        // of PB tables until replay result recovery supplies authoritative data.
+        if (reader.GetInt64(7) + reader.GetInt64(8) + reader.GetInt64(9) + reader.GetInt64(6) == 0)
+        {
+            return;
+        }
         var metrics = new Dictionary<string, double>
         {
             ["score"] = reader.GetDouble(2),

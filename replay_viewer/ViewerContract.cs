@@ -94,8 +94,7 @@ public sealed record ViewerContract
     {
         get
         {
-            if (Attempt.Progress >= 0.99
-                || Attempt.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase))
+            if (Attempt.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase))
                 return null;
 
             double lastSample = Samples

@@ -246,7 +246,8 @@ public sealed partial class ReplayResultRecoveryStore
             recoveredFields.Add(field);
         var recovery = root["result_recovery"] as JsonObject ?? [];
         recovery["source"] = source;
-        recovery["reason"] = "tosu_gameplay_values_missing";
+        if (fields.Any(IsCoreResultField))
+            recovery["reason"] = "tosu_gameplay_values_missing";
         recovery["recovered_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
         recovery["fields"] = recoveredFields;
         if (fields.Contains("accuracy", StringComparer.OrdinalIgnoreCase))
@@ -260,6 +261,10 @@ public sealed partial class ReplayResultRecoveryStore
         update.Parameters.AddWithValue("@id", attemptId);
         update.ExecuteNonQuery();
     }
+
+    private static bool IsCoreResultField(string field)
+        => field is "score" or "accuracy" or "grade" or "combo"
+            or "300" or "100" or "50" or "misses";
 
     private static void RebuildRecoveredPersonalBests(
         SqliteConnection con,
@@ -514,7 +519,8 @@ public sealed partial class ReplayResultRecoveryStore
         SqliteConnection con,
         SqliteTransaction tx,
         long attemptId,
-        IReadOnlyList<string> fields)
+        IReadOnlyList<string> fields,
+        bool tosuResultWasMissing)
     {
         string sourceJson = "{}";
         using (var read = con.CreateCommand())
@@ -534,6 +540,8 @@ public sealed partial class ReplayResultRecoveryStore
         recovery["simulation_schema"] = CurrentSimulationSchema;
         recovery["simulation_completed_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
         recovery["simulated_fields"] = simulatedFields;
+        if (tosuResultWasMissing)
+            recovery["reason"] = "tosu_gameplay_values_missing";
         root["result_recovery"] = recovery;
         using var update = con.CreateCommand();
         update.Transaction = tx;

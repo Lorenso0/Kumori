@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Kumori.Core;
 using Microsoft.Data.Sqlite;
 
@@ -37,6 +38,371 @@ public sealed class TrackingMaintenanceRepository
         cmd.Parameters.AddWithValue("@ended_at", endedAt.ToString("O"));
         cmd.Parameters.AddWithValue("@ended_at_utc_ms", endedAt.ToUnixTimeMilliseconds());
         return cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Finalizes tracking rows left open by a previous interrupted app process.
+    /// This must run during startup before the live tracking runtime is created.
+    /// </summary>
+    public (int Attempts, int Sessions) RecoverInterruptedTracking()
+    {
+        if (!_factory.DatabaseExists)
+        {
+            return (0, 0);
+        }
+
+        using var con = OpenWriteConnection();
+        using var tx = con.BeginTransaction();
+
+        using var attempts = con.CreateCommand();
+        attempts.Transaction = tx;
+        attempts.CommandText = """
+            UPDATE attempts
+            SET ended_at = COALESCE(ended_at, started_at),
+                ended_at_utc_ms = COALESCE(ended_at_utc_ms, started_at_utc_ms),
+                outcome = 'abandoned',
+                termination_evidence = CASE
+                    WHEN termination_evidence IS NULL OR termination_evidence = ''
+                        THEN 'startup_recovery'
+                    ELSE termination_evidence || ':startup_recovery'
+                END
+            WHERE outcome = 'active'
+            """;
+        var recoveredAttempts = attempts.ExecuteNonQuery();
+
+        using var sessions = con.CreateCommand();
+        sessions.Transaction = tx;
+        sessions.CommandText = """
+            UPDATE sessions
+            SET ended_at = COALESCE(
+                    (SELECT MAX(COALESCE(a.ended_at, a.started_at))
+                     FROM attempts a
+                     WHERE a.session_id = sessions.id),
+                    started_at),
+                ended_at_utc_ms = COALESCE(
+                    (SELECT MAX(COALESCE(a.ended_at_utc_ms, a.started_at_utc_ms))
+                     FROM attempts a
+                     WHERE a.session_id = sessions.id),
+                    started_at_utc_ms),
+                interrupted = 1
+            WHERE ended_at IS NULL
+            """;
+        var recoveredSessions = sessions.ExecuteNonQuery();
+
+        tx.Commit();
+        return (recoveredAttempts, recoveredSessions);
+    }
+
+    public int RepairMissingTosuResults()
+    {
+        if (!_factory.DatabaseExists)
+        {
+            return 0;
+        }
+
+        using var con = OpenWriteConnection();
+        using var tx = con.BeginTransaction();
+        using var repair = con.CreateCommand();
+        repair.Transaction = tx;
+        repair.CommandText = """
+            UPDATE attempts
+            SET accuracy = 0,
+                grade = NULL,
+                termination_evidence = CASE
+                    WHEN instr(COALESCE(termination_evidence, ''), 'tosu_result_missing') > 0
+                        THEN termination_evidence
+                    WHEN termination_evidence IS NULL OR termination_evidence = ''
+                        THEN 'tosu_result_missing'
+                    ELSE termination_evidence || ':tosu_result_missing'
+                END
+            WHERE outcome <> 'active'
+              AND score = 0
+              AND n300 + n100 + n50 + misses = 0
+              AND EXISTS (
+                  SELECT 1 FROM attempt_timing t
+                  WHERE t.attempt_id = attempts.id AND t.hit_count > 0
+              )
+              AND (
+                  ABS(accuracy) > 0.000001
+                  OR grade IS NOT NULL
+                  OR instr(COALESCE(termination_evidence, ''), 'tosu_result_missing') = 0
+              )
+            """;
+        var repaired = repair.ExecuteNonQuery();
+        if (repaired > 0)
+        {
+            RebuildPersonalBests(con, tx);
+        }
+        tx.Commit();
+        return repaired;
+    }
+
+    /// <summary>
+    /// Repairs partial plays whose valid tosu hit totals were overwritten by
+    /// the short-lived partial-simulation authority regression. The periodic
+    /// checkpoint stream is retained independently and is the authority used
+    /// to restore both totals and judgement events.
+    /// </summary>
+    public int RepairPartialSimulationCoreResults()
+    {
+        if (!_factory.DatabaseExists)
+            return 0;
+
+        using var con = OpenWriteConnection();
+        using var tx = con.BeginTransaction();
+        var candidates = new List<(long AttemptId, string SourceJson, string ScoreJson)>();
+        using (var read = con.CreateCommand())
+        {
+            read.Transaction = tx;
+            read.CommandText = """
+                SELECT a.id, c.source_json, c.score_json
+                FROM attempts a
+                JOIN attempt_context c ON c.attempt_id=a.id
+                WHERE a.outcome IN ('failed', 'retried', 'quit', 'abandoned')
+                  AND EXISTS (
+                      SELECT 1 FROM attempt_events e
+                      WHERE e.attempt_id=a.id AND e.event_type='checkpoint'
+                  )
+                """;
+            using var reader = read.ExecuteReader();
+            while (reader.Read())
+            {
+                string sourceJson = reader.IsDBNull(1) ? "{}" : reader.GetString(1);
+                if (!WasCoreOverwrittenByNormalPartialSimulation(sourceJson))
+                    continue;
+                candidates.Add((
+                    reader.GetInt64(0),
+                    sourceJson,
+                    reader.IsDBNull(2) ? "{}" : reader.GetString(2)));
+            }
+        }
+
+        int repaired = 0;
+        foreach (var candidate in candidates)
+        {
+            List<RecoveryCheckpoint> checkpoints = ReadRecoveryCheckpoints(con, tx, candidate.AttemptId);
+            if (checkpoints.Count == 0 || checkpoints[^1].CoreTotal <= 0)
+                continue;
+            RecoveryCheckpoint final = checkpoints[^1];
+
+            using (var update = con.CreateCommand())
+            {
+                update.Transaction = tx;
+                update.CommandText = """
+                    UPDATE attempts
+                    SET n300=@n300, n100=@n100, n50=@n50, misses=@misses
+                    WHERE id=@id AND outcome IN ('failed', 'retried', 'quit', 'abandoned')
+                    """;
+                update.Parameters.AddWithValue("@n300", final.N300);
+                update.Parameters.AddWithValue("@n100", final.N100);
+                update.Parameters.AddWithValue("@n50", final.N50);
+                update.Parameters.AddWithValue("@misses", final.Misses);
+                update.Parameters.AddWithValue("@id", candidate.AttemptId);
+                if (update.ExecuteNonQuery() == 0)
+                    continue;
+            }
+
+            string sourceJson = MarkPartialCoreCheckpointRepair(candidate.SourceJson);
+            string scoreJson = RestoreScoreJsonCore(candidate.ScoreJson, final);
+            using (var context = con.CreateCommand())
+            {
+                context.Transaction = tx;
+                context.CommandText = """
+                    UPDATE attempt_context
+                    SET source_json=@source, score_json=@score
+                    WHERE attempt_id=@id
+                    """;
+                context.Parameters.AddWithValue("@source", sourceJson);
+                context.Parameters.AddWithValue("@score", scoreJson);
+                context.Parameters.AddWithValue("@id", candidate.AttemptId);
+                context.ExecuteNonQuery();
+            }
+
+            RebuildCheckpointJudgementEvents(con, tx, candidate.AttemptId, checkpoints);
+            repaired++;
+        }
+
+        tx.Commit();
+        return repaired;
+    }
+
+    private static bool WasCoreOverwrittenByNormalPartialSimulation(string sourceJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(sourceJson);
+            if (!document.RootElement.TryGetProperty("result_recovery", out var recovery)
+                || recovery.ValueKind != JsonValueKind.Object
+                || recovery.TryGetProperty("reason", out _)
+                || !recovery.TryGetProperty("simulated_fields", out var fields)
+                || fields.ValueKind != JsonValueKind.Array)
+                return false;
+            return fields.EnumerateArray().Any(field =>
+                field.ValueKind == JsonValueKind.String && IsCoreSimulationField(field.GetString()));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsCoreSimulationField(string? field)
+        => field is "300" or "100" or "50" or "misses";
+
+    private static List<RecoveryCheckpoint> ReadRecoveryCheckpoints(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId)
+    {
+        using var read = con.CreateCommand();
+        read.Transaction = tx;
+        read.CommandText = """
+            SELECT captured_at, map_time_ms, data_json
+            FROM attempt_events
+            WHERE attempt_id=@id AND event_type='checkpoint'
+            ORDER BY id
+            """;
+        read.Parameters.AddWithValue("@id", attemptId);
+        using var reader = read.ExecuteReader();
+        var checkpoints = new List<RecoveryCheckpoint>();
+        while (reader.Read())
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(reader.GetString(2));
+                JsonElement root = document.RootElement;
+                checkpoints.Add(new RecoveryCheckpoint(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+                    Count(root, "n300"),
+                    Count(root, "n100"),
+                    Count(root, "n50"),
+                    Count(root, "misses"),
+                    Count(root, "slider_breaks")));
+            }
+            catch (JsonException)
+            {
+                // A malformed checkpoint cannot be used as recovery evidence.
+            }
+        }
+        return checkpoints;
+
+        static int Count(JsonElement root, string name)
+            => root.TryGetProperty(name, out var value) && value.TryGetDouble(out double number)
+                ? Math.Max(0, (int)Math.Round(number))
+                : 0;
+    }
+
+    private static string RestoreScoreJsonCore(string scoreJson, RecoveryCheckpoint checkpoint)
+    {
+        JsonObject root;
+        try { root = JsonNode.Parse(scoreJson) as JsonObject ?? []; }
+        catch (JsonException) { root = []; }
+        var hits = root["hits"] as JsonObject ?? [];
+        hits["_300"] = checkpoint.N300;
+        hits["_100"] = checkpoint.N100;
+        hits["_50"] = checkpoint.N50;
+        hits["_0"] = checkpoint.Misses;
+        root["hits"] = hits;
+        root.Remove("recovered_from_replay");
+        return root.ToJsonString();
+    }
+
+    private static string MarkPartialCoreCheckpointRepair(string sourceJson)
+    {
+        JsonObject root;
+        try { root = JsonNode.Parse(sourceJson) as JsonObject ?? []; }
+        catch (JsonException) { root = []; }
+        var recovery = root["result_recovery"] as JsonObject ?? [];
+        if (recovery["simulated_fields"] is JsonArray fields)
+        {
+            var retained = new JsonArray();
+            foreach (JsonNode? field in fields)
+            {
+                string? name = field?.GetValue<string>();
+                if (!IsCoreSimulationField(name))
+                    retained.Add(name);
+            }
+            recovery["simulated_fields"] = retained;
+        }
+        recovery["core_result_source"] = "tosu_checkpoint";
+        recovery["core_result_repaired_at_utc"] = DateTimeOffset.UtcNow.ToString("O");
+        root["result_recovery"] = recovery;
+        return root.ToJsonString();
+    }
+
+    private static void RebuildCheckpointJudgementEvents(
+        SqliteConnection con,
+        SqliteTransaction tx,
+        long attemptId,
+        IReadOnlyList<RecoveryCheckpoint> checkpoints)
+    {
+        using (var delete = con.CreateCommand())
+        {
+            delete.Transaction = tx;
+            delete.CommandText = """
+                DELETE FROM attempt_events
+                WHERE attempt_id=@id
+                  AND event_type IN ('miss', 'hit_50', 'hit_100', 'slider_break')
+                """;
+            delete.Parameters.AddWithValue("@id", attemptId);
+            delete.ExecuteNonQuery();
+        }
+
+        if (checkpoints.Count < 2)
+            return;
+        RecoveryCheckpoint previous = checkpoints[0];
+        for (int index = 1; index < checkpoints.Count; index++)
+        {
+            RecoveryCheckpoint current = checkpoints[index];
+            AddCumulative("hit_100", current.N100, previous.N100);
+            AddCumulative("hit_50", current.N50, previous.N50);
+            AddPerIncrement("miss", current.Misses, previous.Misses);
+            AddPerIncrement("slider_break", current.SliderBreaks, previous.SliderBreaks);
+            previous = current;
+
+            void AddCumulative(string eventType, int value, int prior)
+            {
+                if (value <= prior) return;
+                Insert(eventType, value, JsonSerializer.Serialize(new { delta = value - prior }));
+            }
+
+            void AddPerIncrement(string eventType, int value, int prior)
+            {
+                for (int count = 0; count < value - prior; count++)
+                    Insert(eventType, prior + count + 1, "{}");
+            }
+
+            void Insert(string eventType, int value, string dataJson)
+            {
+                using var insert = con.CreateCommand();
+                insert.Transaction = tx;
+                insert.CommandText = """
+                    INSERT INTO attempt_events(
+                        attempt_id, captured_at, map_time_ms, event_type, value, data_json)
+                    VALUES(@id, @captured, @time, @type, @value, @data)
+                    """;
+                insert.Parameters.AddWithValue("@id", attemptId);
+                insert.Parameters.AddWithValue("@captured", current.CapturedAt);
+                insert.Parameters.AddWithValue("@time", current.MapTimeMs);
+                insert.Parameters.AddWithValue("@type", eventType);
+                insert.Parameters.AddWithValue("@value", value);
+                insert.Parameters.AddWithValue("@data", dataJson);
+                insert.ExecuteNonQuery();
+            }
+        }
+    }
+
+    private sealed record RecoveryCheckpoint(
+        string CapturedAt,
+        long MapTimeMs,
+        int N300,
+        int N100,
+        int N50,
+        int Misses,
+        int SliderBreaks)
+    {
+        public int CoreTotal => N300 + N100 + N50 + Misses;
     }
 
     public int DeleteAttempt(long attemptId)
@@ -563,10 +929,12 @@ public sealed class TrackingMaintenanceRepository
                                    WHERE previous.beatmap_id = a.beatmap_id
                                      AND previous.mods_key = a.mods_key
                                      AND previous.outcome IN ('completed', 'failed')
+                                     AND previous.n300 + previous.n100 + previous.n50 + previous.misses > 0
                                      AND previous.id < a.id
                                ) AS previous_value
                         FROM attempts a
                         WHERE a.outcome IN ('completed', 'failed')
+                          AND a.n300 + a.n100 + a.n50 + a.misses > 0
                     )
                     INSERT INTO attempt_improvements(attempt_id, metric, previous_value, new_value, delta)
                     SELECT id, @metric, previous_value, new_value,
@@ -591,6 +959,7 @@ public sealed class TrackingMaintenanceRepository
                            ) AS row_number
                     FROM attempts a
                     WHERE outcome IN ('completed', 'failed')
+                      AND n300 + n100 + n50 + misses > 0
                 )
                 WHERE row_number = 1
                 """;

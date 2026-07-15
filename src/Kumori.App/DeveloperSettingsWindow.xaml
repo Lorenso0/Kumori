@@ -61,8 +61,8 @@
                         <TextBlock Text="Writes every raw tosu WebSocket packet to timestamped JSONL fixture files. Leave this disabled during normal use because recordings can consume significant disk space."
                                    Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" Margin="16,-2,0,0" />
                         <Separator Margin="0,12" />
-                        <CheckBox x:Name="ForceReplayRecoveryNextPlay" Content="Test replay recovery on the next completed play" />
-                        <TextBlock Text="One shot: discards the next completed play's tosu result values, recovers them from its local replay, restarts tosu, and refreshes the dashboard."
+                        <CheckBox x:Name="ForceReplayRecoveryNextPlay" Content="Test replay recovery on the next play" />
+                        <TextBlock Text="One shot: discards the next play's tosu result values, recovers completed plays from a local replay or partial plays from retained frames, restarts tosu when telemetry is missing, and refreshes the dashboard."
                                    Style="{StaticResource Text.Muted}" FontSize="10" TextWrapping="Wrap" Margin="16,-2,0,0" />
                     </StackPanel>
                 </Border>

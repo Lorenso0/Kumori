@@ -24,6 +24,10 @@ public sealed record ReplayResultRecoveryOutcome(
     bool Applied,
     IReadOnlyList<string> RecoveredFields)
 {
+    public bool RecoveredCoreResult => RecoveredFields.Any(resultField =>
+        resultField is "score" or "accuracy" or "grade" or "combo"
+            or "300" or "100" or "50" or "misses");
+
     public static ReplayResultRecoveryOutcome NotReady { get; } = new(false, false, []);
     public static ReplayResultRecoveryOutcome NoChanges { get; } = new(true, false, []);
 }

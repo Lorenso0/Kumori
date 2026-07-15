@@ -46,7 +46,7 @@ public sealed class ReplayViewerContractService
     /// </summary>
     public async Task<ReplaySimulationResult> SimulateRecoveryAsync(
         long attemptId,
-        string replayPath,
+        string? replayPath,
         string beatmapPath,
         string? mediaDirectory,
         IReadOnlyDictionary<string, string>? mediaPaths,
@@ -55,7 +55,7 @@ public sealed class ReplayViewerContractService
     {
         if (samples.Count == 0)
             throw new InvalidOperationException("Replay simulation requires replay frames.");
-        if (!File.Exists(replayPath))
+        if (!string.IsNullOrWhiteSpace(replayPath) && !File.Exists(replayPath))
             throw new FileNotFoundException("Recovered replay file not found.", replayPath);
         if (!File.Exists(beatmapPath))
             throw new FileNotFoundException("Replay beatmap file not found.", beatmapPath);
@@ -94,7 +94,7 @@ public sealed class ReplayViewerContractService
             beatmap_path = Path.GetFullPath(beatmapPath),
             media_directory = Path.GetFullPath(mediaDirectory ?? Path.GetDirectoryName(beatmapPath)!),
             media_paths = mediaPaths ?? new Dictionary<string, string>(),
-            replay_path = Path.GetFullPath(replayPath),
+            replay_path = string.IsNullOrWhiteSpace(replayPath) ? null : Path.GetFullPath(replayPath),
             settings = ReplaySettings(),
             judgement_events = Array.Empty<object>(),
             final_hits = new
@@ -138,12 +138,40 @@ public sealed class ReplayViewerContractService
                 ?? throw new InvalidDataException("Replay simulation result was empty.");
             if (prepared.Summary is null)
                 throw new InvalidDataException("Replay simulation did not return a result summary.");
+            ValidateSimulationCompleteness(details, prepared.Summary, prepared.Judgements);
             return prepared.Summary with { Judgements = prepared.Judgements };
         }
         finally
         {
             try { File.Delete(contractPath); } catch { }
             try { File.Delete(analysisPath); } catch { }
+        }
+    }
+
+    internal static void ValidateSimulationCompleteness(
+        AttemptDetails details,
+        ReplaySimulationResult summary,
+        IReadOnlyList<ReplaySimulationJudgement> judgements)
+    {
+        int simulatedCoreTotal = summary.N300 + summary.N100 + summary.N50 + summary.Misses;
+        int capturedCoreTotal = details.N300 + details.N100 + details.N50 + details.Summary.Misses;
+        int timingEvidence = details.Timing?.HitCount ?? 0;
+        int minimumCoreTotal = Math.Max(capturedCoreTotal, timingEvidence);
+        if (simulatedCoreTotal < minimumCoreTotal)
+        {
+            throw new InvalidDataException(
+                $"Replay simulation was incomplete: scored {simulatedCoreTotal} core objects but capture evidence requires at least {minimumCoreTotal}.");
+        }
+
+        int simulatedMissEvents = judgements.Count(judgement => judgement.Kind == 0);
+        int simulatedFifties = judgements.Count(judgement => judgement.Kind == 1);
+        int simulatedHundreds = judgements.Count(judgement => judgement.Kind == 2);
+        if (simulatedMissEvents != summary.Misses
+            || simulatedFifties != summary.N50
+            || simulatedHundreds != summary.N100)
+        {
+            throw new InvalidDataException(
+                "Replay simulation judgement events did not match its numeric 100/50/miss summary.");
         }
     }
 
@@ -719,6 +747,8 @@ public sealed record ReplaySimulationResult
     public int N50 { get; init; }
     public int Misses { get; init; }
     public double Accuracy { get; init; }
+    public long Score { get; init; }
+    public int AchievedCombo { get; init; }
     public int SliderBreaks { get; init; }
     public int LargeTickHits { get; init; }
     public int LargeTickMisses { get; init; }

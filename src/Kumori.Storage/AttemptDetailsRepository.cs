@@ -75,12 +75,13 @@ public sealed class AttemptDetailsRepository
             string clientKind = document.RootElement.TryGetProperty("client_kind", out var clientElement)
                 ? clientElement.GetString() ?? "unknown"
                 : "unknown";
-            bool recovered = document.RootElement.TryGetProperty("result_recovery", out var recovery)
-                             && recovery.ValueKind == JsonValueKind.Object;
+            bool hasRecoveryMetadata = document.RootElement.TryGetProperty("result_recovery", out var recovery)
+                                       && recovery.ValueKind == JsonValueKind.Object;
+            bool recovered = hasRecoveryMetadata && IsMissingTosuRecovery(recovery);
             string? recoverySource = recovered && recovery.TryGetProperty("source", out var sourceElement)
                 ? sourceElement.GetString()
                 : null;
-            bool simulationCompleted = recovered
+            bool simulationCompleted = hasRecoveryMetadata
                                        && recovery.TryGetProperty("simulation", out var simulation)
                                        && simulation.GetString()?.Equals("completed", StringComparison.OrdinalIgnoreCase) == true;
             return (beatmap, media, clientKind, recovered, recoverySource, simulationCompleted);
@@ -90,6 +91,34 @@ public sealed class AttemptDetailsRepository
             return (null, null, "unknown", false, null, false);
         }
     }
+
+    private static bool IsMissingTosuRecovery(JsonElement recovery)
+    {
+        if (recovery.ValueKind != JsonValueKind.Object
+            || !recovery.TryGetProperty("reason", out var reason)
+            || !string.Equals(reason.GetString(), "tosu_gameplay_values_missing", StringComparison.Ordinal))
+            return false;
+
+        bool foundFieldList = false;
+        foreach (string propertyName in new[] { "fields", "simulated_fields" })
+        {
+            if (!recovery.TryGetProperty(propertyName, out var fields)
+                || fields.ValueKind != JsonValueKind.Array)
+                continue;
+            foundFieldList = true;
+            if (fields.EnumerateArray().Any(field =>
+                    field.ValueKind == JsonValueKind.String && IsCoreResultField(field.GetString())))
+                return true;
+        }
+
+        // Preserve the notice for legacy recovery records that predate field
+        // provenance, while excluding modern simulation/enrichment metadata.
+        return !foundFieldList;
+    }
+
+    private static bool IsCoreResultField(string? field)
+        => field is "score" or "accuracy" or "grade" or "combo"
+            or "300" or "100" or "50" or "misses";
 
     public IReadOnlyList<AttemptTrendSummary> GetRecentSameMapAttempts(long attemptId, int limit = 6)
     {

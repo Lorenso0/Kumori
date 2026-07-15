@@ -351,6 +351,180 @@ public class MissAnalysisBuilderTests
     }
 
     [Fact]
+    public void LocalApproach_KeepsTrajectoryWhenCursorNeverEntersTargetRadius()
+    {
+        MissReplayFrameSample[] frames = Enumerable.Range(0, 11)
+            .Select(index => new MissReplayFrameSample(
+                900 + index * 16,
+                new Vector2(350 + Math.Abs(index - 6) * 4, 200 + index),
+                false))
+            .ToArray();
+
+        MissReplayFrameSample[] result = MissAnalysisBuilder.isolateLocalApproach(
+            frames,
+            new Vector2(200, 200),
+            maximumDistance: 70,
+            anchorTime: 1000);
+
+        Assert.True(result.Length >= 7);
+        Assert.Contains(result, frame => frame.Time == 996);
+        Assert.True(result.Zip(result.Skip(1)).All(pair => pair.Second.Time > pair.First.Time));
+    }
+
+    [Fact]
+    public void LocalApproach_ExpandsSingleClosestSampleIntoRenderablePath()
+    {
+        MissReplayFrameSample[] frames = Enumerable.Range(0, 9)
+            .Select(index => new MissReplayFrameSample(
+                900 + index * 16,
+                new Vector2(260 + Math.Abs(index - 4) * 20, 200),
+                false))
+            .ToArray();
+
+        MissReplayFrameSample[] result = MissAnalysisBuilder.isolateLocalApproach(
+            frames,
+            new Vector2(200, 200),
+            maximumDistance: 65,
+            anchorTime: 964);
+
+        Assert.True(result.Length >= 7);
+        Assert.Contains(result, frame => frame.Time == 964);
+    }
+
+    [Fact]
+    public void ContiguousFrames_PreserveFastButPlausibleReplayAim()
+    {
+        MissReplayFrameSample[] frames =
+        [
+            new(1000, new Vector2(100, 100), false),
+            new(1016, new Vector2(154, 100), false),
+            new(1032, new Vector2(208, 100), false),
+        ];
+
+        MissReplayFrameSample[] result = MissAnalysisBuilder.isolateContiguousFrames(
+            frames, 900, 1100, 1016);
+
+        Assert.Equal(3, result.Length);
+    }
+
+    [Fact]
+    public void MergeAuthoritative_KeepsExactPlacementAndRestoresEveryMissingKind()
+    {
+        var analysis = new BeatmapAnalysis("", "", "", 9, 8, 4,
+        [
+            new HitObjectAnalysis("HitCircle", 1000, 1000, 100, 100, 31, 600, 0, 0, 0, []),
+            new HitObjectAnalysis("HitCircle", 2000, 2000, 200, 100, 31, 600, 0, 0, 0, []),
+            new HitObjectAnalysis("HitCircle", 3000, 3000, 300, 100, 31, 600, 0, 0, 0, []),
+            new HitObjectAnalysis("HitCircle", 4000, 4000, 400, 100, 31, 600, 0, 0, 0, []),
+        ], new HitWindowAnalysis(20, 50, 100, 150));
+        MissAnalysisModel captured = MissAnalysisBuilder.Build(
+            Contract([
+                Event(1100, "miss"),
+                Event(2100, "miss"),
+                Event(3100, "100"),
+                Event(4100, "50"),
+                Event(4200, "slider_break"),
+            ]),
+            analysis,
+            Frames(Frame(1000, 100, 100)));
+        MissAnalysisModel simulated = MissAnalysisBuilder.BuildFromPrepared(
+            analysis,
+            Frames(Frame(1000, 100, 100)),
+            [new PreparedReplayJudgement(
+                KumoriTimelineMarkerKind.Miss,
+                1090,
+                1000,
+                1000,
+                1000,
+                "Exact circle",
+                123,
+                234,
+                31,
+                90,
+                5,
+                0)]);
+
+        MissAnalysisModel merged = MissAnalysisBuilder.MergeAuthoritative(captured, simulated);
+
+        Assert.Equal(2, merged.Entries.Count(entry => entry.Kind == KumoriTimelineMarkerKind.Miss));
+        Assert.Single(merged.Entries.Where(entry => entry.Kind == KumoriTimelineMarkerKind.Ok));
+        Assert.Single(merged.Entries.Where(entry => entry.Kind == KumoriTimelineMarkerKind.Meh));
+        Assert.Single(merged.Entries.Where(entry => entry.Kind == KumoriTimelineMarkerKind.SliderBreak));
+        MissAnalysisEntry exact = Assert.Single(merged.Entries.Where(entry => entry.Source == AnalysisDataSource.Lazer));
+        Assert.Equal(new Vector2(123, 234), exact.TargetPosition);
+        Assert.True(exact.ExactTiming);
+        Assert.Equal(Enumerable.Range(1, 5), merged.Entries.Select(entry => entry.Index));
+    }
+
+    [Fact]
+    public void MergeAuthoritative_DoesNotDuplicateFullySimulatedOccurrences()
+    {
+        MissAnalysisModel captured = MissAnalysisBuilder.Build(
+            Contract([Event(1100, "miss"), Event(2100, "miss")]),
+            Objects(Circle(1000, 100, 100), Circle(2000, 200, 200)),
+            Frames(Frame(1000, 100, 100)));
+        MissAnalysisModel simulated = MissAnalysisBuilder.BuildFromJudgements(
+            Objects(Circle(1000, 100, 100), Circle(2000, 200, 200)),
+            Frames(Frame(1000, 100, 100)),
+            [
+                new ReplayJudgementSnapshot(Circle(1000, 100, 100), KumoriTimelineMarkerKind.Miss, 1100, 100, 1, 0),
+                new ReplayJudgementSnapshot(Circle(2000, 200, 200), KumoriTimelineMarkerKind.Miss, 2100, 100, 1, 0),
+            ]);
+
+        MissAnalysisModel merged = MissAnalysisBuilder.MergeAuthoritative(captured, simulated);
+
+        Assert.Equal(2, merged.Entries.Count);
+        Assert.All(merged.Entries, entry => Assert.Equal(AnalysisDataSource.Lazer, entry.Source));
+    }
+
+    [Fact]
+    public void MergeAuthoritative_CapsSimulatedClassificationToFinalTosuCounts()
+    {
+        MissAnalysisModel captured = MissAnalysisBuilder.Build(
+            Contract([Event(1100, "100"), Event(2100, "100")]),
+            Objects(Circle(1000, 100, 100), Circle(2000, 200, 200)),
+            Frames(Frame(1000, 100, 100)));
+        MissAnalysisModel simulated = MissAnalysisBuilder.BuildFromJudgements(
+            Objects(),
+            Frames(Frame(1000, 100, 100)),
+            [
+                new ReplayJudgementSnapshot(Circle(1000, 100, 100), KumoriTimelineMarkerKind.Ok, 1100, 100, 1, 0),
+                new ReplayJudgementSnapshot(Circle(2000, 200, 200), KumoriTimelineMarkerKind.Ok, 2100, 100, 1, 0),
+                new ReplayJudgementSnapshot(Circle(3000, 300, 300), KumoriTimelineMarkerKind.Ok, 3100, 100, 1, 0),
+            ]);
+        var authority = new Dictionary<KumoriTimelineMarkerKind, int>
+        {
+            [KumoriTimelineMarkerKind.Ok] = 2,
+        };
+
+        MissAnalysisModel merged = MissAnalysisBuilder.MergeAuthoritative(captured, simulated, authority);
+
+        Assert.Equal(2, merged.Entries.Count);
+        Assert.All(merged.Entries, entry => Assert.Equal(AnalysisDataSource.Lazer, entry.Source));
+    }
+
+    [Fact]
+    public void AuthoritativeCoreCounts_RequiresARealFinalResult()
+    {
+        ViewerContract missing = Contract([]) with
+        {
+            FinalHits = new FinalHitsContract(),
+        };
+        ViewerContract captured = Contract([]) with
+        {
+            FinalHits = new FinalHitsContract { N300 = 50, N100 = 2, N50 = 1, Misses = 3 },
+        };
+
+        Assert.Null(MissAnalysisBuilder.AuthoritativeCoreCounts(missing));
+        IReadOnlyDictionary<KumoriTimelineMarkerKind, int> counts =
+            Assert.IsAssignableFrom<IReadOnlyDictionary<KumoriTimelineMarkerKind, int>>(
+                MissAnalysisBuilder.AuthoritativeCoreCounts(captured));
+        Assert.Equal(3, counts[KumoriTimelineMarkerKind.Miss]);
+        Assert.Equal(1, counts[KumoriTimelineMarkerKind.Meh]);
+        Assert.Equal(2, counts[KumoriTimelineMarkerKind.Ok]);
+    }
+
+    [Fact]
     public void Build_UsesNearestSliderComponentForSliderBreak()
     {
         var analysis = new BeatmapAnalysis("", "", "", 9, 8, 4,

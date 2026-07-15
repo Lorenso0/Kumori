@@ -45,7 +45,7 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
     }
 
     [Fact]
-    public void NonCompletedPlay_DoesNotConsumeSwitchOrStripFinalResult()
+    public void PartialPlay_IsStrippedAndConsumesSwitch()
     {
         SettingsService settings = CreateArmedSettings();
         var capture = new CaptureSink();
@@ -55,8 +55,10 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
         sink.StartAttempt(new AttemptStart { Identity = "checksum:test" });
         sink.Finalize(new AttemptFinalization("retried", "retry", snapshot, 1));
 
-        Assert.Equal(snapshot.Score, capture.LastFinalization!.Snapshot.Score);
-        Assert.True(settings.Current.Developer.ForceReplayRecoveryNextPlay);
+        AssertMissing(capture.LastFinalization!.Snapshot);
+        Assert.Equal("retried", capture.LastFinalization.Outcome);
+        Assert.True(LazerReplayFrameRecoverySink.HasMissingTosuResult(capture.LastFinalization));
+        Assert.False(settings.Current.Developer.ForceReplayRecoveryNextPlay);
     }
 
     [Fact]
@@ -89,6 +91,31 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
 
         deferredWrite();
         Assert.False(settings.Current.Developer.ForceReplayRecoveryNextPlay);
+    }
+
+    [Fact]
+    public void ResultHealth_DetectsZeroTosuTelemetryWhenTimingProvesRealHits()
+    {
+        var broken = new AttemptFinalization(
+            "failed",
+            "state_transition",
+            new AttemptSnapshot
+            {
+                Score = 0,
+                Accuracy = 100,
+                TimingOffsets = [-12, 4, 7],
+            },
+            1);
+
+        Assert.True(LazerReplayFrameRecoverySink.HasMissingTosuResult(broken));
+        Assert.False(LazerReplayFrameRecoverySink.HasMissingTosuResult(
+            broken with { Snapshot = broken.Snapshot with { N300 = 3 } }));
+        Assert.False(LazerReplayFrameRecoverySink.HasMissingTosuResult(
+            broken with { Snapshot = broken.Snapshot with { TimingOffsets = [] } }));
+        Assert.True(LazerReplayFrameRecoverySink.HasMissingTosuResult(
+            broken with { Outcome = "quit" }));
+        Assert.False(LazerReplayFrameRecoverySink.HasMissingTosuResult(
+            broken with { Outcome = "active" }));
     }
 
     private SettingsService CreateArmedSettings()
@@ -148,7 +175,7 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
         Assert.Equal(0, snapshot.N50);
         Assert.Equal(0, snapshot.Misses);
         Assert.Equal(0, snapshot.UnstableRate);
-        Assert.Empty(snapshot.TimingOffsets);
+        Assert.NotEmpty(snapshot.TimingOffsets);
         Assert.Null(snapshot.BeatmapStats.Stars);
     }
 

@@ -16,6 +16,8 @@ namespace Kumori.App;
 
 public partial class App
 {
+    internal static bool ShouldLaunchTosuForRecovery(bool osuRunning) => osuRunning;
+
     private void RequestRecoveryTosuRestart(long attemptId)
     {
         var startWorker = false;
@@ -76,6 +78,20 @@ public partial class App
                             gameplayToken.ThrowIfCancellationRequested();
                             try
                             {
+                                // Historical/startup reconciliation can discover
+                                // a broken result while osu! is closed. That is
+                                // not permission to launch tosu early: the next
+                                // confirmed osu! startup performs a clean restart.
+                                if (!ShouldLaunchTosuForRecovery(OsuProcessDetector.IsRunning()))
+                                {
+                                    TosuManager.CloseOwned();
+                                    lock (_osuCompanionGate)
+                                        _tosuStartedForOsu = false;
+                                    Log.Information(
+                                        "Skipped recovery tosu restart for attempt {AttemptId} because osu! is not running; confirmed osu! startup will launch a fresh process",
+                                        attemptId);
+                                    return true;
+                                }
                                 if (!File.Exists(AppPaths.TosuExecutable))
                                 {
                                     await TosuManager.EnsureInstalledAsync(
@@ -297,10 +313,16 @@ public partial class App
                     return;
                 }
 
-                if (File.Exists(AppPaths.TosuExecutable))
-                    TosuManager.LaunchInstalled();
-                else
-                    await TosuManager.EnsureInstalledAndLaunchAsync(cancellationToken: _backgroundCts.Token);
+                if (!File.Exists(AppPaths.TosuExecutable))
+                    await TosuManager.EnsureInstalledAsync(cancellationToken: _backgroundCts.Token);
+
+                // Always replace an old managed process after the confirmed
+                // osu! startup window. Reusing one left by an earlier Kumori or
+                // osu! process preserves stale GameBase pointers and produces
+                // all-zero gameplay telemetry on the first play.
+                await TosuManager.RestartAsync(
+                    _backgroundCts.Token,
+                    reason: "confirmed osu! startup");
                 if (!OsuProcessDetector.IsRunning())
                 {
                     TosuManager.CloseOwned();

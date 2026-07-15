@@ -89,6 +89,37 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
+    public void BrokenZeroJudgementResult_DoesNotCreatePersonalBests()
+    {
+        var sink = CreateSink();
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "broken-tosu-result",
+            WallTime = 1_788_000_000,
+        });
+        sink.Finalize(new AttemptFinalization(
+            "failed",
+            "state_transition:play->selectplay",
+            new AttemptSnapshot
+            {
+                Identity = "broken-tosu-result",
+                WallTime = 1_788_000_010,
+                DurationSeconds = 10,
+                Accuracy = 100,
+                Grade = "F",
+                TimingOffsets = [-10, 5, 8],
+            },
+            Ordinal: 1));
+
+        using var con = Open();
+        Assert.Equal(1, Scalar<long>(con, "SELECT COUNT(*) FROM attempts"));
+        Assert.Equal(0d, Scalar<double>(con, "SELECT accuracy FROM attempts"));
+        Assert.Equal(0, Scalar<long>(con, "SELECT COUNT(*) FROM attempts WHERE grade IS NOT NULL"));
+        Assert.Equal(0, Scalar<long>(con, "SELECT COUNT(*) FROM personal_bests"));
+        Assert.Equal(0, Scalar<long>(con, "SELECT COUNT(*) FROM attempt_improvements"));
+    }
+
+    [Fact]
     public void EmptyRetryPulse_IsDeletedAndReplacementUsesFreshDurableId()
     {
         var sink = CreateSink();

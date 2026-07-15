@@ -631,6 +631,16 @@ public sealed partial class AttemptSqliteSink : IAttemptSink, ISessionSink
         cancellationToken.ThrowIfCancellationRequested();
         if (attempt.Snapshot is { } snapshot)
         {
+            if (attempt.Finalization is not null
+                && snapshot.TimingOffsets.Count > 0
+                && snapshot.Score == 0
+                && snapshot.N300 + snapshot.N100 + snapshot.N50 + snapshot.Misses <= 0)
+            {
+                // Timing data proves gameplay occurred, while the zero result is
+                // a broken-tosu placeholder. Persist neutral display values until
+                // the checksum-matched replay supplies the authoritative result.
+                snapshot = snapshot with { Accuracy = 0, Grade = null };
+            }
             UpdateAttempt(con, tx, attempt.Id, snapshot);
             if (snapshot.Mods.Count > 0 || !snapshot.ModsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
                 ReplaceMods(con, tx, attempt.Id, snapshot.ModsKey, snapshot.Mods);

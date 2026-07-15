@@ -193,21 +193,30 @@ public partial class ReplayViewerGame : OsuGameBase
         player.SeekBar = seekBar;
 
         bool authoritativeStableJudgements = usesAuthoritativeStableJudgements();
-        MissAnalysisModel initialModel = preparedAnalysis != null && !authoritativeStableJudgements
-            ? MissAnalysisBuilder.BuildFromPrepared(
+        OsuReplayFrame[] analysisFrames = score.Replay.Frames.OfType<OsuReplayFrame>().ToArray();
+        MissAnalysisModel capturedModel = MissAnalysisBuilder.Build(contract, analysis, analysisFrames);
+        MissAnalysisModel initialModel = capturedModel;
+        if (preparedAnalysis != null && !authoritativeStableJudgements)
+        {
+            MissAnalysisModel simulatedModel = MissAnalysisBuilder.BuildFromPrepared(
                 analysis,
-                score.Replay.Frames.OfType<OsuReplayFrame>(),
+                analysisFrames,
                 preparedAnalysis.Judgements,
                 preparedAnalysis.Frames,
-                contract.AnalysisCoverageEnd)
-            : MissAnalysisBuilder.Build(
-                contract,
-                analysis,
-                score.Replay.Frames.OfType<OsuReplayFrame>());
+                contract.AnalysisCoverageEnd);
+            initialModel = MissAnalysisBuilder.MergeAuthoritative(
+                capturedModel,
+                simulatedModel,
+                MissAnalysisBuilder.AuthoritativeCoreCounts(contract));
+        }
         if (preparedAnalysis != null && !authoritativeStableJudgements)
         {
             seekBar.SetMarkers(initialModel.Markers);
-            Logger.Log($"Kumori: loaded {initialModel.Entries.Count} exact judgements from prepared replay analysis.");
+            int restored = initialModel.Entries.Count(entry => entry.Source == AnalysisDataSource.Inferred);
+            Logger.Log(restored == 0
+                ? $"Kumori: loaded {initialModel.Entries.Count} exact judgements from prepared replay analysis."
+                : $"Kumori: prepared replay analysis omitted {restored} captured judgements; exact lazer placements were retained and missing events were restored.",
+                level: restored == 0 ? LogLevel.Verbose : LogLevel.Important);
         }
         advancedAnalyzerViewModel = new AdvancedAnalyzerViewModel(initialModel, viewerConfig, sessionContract);
         var analyzerRuntime = new AdvancedAnalyzerRuntime(() => currentPlayer);
@@ -240,25 +249,27 @@ public partial class ReplayViewerGame : OsuGameBase
         if (preparedAnalysis == null && !authoritativeStableJudgements)
             player.AnalysisJudgementsReady = snapshots => Schedule(() =>
         {
-            int expectedEvents = contract.JudgementEvents
-                .Where(e => KumoriTimelineMarkers.KindFromContract(e.Kind) != null)
-                .Sum(e => Math.Max(1, e.Delta));
-            int minimumCompletePass = Math.Max(1, (int)Math.Ceiling(expectedEvents * 0.8));
-
-            if (snapshots.Count < minimumCompletePass || !ReferenceEquals(currentPlayer, player))
+            if (!ReferenceEquals(currentPlayer, player))
             {
-                Logger.Log($"Kumori: lazer analysis pass was incomplete ({snapshots.Count}/{expectedEvents}); using captured events with playable beatmap geometry.", level: LogLevel.Important);
                 return;
             }
 
-            MissAnalysisModel exactModel = MissAnalysisBuilder.BuildFromJudgements(
+            MissAnalysisModel simulatedModel = MissAnalysisBuilder.BuildFromJudgements(
                 workingBeatmap.Beatmap.HitObjects,
-                score.Replay.Frames.OfType<OsuReplayFrame>(),
+                analysisFrames,
                 snapshots,
                 contract.AnalysisCoverageEnd);
-            advancedAnalyzerViewModel.ReplaceModel(exactModel);
-            seekBar.SetMarkers(exactModel.Markers);
-            Logger.Log($"Kumori: analyzer and seek bar now use {exactModel.Entries.Count} exact lazer results.");
+            MissAnalysisModel mergedModel = MissAnalysisBuilder.MergeAuthoritative(
+                capturedModel,
+                simulatedModel,
+                MissAnalysisBuilder.AuthoritativeCoreCounts(contract));
+            advancedAnalyzerViewModel.ReplaceModel(mergedModel);
+            seekBar.SetMarkers(mergedModel.Markers);
+            int restored = mergedModel.Entries.Count(entry => entry.Source == AnalysisDataSource.Inferred);
+            Logger.Log(restored == 0
+                ? $"Kumori: analyzer and seek bar now use {mergedModel.Entries.Count} exact lazer results."
+                : $"Kumori: runtime lazer pass omitted {restored} captured judgements; retained exact placements and restored missing events.",
+                level: restored == 0 ? LogLevel.Verbose : LogLevel.Important);
         });
 
         screenStack.Push(player);

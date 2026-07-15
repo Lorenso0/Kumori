@@ -5,7 +5,7 @@ using Serilog;
 namespace Kumori.App;
 
 /// <summary>
-/// One-shot developer diagnostic that feeds a completed play through the real
+/// One-shot developer diagnostic that feeds a finalized play through the real
 /// missing-tosu replay recovery path. Only result telemetry is removed; map
 /// identity, mods, timing and attempt lifecycle remain valid so the persisted
 /// replay can be located and simulated normally.
@@ -44,7 +44,7 @@ internal sealed class ReplayRecoveryTestAttemptSink(
     public void Finalize(AttemptFinalization finalization)
     {
         bool consume = forceCurrentAttempt
-                       && finalization.Outcome.Equals("completed", StringComparison.OrdinalIgnoreCase);
+                       && !finalization.Outcome.Equals("active", StringComparison.OrdinalIgnoreCase);
         forceCurrentAttempt = false;
         if (!consume)
         {
@@ -53,7 +53,7 @@ internal sealed class ReplayRecoveryTestAttemptSink(
         }
 
         Log.Warning(
-            "Developer replay recovery test is discarding tosu result telemetry for the next completed play");
+            "Developer replay recovery test is discarding tosu result telemetry for the finalized play");
         try
         {
             inner.Finalize(finalization with
@@ -117,7 +117,6 @@ internal sealed class ReplayRecoveryTestAttemptSink(
         SliderTailHits = 0,
         SliderTailMisses = 0,
         UnstableRate = 0,
-        TimingOffsets = [],
         BeatmapStats = new BeatmapStats(),
     };
 }

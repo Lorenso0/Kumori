@@ -1,5 +1,34 @@
 [
   {
+    "version": "0.4.3",
+    "date": "2026-07-15",
+    "major": [
+      "Rebuilt replay result recovery and simulation so completed, failed, retried, quit, and abandoned plays retain the correct data authority",
+      "Hardened managed tosu startup and recovery around osu! process lifetime to prevent broken first-play telemetry"
+    ],
+    "features": [
+      "Added retained-frame ruleset simulation for partial stable and lazer plays without attaching a later saved replay",
+      "Added startup reconciliation for stale replay simulations and missing tosu results even when movement capture is disabled"
+    ],
+    "improvements": [
+      "Start tosu only after the same osu! process remains alive for a five-second initialization window, with a fresh process for replacements and new sessions",
+      "Merge official ruleset judgement geometry with captured final counts so misses, 50s, and 100s stay correctly placed and classified",
+      "Show a bounded contiguous cursor trajectory around closest approach in Replay Analyzer, including fast aim and misses that remain outside the hit radius",
+      "Validate recovered simulation totals and judgement events before allowing them to update a play"
+    ],
+    "fixes": [
+      "Prevented deleting plays, sessions, retention history, or cleanup data from crashing or mutating while tracking is active",
+      "Recovered stale active attempts and sessions before hydrating the UI so tracking no longer remains permanently active after interruption",
+      "Prevented replay recovery from replacing partial plays with a later saved score; partial plays now simulate only their retained frames",
+      "Prevented checksum-less stable plays from accepting an unverified nearby replay",
+      "Restored missing score, combo, accuracy, 300, 100, 50, and miss totals when tosu result telemetry is absent",
+      "Restored miss, 50, 100, and slider-break markers in the Replay Analyzer hotbar and advanced inspector",
+      "Prevented old high-speed simulation caches from suppressing or corrupting replay judgements",
+      "Prevented recovery from launching tosu while osu! is closed and made required recovery restarts retry until handled",
+      "Fixed Replay Analyzer cursor paths collapsing to endpoint arrows when the cursor never entered the local hit-radius filter"
+    ]
+  },
+  {
     "version": "0.4.2",
     "date": "2026-07-15",
     "major": [

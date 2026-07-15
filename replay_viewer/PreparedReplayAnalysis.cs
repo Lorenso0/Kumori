@@ -9,7 +9,9 @@ internal sealed record PreparedReplayAnalysis(
     IReadOnlyList<PreparedReplayFrame> Frames,
     PreparedReplaySimulationSummary? Summary = null)
 {
-    public const int CurrentVersion = 5;
+    // Version 6 is produced by the scoring-safe simulation rate. Older files
+    // may have silently skipped short replay inputs while running at 100x.
+    public const int CurrentVersion = 6;
 
     public static string PathFor(string contractPath) => contractPath + ".analysis.json";
 
@@ -38,6 +40,8 @@ internal sealed record PreparedReplaySimulationSummary(
     int N50,
     int Misses,
     double Accuracy,
+    long Score,
+    int AchievedCombo,
     int SliderBreaks,
     int LargeTickHits,
     int LargeTickMisses,

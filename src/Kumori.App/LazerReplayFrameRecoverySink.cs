@@ -9,7 +9,7 @@ using Serilog;
 
 namespace Kumori.App;
 
-/// <summary>Replaces a completed lazer memory capture with its persisted Realm replay when available.</summary>
+/// <summary>Recovers lazer results from a persisted replay or retained live frames.</summary>
 internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
 {
     private const int SearchPassCount = 240;
@@ -22,6 +22,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
     private readonly ReplayResultRecoveryStore resultRecovery;
     private readonly Action<long>? movementReplaced;
     private readonly Action<ReplayResultRecoveryContext>? resultRecovered;
+    private readonly Action<long>? resultTelemetryMissing;
     private readonly bool recoverMovement;
     private readonly CancellationToken cancellationToken;
     private readonly GameplayWorkCoordinator? workCoordinator;
@@ -34,6 +35,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         Func<long?> attemptId,
         Action<long>? movementReplaced = null,
         Action<ReplayResultRecoveryContext>? resultRecovered = null,
+        Action<long>? resultTelemetryMissing = null,
         bool recoverMovement = true,
         CancellationToken cancellationToken = default,
         GameplayWorkCoordinator? workCoordinator = null)
@@ -44,6 +46,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         resultRecovery = new ReplayResultRecoveryStore(factory);
         this.movementReplaced = movementReplaced;
         this.resultRecovered = resultRecovered;
+        this.resultTelemetryMissing = resultTelemetryMissing;
         this.recoverMovement = recoverMovement;
         this.cancellationToken = cancellationToken;
         this.workCoordinator = workCoordinator;
@@ -76,7 +79,14 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         var id = attemptId();
         long capturedGeneration = Volatile.Read(ref generation);
         start = null;
-        if (capturedStart is null || id is null || string.IsNullOrWhiteSpace(capturedStart.Checksum)) return;
+        if (capturedStart is null || id is null) return;
+        if (HasMissingTosuResult(finalization))
+        {
+            Log.Warning(
+                "Detected missing tosu result telemetry for attempt {AttemptId}; restarting tosu while replay recovery continues",
+                id.Value);
+            resultTelemetryMissing?.Invoke(id.Value);
+        }
         var endedAt = DateTimeOffset.FromUnixTimeMilliseconds((long)(finalization.Snapshot.WallTime * 1000));
         if (!activeRecoveries.TryAdd(id.Value, 0))
             return;
@@ -85,7 +95,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         {
             try
             {
-                await RecoverAsync(capturedStart, id.Value, capturedGeneration, endedAt).ConfigureAwait(false);
+                await RecoverAsync(capturedStart, finalization, id.Value, capturedGeneration, endedAt).ConfigureAwait(false);
             }
             finally
             {
@@ -94,8 +104,22 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         }, CancellationToken.None);
     }
 
+    internal static bool HasMissingTosuResult(AttemptFinalization finalization)
+    {
+        AttemptSnapshot snapshot = finalization.Snapshot;
+        return !finalization.Outcome.Equals("active", StringComparison.OrdinalIgnoreCase)
+               && snapshot.TimingOffsets.Count > 0
+               && snapshot.Score == 0
+               && snapshot.Combo <= 0
+               && snapshot.N300 <= 0
+               && snapshot.N100 <= 0
+               && snapshot.N50 <= 0
+               && snapshot.Misses <= 0;
+    }
+
     private async Task RecoverAsync(
         AttemptStart attempt,
+        AttemptFinalization finalization,
         long id,
         long capturedGeneration,
         DateTimeOffset endedAt)
@@ -108,6 +132,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
             Task<bool> RunPass(int pass, CancellationToken token)
                 => RecoverOnePassAsync(
                     attempt,
+                    finalization,
                     id,
                     capturedGeneration,
                     startedAt,
@@ -147,6 +172,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
 
     private Task<bool> RecoverOnePassAsync(
         AttemptStart attempt,
+        AttemptFinalization finalization,
         long id,
         long capturedGeneration,
         DateTimeOffset startedAt,
@@ -170,14 +196,17 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         }
 
         var matched = state.Matched;
-        if (matched is null)
+        if (matched is null && !IsPartialOutcome(finalization.Outcome))
         {
             var candidatesChecked = 0;
-            foreach (var replay in LazerStorage.ResolveReplayFiles(
-                         attempt.Checksum!,
-                         startedAt,
-                         attempt.GameFolder,
-                         endedAt))
+            IEnumerable<string> replayFiles = string.IsNullOrWhiteSpace(attempt.Checksum)
+                ? []
+                : LazerStorage.ResolveReplayFiles(
+                    attempt.Checksum,
+                    startedAt,
+                    attempt.GameFolder,
+                    endedAt);
+            foreach (var replay in replayFiles)
             {
                 operationToken.ThrowIfCancellationRequested();
                 if (!TryGetReplayVersion(replay, out var version) ||
@@ -214,6 +243,22 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
 
         if (matched is null)
         {
+            if ((IsPartialOutcome(finalization.Outcome) || string.IsNullOrWhiteSpace(attempt.Checksum))
+                && TryNotifyRetainedSimulation(
+                    id,
+                    beatmap,
+                    state,
+                    HasMissingTosuResult(finalization),
+                    operationToken))
+            {
+                UpdateIfCurrent(capturedGeneration, status =>
+                {
+                    status.LocalReplayState = "existing_capture_preserved";
+                    status.LocalReplayError = null;
+                });
+                return Task.FromResult(true);
+            }
+
             UpdateIfCurrent(capturedGeneration, status => status.LocalReplayState = "waiting");
             if (!isLastPass)
                 return Task.FromResult(false);
@@ -392,6 +437,51 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
             samples));
     }
 
+    private bool TryNotifyRetainedSimulation(
+        long id,
+        LazerBeatmapAssets beatmap,
+        RecoveryState state,
+        bool tosuResultWasMissing,
+        CancellationToken operationToken)
+    {
+        if (state.PartialSimulationNotified)
+            return true;
+
+        var retained = repository.GetMetadata(id, operationToken);
+        if (retained is not { SampleCount: > 0 }
+            || retained.Source is not ("lazer_memory" or "lazer_replay_frame"))
+            return false;
+
+        IReadOnlyList<MovementSample> samples = repository.GetSamples(id, operationToken);
+        if (samples.Count == 0)
+            return false;
+
+        resultRecovered?.Invoke(new ReplayResultRecoveryContext(
+            id,
+            ReplayResultRecoveryOutcome.NoChanges,
+            null,
+            beatmap.BeatmapPath,
+            null,
+            beatmap.Files,
+            samples,
+            RequiresSimulation: true,
+            RequiresTosuRestart: false,
+            SimulationOwnsCoreResult: tosuResultWasMissing,
+            TosuResultWasMissing: tosuResultWasMissing));
+        state.PartialSimulationNotified = true;
+        Log.Information(
+            "Queued retained-frame ruleset simulation from {Count} lazer frames for attempt {AttemptId}",
+            samples.Count,
+            id);
+        return true;
+    }
+
+    internal static bool IsPartialOutcome(string outcome)
+        => outcome.Equals("failed", StringComparison.OrdinalIgnoreCase)
+           || outcome.Equals("retried", StringComparison.OrdinalIgnoreCase)
+           || outcome.Equals("quit", StringComparison.OrdinalIgnoreCase)
+           || outcome.Equals("abandoned", StringComparison.OrdinalIgnoreCase);
+
     private sealed record RecoveredReplay(
         string ReplayPath,
         MovementSample[] Samples,
@@ -403,6 +493,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         public RecoveredReplay? Matched { get; set; }
         public ReplayResultRecoveryOutcome? Recovery { get; set; }
         public bool ResultRecoveryNotified { get; set; }
+        public bool PartialSimulationNotified { get; set; }
         public bool MovementCommitted { get; set; }
         public Dictionary<string, (long Length, long WriteTicks)> CheckedVersions { get; } =
             new(StringComparer.OrdinalIgnoreCase);

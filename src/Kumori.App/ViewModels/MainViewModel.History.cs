@@ -148,7 +148,12 @@ public partial class MainViewModel
         {
             return;
         }
-        await Task.Run(() => _maintenance.DeleteAttempt(row.Id));
+        if (!await TryRunHistoryDeletionAsync(
+                () => _maintenance.DeleteAttempt(row.Id),
+                "attempt"))
+        {
+            return;
+        }
         Inspector.ForgetAttempt(row.Id);
         if (SelectedAttempt?.Id == row.Id)
         {
@@ -166,13 +171,55 @@ public partial class MainViewModel
         {
             return;
         }
-        await Task.Run(() => _maintenance.DeleteSession(sessionId));
+        if (!await TryRunHistoryDeletionAsync(
+                () => _maintenance.DeleteSession(sessionId),
+                "session"))
+        {
+            return;
+        }
         if (SelectedAttempt?.Model.SessionId == sessionId)
         {
             Inspector.ForgetAttempt(SelectedAttempt.Id);
             SelectedAttempt = null;
         }
         await ReloadFirstPageAsync();
+    }
+
+    private async Task<bool> TryRunHistoryDeletionAsync(Func<int> delete, string itemName)
+    {
+        try
+        {
+            await Task.Run(delete);
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The in-memory session state can change after the menu is opened or
+            // confirmation is shown. The repository is the final authority and
+            // deliberately rejects the delete; keep that race non-fatal in WPF's
+            // async menu-click handler.
+            Log.Warning(ex, "Could not delete tracking history {ItemName}", itemName);
+            HistoryStatus = $"Could not delete the {itemName} while tracking is active";
+            KumoriDialog.Show(
+                ActiveOwner(),
+                $"The {itemName} was not deleted because a tracking session is active. End the current session and try again.",
+                "Tracking is active",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Could not delete tracking history {ItemName}", itemName);
+            HistoryStatus = $"Could not delete the {itemName} - see logs";
+            KumoriDialog.Show(
+                ActiveOwner(),
+                $"Kumori could not delete the {itemName}. No tracking history was changed.",
+                "Delete failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return false;
+        }
     }
 
     private bool EnsureMaintenanceAvailable()

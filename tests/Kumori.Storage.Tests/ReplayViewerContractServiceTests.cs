@@ -50,6 +50,67 @@ public class ReplayViewerContractServiceTests : IDisposable
     }
 
     [Fact]
+    public void ValidateSimulationCompleteness_AcceptsConsistentCoreAndJudgements()
+    {
+        var details = new AttemptDetails
+        {
+            Summary = new AttemptSummary { Misses = 2 },
+            N300 = 50,
+            N100 = 3,
+            N50 = 1,
+            Timing = new TimingSummary { HitCount = 54 },
+        };
+        var summary = new ReplaySimulationResult
+        {
+            N300 = 50,
+            N100 = 3,
+            N50 = 1,
+            Misses = 2,
+        };
+        ReplaySimulationJudgement[] judgements =
+        [
+            new() { Kind = 2 }, new() { Kind = 2 }, new() { Kind = 2 },
+            new() { Kind = 1 },
+            new() { Kind = 0 }, new() { Kind = 0 },
+        ];
+
+        ReplayViewerContractService.ValidateSimulationCompleteness(details, summary, judgements);
+    }
+
+    [Fact]
+    public void ValidateSimulationCompleteness_RejectsPassBelowCapturedCoreEvidence()
+    {
+        var details = new AttemptDetails
+        {
+            Summary = new AttemptSummary { Misses = 4 },
+            N300 = 62,
+            N100 = 1,
+            Timing = new TimingSummary { HitCount = 63 },
+        };
+        var summary = new ReplaySimulationResult { N300 = 12 };
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            ReplayViewerContractService.ValidateSimulationCompleteness(details, summary, []));
+
+        Assert.Contains("incomplete", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateSimulationCompleteness_RejectsSummaryEventMismatch()
+    {
+        var details = new AttemptDetails();
+        var summary = new ReplaySimulationResult { N300 = 10, N100 = 1, Misses = 2 };
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            ReplayViewerContractService.ValidateSimulationCompleteness(
+                details,
+                summary,
+                [new ReplaySimulationJudgement { Kind = 2 }, new ReplaySimulationJudgement { Kind = 0 }]));
+
+        Assert.Contains("did not match", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void DisabledViewerCannotBeLaunched()
     {
         var factory = new SqliteConnectionFactory(_dbPath, readOnly: false);
