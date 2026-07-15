@@ -8,6 +8,72 @@ namespace Kumori.App.Tests;
 public sealed class LazerMemoryReadPolicyTests
 {
     [Fact]
+    public void OffsetRefreshPolicyAcceptsNewerAndCorrectedButNotOlderDocuments()
+    {
+        var current = Offsets("2026.711.0", 10);
+
+        Assert.False(LazerMemoryOffsetRefreshPolicy.ShouldReplace(current, current));
+        Assert.True(LazerMemoryOffsetRefreshPolicy.ShouldReplace(current, Offsets("2026.711.0", 20)));
+        Assert.True(LazerMemoryOffsetRefreshPolicy.ShouldReplace(current, Offsets("2026.712.0", 20)));
+        Assert.False(LazerMemoryOffsetRefreshPolicy.ShouldReplace(current, Offsets("2026.710.0", 20)));
+        Assert.Equal(TimeSpan.FromHours(6), LazerMemoryReplayFrameSource.OffsetRefreshInterval);
+        Assert.Equal(TimeSpan.FromMinutes(15), LazerMemoryReplayFrameSource.OffsetRefreshRetryInterval);
+    }
+
+    [Fact]
+    public async Task OffsetRefreshAtomicallyStoresANewerValidatedDocument()
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            var path = Path.Combine(root, "offsets.json");
+            var current = Offsets("2026.710.0", 10);
+            var candidate = Offsets("2026.711.0", 20);
+            await File.WriteAllTextAsync(path, OffsetJson(current));
+
+            var result = await LazerMemoryOffsets.RefreshCachedAsync(
+                current,
+                path,
+                _ => Task.FromResult(OffsetJson(candidate)));
+
+            Assert.True(result.Updated);
+            Assert.Equal(candidate, result.Offsets);
+            Assert.Equal(candidate, LazerMemoryOffsets.LoadCached(path));
+            Assert.Empty(Directory.EnumerateFiles(root, "*.new-*"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MalformedOffsetRefreshPreservesLastKnownGoodCache()
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            var path = Path.Combine(root, "offsets.json");
+            var current = Offsets("2026.711.0", 10);
+            var originalJson = OffsetJson(current);
+            await File.WriteAllTextAsync(path, originalJson);
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                LazerMemoryOffsets.RefreshCachedAsync(
+                    current,
+                    path,
+                    _ => Task.FromResult("{\"OsuVersion\":\"2026.712.0\"}")));
+
+            Assert.Equal(originalJson, await File.ReadAllTextAsync(path));
+            Assert.Equal(current, LazerMemoryOffsets.LoadCached(path));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParsesLatestTosuSessionAndHexGameBaseFromBoundedSegments()
     {
         const string head = """
@@ -151,5 +217,49 @@ public sealed class LazerMemoryReadPolicyTests
         Assert.Equal(16, LazerMemoryReadPolicy.FindAlignedPointerOffset(buffer, pointer, sizeof(long)));
         Assert.Equal(16, LazerMemoryReadPolicy.FindAlignedPointerOffset(buffer, pointer, 9));
         Assert.Equal(-1, LazerMemoryReadPolicy.FindAlignedPointerOffset(buffer, pointer, 24));
+    }
+
+    private static LazerMemoryOffsets Offsets(string version, int seed) => new(
+        version,
+        GameBaseVtable: 1000 + seed,
+        OsuGameScreenStack: 10 + seed,
+        ScreenStackStack: 20 + seed,
+        PlayerScore: 30 + seed,
+        ExternalLinkOpenerApi: 40 + seed,
+        ApiAccessGame: 50 + seed,
+        PlayerDrawableRuleset: 60 + seed,
+        DrawableRulesetReplayScore: 70 + seed);
+
+    private static string OffsetJson(LazerMemoryOffsets offsets) => $$"""
+        {
+          "OsuVersion": "{{offsets.OsuVersion}}",
+          "GameBaseVtable": {{offsets.GameBaseVtable}},
+          "osu.Game.OsuGame": {
+            "<ScreenStack>k__BackingField": {{offsets.OsuGameScreenStack}}
+          },
+          "osu.Framework.Screens.ScreenStack": {
+            "stack": {{offsets.ScreenStackStack}}
+          },
+          "osu.Game.Screens.Play.Player": {
+            "<Score>k__BackingField": {{offsets.PlayerScore}},
+            "<DrawableRuleset>k__BackingField": {{offsets.PlayerDrawableRuleset}}
+          },
+          "osu.Game.Online.Chat.ExternalLinkOpener": {
+            "<api>k__BackingField": {{offsets.ExternalLinkOpenerApi}}
+          },
+          "osu.Game.Online.API.APIAccess": {
+            "game": {{offsets.ApiAccessGame}}
+          },
+          "osu.Game.Rulesets.UI.DrawableRuleset": {
+            "<ReplayScore>k__BackingField": {{offsets.DrawableRulesetReplayScore}}
+          }
+        }
+        """;
+
+    private static string NewTempDirectory()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"kumori-lazer-offsets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
     }
 }

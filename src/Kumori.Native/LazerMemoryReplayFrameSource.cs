@@ -16,6 +16,8 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     private static readonly TimeSpan ProcessSearchInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan TosuGameBaseHintInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan FinalTailDrainBudget = TimeSpan.FromMilliseconds(25);
+    internal static readonly TimeSpan OffsetRefreshInterval = TimeSpan.FromHours(6);
+    internal static readonly TimeSpan OffsetRefreshRetryInterval = TimeSpan.FromMinutes(15);
     private const int MaximumFinalTailPasses = 16;
     private readonly TimeSpan _pollInterval;
     private readonly IReplayFrameStatusSink _status;
@@ -83,24 +85,13 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
 
             var attemptGeneration = Volatile.Read(ref _attemptGeneration);
 
-            if (offsets is null)
+            var publishedOffsets = Volatile.Read(ref _replayDetectionOffsets);
+            if (publishedOffsets is not null && publishedOffsets != offsets)
             {
-                // Offset download/parse is prewarmed off the capture loop. A
-                // song that starts before it completes must not perform file or
-                // network I/O on the gameplay polling path.
-                offsets = Volatile.Read(ref _replayDetectionOffsets);
-                if (offsets is null)
-                {
-                    _status.Update(s =>
-                    {
-                        s.Enabled = true;
-                        s.State = "lazer_memory_offsets_warming";
-                        s.Detail = "Waiting for osu!lazer memory offsets; persisted replay recovery remains available.";
-                        s.LastError = null;
-                    });
-                    await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
-                    continue;
-                }
+                // Offset refresh happens on its own background task. Observe
+                // the immutable replacement here; GetReaderLocked will rebuild
+                // the reader on the next bounded memory poll.
+                offsets = publishedOffsets;
                 var loadedOffsets = offsets;
                 _status.Update(s =>
                 {
@@ -109,6 +100,21 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
                     s.Detail = $"Loaded osu!lazer offsets {loadedOffsets.OsuVersion}.";
                     s.LastError = null;
                 });
+            }
+            if (offsets is null)
+            {
+                // Offset download/parse is prewarmed off the capture loop. A
+                // song that starts before it completes must not perform file or
+                // network I/O on the gameplay polling path.
+                _status.Update(s =>
+                {
+                    s.Enabled = true;
+                    s.State = "lazer_memory_offsets_warming";
+                    s.Detail = "Waiting for osu!lazer memory offsets; persisted replay recovery remains available.";
+                    s.LastError = null;
+                });
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+                continue;
             }
 
             // Vanilla tosu has already resolved GameBase by the time its normal
@@ -289,22 +295,73 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     public async Task EnsureReplayDetectionOffsetsAsync(CancellationToken cancellationToken = default)
     {
         WarmReplayDetectionOffsets();
-        if (Volatile.Read(ref _replayDetectionOffsets) is not null)
-            return;
         if (Interlocked.Exchange(ref _replayDetectionOffsetsNetworkLoadStarted, 1) != 0)
             return;
 
         try
         {
-            var offsets = await LazerMemoryOffsets.LoadAsync(_offsetsPath, cancellationToken)
-                .ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            Volatile.Write(ref _replayDetectionOffsets, offsets);
+            // An explicit path is a diagnostic/development override and must
+            // never be replaced from the public tosu URL.
+            if (!string.IsNullOrWhiteSpace(_offsetsPath))
+            {
+                if (Volatile.Read(ref _replayDetectionOffsets) is null)
+                {
+                    var explicitOffsets = await LazerMemoryOffsets.LoadAsync(_offsetsPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Volatile.Write(ref _replayDetectionOffsets, explicitOffsets);
+                }
+                return;
+            }
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var nextCheck = OffsetRefreshInterval;
+                try
+                {
+                    var current = Volatile.Read(ref _replayDetectionOffsets);
+                    if (current is null)
+                    {
+                        var loaded = await LazerMemoryOffsets.LoadAsync(null, cancellationToken)
+                            .ConfigureAwait(false);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        Volatile.Write(ref _replayDetectionOffsets, loaded);
+                    }
+                    else
+                    {
+                        var refresh = await LazerMemoryOffsets.RefreshCachedAsync(
+                                current,
+                                cancellationToken: cancellationToken)
+                            .ConfigureAwait(false);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (refresh.Updated)
+                            Volatile.Write(ref _replayDetectionOffsets, refresh.Offsets);
+                    }
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Keep a validated last-known-good cache. A transient
+                    // network or malformed upstream response must not stop live
+                    // capture, and the shorter retry interval heals it later.
+                    nextCheck = OffsetRefreshRetryInterval;
+                    if (Volatile.Read(ref _replayDetectionOffsets) is null)
+                    {
+                        _status.Update(s =>
+                        {
+                            s.Enabled = true;
+                            s.State = "lazer_memory_offsets_warming";
+                            s.Detail = "Could not load osu!lazer offsets; retrying in the background.";
+                            s.LastError = ex.Message;
+                        });
+                    }
+                }
+
+                await Task.Delay(nextCheck, cancellationToken).ConfigureAwait(false);
+            }
         }
-        catch
+        finally
         {
             Interlocked.Exchange(ref _replayDetectionOffsetsNetworkLoadStarted, 0);
-            throw;
         }
     }
 
@@ -2000,6 +2057,7 @@ internal sealed record LazerMemoryOffsets(
 {
     private const string OfficialOffsetsUrl =
         "https://raw.githubusercontent.com/tosuapp/tosu/master/packages/tosu/src/assets/offsets.json";
+    private static readonly HttpClient OfficialOffsetsClient = CreateOfficialOffsetsClient();
 
     public static LazerMemoryOffsets Load(string? path, bool refreshOfficialCache = false)
     {
@@ -2056,28 +2114,38 @@ internal sealed record LazerMemoryOffsets(
 
         cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("Kumori");
-        var json = await http.GetStringAsync(OfficialOffsetsUrl, cancellationToken).ConfigureAwait(false);
+        var json = await DownloadOfficialJsonAsync(cancellationToken).ConfigureAwait(false);
         var offsets = Parse(json);
         cancellationToken.ThrowIfCancellationRequested();
 
         var isNew = !File.Exists(path);
-        var temp = path + $".new-{Guid.NewGuid():N}";
-        try
-        {
-            await File.WriteAllTextAsync(temp, json, cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temp, path, overwrite: true);
-        }
-        finally
-        {
-            try { File.Delete(temp); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
+        await ReplaceCacheAsync(path, json, cancellationToken).ConfigureAwait(false);
         if (isNew)
             CacheActivityLog.RecordAddition(path, "tosu-memory-offsets");
         return offsets;
+    }
+
+    internal static async Task<LazerMemoryOffsetRefreshResult> RefreshCachedAsync(
+        LazerMemoryOffsets current,
+        string? path = null,
+        Func<CancellationToken, Task<string>>? downloadJson = null,
+        CancellationToken cancellationToken = default)
+    {
+        path ??= Path.Combine(AppPaths.CacheDir, "tosu", "offsets.json");
+        var json = await (downloadJson ?? DownloadOfficialJsonAsync)(cancellationToken)
+            .ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Parse and validate the complete document before touching the existing
+        // cache. This guarantees a truncated or incompatible upstream response
+        // cannot replace the last-known-good offsets.
+        var candidate = Parse(json);
+        if (!LazerMemoryOffsetRefreshPolicy.ShouldReplace(current, candidate))
+            return new LazerMemoryOffsetRefreshResult(current, Updated: false);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await ReplaceCacheAsync(path, json, cancellationToken).ConfigureAwait(false);
+        return new LazerMemoryOffsetRefreshResult(candidate, Updated: true);
     }
 
     private static LazerMemoryOffsets Parse(string json)
@@ -2152,6 +2220,62 @@ internal sealed record LazerMemoryOffsets(
         }
 
         return value;
+    }
+
+    private static HttpClient CreateOfficialOffsetsClient()
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Kumori");
+        return client;
+    }
+
+    private static Task<string> DownloadOfficialJsonAsync(CancellationToken cancellationToken) =>
+        OfficialOffsetsClient.GetStringAsync(OfficialOffsetsUrl, cancellationToken);
+
+    private static async Task ReplaceCacheAsync(
+        string path,
+        string json,
+        CancellationToken cancellationToken)
+    {
+        var temp = path + $".new-{Guid.NewGuid():N}";
+        try
+        {
+            await File.WriteAllTextAsync(temp, json, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temp); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
+}
+
+internal readonly record struct LazerMemoryOffsetRefreshResult(
+    LazerMemoryOffsets Offsets,
+    bool Updated);
+
+internal static class LazerMemoryOffsetRefreshPolicy
+{
+    internal static bool ShouldReplace(LazerMemoryOffsets current, LazerMemoryOffsets candidate)
+    {
+        if (candidate == current)
+            return false;
+        if (string.Equals(candidate.OsuVersion, current.OsuVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            // Allow tosu to correct offsets for a release without changing its
+            // version label.
+            return true;
+        }
+        if (string.Equals(candidate.OsuVersion, "unknown", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (string.Equals(current.OsuVersion, "unknown", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return Version.TryParse(candidate.OsuVersion, out var candidateVersion)
+               && Version.TryParse(current.OsuVersion, out var currentVersion)
+               && candidateVersion > currentVersion;
     }
 }
 
