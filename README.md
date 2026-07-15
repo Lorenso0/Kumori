@@ -1,6 +1,6 @@
 # Kumori
 
-Kumori is a private Windows companion for [osu!](https://osu.ppy.sh/). It quietly records your plays, organizes them into sessions, and turns them into an easy-to-read history of how you are improving.
+Kumori is a Windows companion for [osu!](https://osu.ppy.sh/) that tracks your play history and replay data, organizes your sessions, and helps you understand your performance over time.
 
 ![A quick tour of Kumori](docs/media/kumori-product-tour-1440x934.gif)
 
