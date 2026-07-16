@@ -553,7 +553,7 @@
                             Padding="9,0"
                             Margin="12,0,0,0"
                             FontSize="10"
-                            ToolTip="Open the latest Kumori release on GitHub"
+                            ToolTip="Download and install the latest Kumori update"
                             Visibility="{Binding IsUpdateAvailable, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"
                             shell:WindowChrome.IsHitTestVisibleInChrome="True" />
                 </StackPanel>

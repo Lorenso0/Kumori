@@ -64,6 +64,7 @@ public partial class App : Application
     private KumoriUpdateResult? _pendingUpdatePrompt;
     private string? _promptedUpdateVersion;
     private bool _updatePromptOpen;
+    private bool _manualUpdateCheckRunning;
     private readonly CompanionTransitionPolicy _companionTransitionPolicy = new();
     private readonly object _osuCompanionGate = new();
     private readonly object _otdLifetimeGate = new();
@@ -188,7 +189,16 @@ public partial class App : Application
         var replayViewer = new ReplayViewerContractService(details, movement, () => settings.Current);
         var maintenance = new TrackingMaintenanceRepository(factory);
         var sessions = new SessionRepository(factory);
-        var viewModel = new MainViewModel(store, attempts, details, analytics, settings, replayViewer, maintenance, sessions);
+        var viewModel = new MainViewModel(
+            store,
+            attempts,
+            details,
+            analytics,
+            settings,
+            replayViewer,
+            maintenance,
+            sessions,
+            CheckForKumoriUpdatesManuallyAsync);
 
         // Shell first — no data work before first paint.
         _mainWindow = new MainWindow(viewModel, settings);

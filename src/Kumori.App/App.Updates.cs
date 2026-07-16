@@ -83,16 +83,7 @@ public partial class App
         try
         {
             var result = await new KumoriUpdateService().CheckAsync(cancellationToken: cancellationToken);
-            store.Update(state => state with
-            {
-                ApplicationUpdate = new ApplicationUpdateStatus
-                {
-                    IsAvailable = result.IsUpdateAvailable,
-                    Version = result.LatestTag,
-                    ReleaseUrl = result.ReleaseUrl,
-                    PublishedAt = result.PublishedAt,
-                },
-            });
+            UpdateApplicationUpdateStatus(store, result);
             if (result.IsUpdateAvailable)
             {
                 _tray?.ShowUpdateNotification(result.LatestTag);
@@ -108,6 +99,69 @@ public partial class App
             // Startup update failures stay quiet; the manual update window shows errors on demand.
             Log.Debug(ex, "Kumori startup update check failed");
         }
+    }
+
+    internal async Task CheckForKumoriUpdatesManuallyAsync()
+    {
+        if (_manualUpdateCheckRunning || _updatePromptOpen || _exitRequested)
+        {
+            return;
+        }
+
+        _manualUpdateCheckRunning = true;
+        try
+        {
+            var result = await new KumoriUpdateService().CheckAsync(cancellationToken: _backgroundCts.Token);
+            if (_store is { } store)
+            {
+                UpdateApplicationUpdateStatus(store, result);
+            }
+
+            if (!result.IsUpdateAvailable)
+            {
+                KumoriDialog.Show(
+                    _mainWindow,
+                    $"You are running the latest Kumori release.\n\nVersion: {result.CurrentVersion.ToString(3)}",
+                    "Kumori is up to date",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            Log.Information("Manual Kumori update check found {Version} at {Url}", result.LatestTag, result.ReleaseUrl);
+            ShowAvailableUpdatePrompt(result);
+        }
+        catch (OperationCanceledException) when (_backgroundCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Manual Kumori update check failed");
+            KumoriDialog.Show(
+                _mainWindow,
+                $"Kumori could not check for updates.\n\n{ex.Message}",
+                "Update check failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            _manualUpdateCheckRunning = false;
+        }
+    }
+
+    private static void UpdateApplicationUpdateStatus(AppStateStore store, KumoriUpdateResult result)
+    {
+        store.Update(state => state with
+        {
+            ApplicationUpdate = new ApplicationUpdateStatus
+            {
+                IsAvailable = result.IsUpdateAvailable,
+                Version = result.LatestTag,
+                ReleaseUrl = result.ReleaseUrl,
+                PublishedAt = result.PublishedAt,
+            },
+        });
     }
 
     private static void OpenAvailableUpdate(string? releaseUrl)
@@ -158,6 +212,17 @@ public partial class App
             _exitRequested ||
             _mainWindow is not { IsVisible: true } owner ||
             owner.WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        ShowAvailableUpdatePrompt(update, owner);
+    }
+
+    private void ShowAvailableUpdatePrompt(KumoriUpdateResult update, Window? owner = null)
+    {
+        owner ??= _mainWindow;
+        if (owner is null || _updatePromptOpen || _exitRequested)
         {
             return;
         }

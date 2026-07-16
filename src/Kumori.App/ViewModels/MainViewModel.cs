@@ -30,6 +30,7 @@ public partial class MainViewModel : ObservableObject
     private readonly AppStateStore _appState;
     private readonly AttemptDetailsRepository _detailsRepository;
     private readonly ReplayViewerContractService? _replayViewer;
+    private readonly Func<Task>? _checkForUpdates;
 
     /// <summary>Attempt rows only — used for compare selection and the inspector.</summary>
     public ObservableCollection<AttemptRowViewModel> Attempts { get; } = new();
@@ -145,7 +146,8 @@ public partial class MainViewModel : ObservableObject
         SettingsService settings,
         ReplayViewerContractService? replayViewer = null,
         TrackingMaintenanceRepository? maintenance = null,
-        SessionRepository? sessions = null)
+        SessionRepository? sessions = null,
+        Func<Task>? checkForUpdates = null)
     {
         _store = store;
         _appState = store;
@@ -154,6 +156,7 @@ public partial class MainViewModel : ObservableObject
         _settings = settings;
         _detailsRepository = details;
         _replayViewer = replayViewer;
+        _checkForUpdates = checkForUpdates;
         _maintenance = maintenance ?? new TrackingMaintenanceRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false));
         _sessionsRepo = sessions ?? new SessionRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: true));
         Inspector = new AttemptDetailsViewModel(details, replayViewer);

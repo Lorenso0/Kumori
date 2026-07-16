@@ -90,8 +90,14 @@ public partial class MainViewModel
     }
 
     [RelayCommand]
-    private void CheckForUpdates()
+    private async Task CheckForUpdatesAsync()
     {
+        if (_checkForUpdates is not null)
+        {
+            await _checkForUpdates();
+            return;
+        }
+
         OpenInWorkspace(new UpdateCheckWindow(), "Updates");
     }
 
@@ -102,12 +108,15 @@ public partial class MainViewModel
     }
 
     [RelayCommand]
-    private void OpenAvailableUpdate()
+    private async Task OpenAvailableUpdateAsync()
     {
-        var releaseUrl = _appState.Current.ApplicationUpdate.ReleaseUrl;
-        if (string.IsNullOrWhiteSpace(releaseUrl)) releaseUrl = KumoriUpdateService.ReleasesUrl;
-        try { Process.Start(new ProcessStartInfo { FileName = releaseUrl, UseShellExecute = true }); }
-        catch (Exception ex) { Log.Warning(ex, "Could not open Kumori release page {Url}", releaseUrl); }
+        if (_checkForUpdates is not null)
+        {
+            await _checkForUpdates();
+            return;
+        }
+
+        OpenInWorkspace(new UpdateCheckWindow(), "Updates");
     }
 
     private void OpenInWorkspace(Window window, string title)
