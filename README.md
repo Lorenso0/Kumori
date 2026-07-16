@@ -2,7 +2,7 @@
 
 Kumori is a Windows companion for [osu!](https://osu.ppy.sh/) that keeps your play history, sessions, map statistics, performance trends, and replay analysis together in one place.
 
-![A quick tour of the Kumori dashboard, performance, and maps pages](docs/media/kumori-product-tour-1180x920.gif)
+![A quick tour of the Kumori dashboard, performance, maps, and Replay Analyzer](docs/media/kumori-product-tour-1180x920.gif)
 
 Kumori works with both osu!stable and osu!lazer. It does not change your osu! installation, and your play history stays on your computer.
 
@@ -42,11 +42,17 @@ Kumori is made for 64-bit Windows. During setup, you can choose whether to enabl
 
 When replay capture is enabled, Kumori can open a play in its built-in Replay Analyzer. You can:
 
+![Replay Analyzer showing playback controls, judgement filters, comparison tools, and audio settings](docs/media/kumori-replay-analyzer-controls-1180x920.png)
+
 - Jump directly to misses, slider breaks, 50s, and 100s.
 - Slow down playback, step through frames, or loop a difficult moment.
 - Review timing and cursor movement around a mistake.
 - Compare compatible attempts on the same map or temporarily load a matching `.osr` replay.
 - Import an osu! skin for use in the replay viewer.
+
+The advanced analyzer focuses the replay on review events. Its event browser and timeline work alongside loop and frame controls, confidence-tagged timing evidence, and cursor-path analysis.
+
+![Advanced Replay Analyzer showing review events, playback controls, timing evidence, and cursor-path analysis](docs/media/kumori-replay-analyzer-events-1180x920.png)
 
 The analyzer explains what the captured information suggests, but it cannot always know the exact reason for a mistake. Results may be less precise when a replay capture is incomplete. Replay capture for osu! is experimental and may need updates when the game changes.
 
