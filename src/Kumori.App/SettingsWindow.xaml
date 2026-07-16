@@ -450,8 +450,20 @@
                         </StackPanel>
                         <Label Content="Minimum play duration (seconds)" Target="{Binding ElementName=MinimumAttemptSeconds}" Style="{StaticResource SettingsFieldLabel}" />
                         <TextBox x:Name="MinimumAttemptSeconds" Width="120" HorizontalAlignment="Left" Margin="0,0,0,10" ToolTip="Whole seconds from 1 to 300. Shorter plays are not saved." AutomationProperties.Name="Minimum play duration in seconds" AutomationProperties.HelpText="Enter a whole number from 1 to 300" />
-                        <Label Content="Retention days" Target="{Binding ElementName=RetentionDays}" Style="{StaticResource SettingsFieldLabel}" />
-                        <TextBox x:Name="RetentionDays" Width="120" HorizontalAlignment="Left" AutomationProperties.Name="Tracking retention days" AutomationProperties.HelpText="Enter zero to keep tracking data indefinitely" />
+                        <Separator Margin="0,14,0,12" />
+                        <TextBlock Text="Performance history" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Kumori keeps performance and play history indefinitely. You can manually clear entries older than a chosen age here." Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
+                        <Label Content="Delete data older than (days)" Target="{Binding ElementName=CleanupAgeDays}" Style="{StaticResource SettingsFieldLabel}" />
+                        <StackPanel Orientation="Horizontal">
+                            <ComboBox x:Name="CleanupAgeDays" Width="120" IsEditable="True" AutomationProperties.Name="Age of performance data to delete" AutomationProperties.HelpText="Choose a common age or enter a whole number from 1 to 36500">
+                                <ComboBoxItem Content="7" />
+                                <ComboBoxItem Content="30" />
+                                <ComboBoxItem Content="90" />
+                                <ComboBoxItem Content="180" />
+                                <ComboBoxItem Content="365" />
+                            </ComboBox>
+                            <Button x:Name="DeleteOldTrackingData" Content="Delete older data" Click="DeleteOldTrackingData_Click" Margin="8,0,0,0" AutomationProperties.Name="Delete old performance data" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 

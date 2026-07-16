@@ -74,7 +74,7 @@ public partial class MainViewModel
     [RelayCommand]
     private void OpenSettings()
     {
-        OpenInWorkspace(new SettingsWindow(_settings), "Settings");
+        OpenInWorkspace(new SettingsWindow(_settings, () => RefreshDashboardAsync()), "Settings");
     }
 
     [RelayCommand]

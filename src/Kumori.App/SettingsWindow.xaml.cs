@@ -17,6 +17,7 @@ using MediaColorConverter = System.Windows.Media.ColorConverter;
 using Kumori.Core;
 using Kumori.Core.Settings;
 using Kumori.Native;
+using Kumori.Storage;
 
 namespace Kumori.App;
 
@@ -25,14 +26,22 @@ public partial class SettingsWindow : Window
     private readonly SettingsService _settings;
     private readonly ThemeManager? _themes;
     private readonly string _originalThemeId;
+    private readonly TrackingMaintenanceRepository _maintenance;
+    private readonly Func<Task>? _trackingDataChanged;
     private readonly ObservableCollection<CustomColorRow> _customColors = [];
     private bool _loading = true;
     private bool _accepted;
     private CustomColorRow? _selectedColor;
 
-    public SettingsWindow(SettingsService settings)
+    public SettingsWindow(
+        SettingsService settings,
+        Func<Task>? trackingDataChanged = null,
+        TrackingMaintenanceRepository? maintenance = null)
     {
         _settings = settings;
+        _trackingDataChanged = trackingDataChanged;
+        _maintenance = maintenance ?? new TrackingMaintenanceRepository(
+            new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false));
         _themes = (Application.Current as App)?.Themes;
         _originalThemeId = ThemeManager.Resolve(settings.Current.Appearance.ThemeId).Id;
         InitializeComponent();
@@ -63,7 +72,7 @@ public partial class SettingsWindow : Window
         var s = _settings.Current;
         TrackingEnabled.IsChecked = s.Tracking.Enabled;
         MinimumAttemptSeconds.Text = s.Tracking.MinimumAttemptSeconds.ToString(CultureInfo.InvariantCulture);
-        RetentionDays.Text = s.Tracking.RetentionDays.ToString(CultureInfo.InvariantCulture);
+        CleanupAgeDays.Text = "30";
         LazerReplayFrameEnabled.IsChecked = s.Capture.LazerReplayFrameEnabled;
         OtdPath.Text = s.OpenTabletDriver.InstallPath;
         OtdAutoLaunch.IsChecked = s.OpenTabletDriver.AutoLaunch;
@@ -115,7 +124,6 @@ public partial class SettingsWindow : Window
     {
         if (!int.TryParse(MinimumAttemptSeconds.Text, out var minimumAttemptSeconds)
             || minimumAttemptSeconds is < 1 or > 300
-            || !int.TryParse(RetentionDays.Text, out var retention)
             || !int.TryParse(BackupInterval.Text, out var backupInterval)
             || !int.TryParse(BackupRetention.Text, out var backupRetention))
         {
@@ -131,7 +139,6 @@ public partial class SettingsWindow : Window
         {
             s.Tracking.Enabled = TrackingEnabled.IsChecked == true;
             s.Tracking.MinimumAttemptSeconds = minimumAttemptSeconds;
-            s.Tracking.RetentionDays = Math.Max(0, retention);
             s.Capture.LazerReplayFrameEnabled = LazerReplayFrameEnabled.IsChecked == true;
             s.OpenTabletDriver.InstallPath = OtdPath.Text.Trim();
             s.OpenTabletDriver.AutoLaunch = OtdAutoLaunch.IsChecked == true;
@@ -169,6 +176,54 @@ public partial class SettingsWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
+
+    private async void DeleteOldTrackingData_Click(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(CleanupAgeDays.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var days)
+            || days is < 1 or > 36_500)
+        {
+            SetStatus("Enter a whole number of days from 1 to 36500.", isError: true);
+            return;
+        }
+
+        var cutoffDate = DateTime.Today.AddDays(-days);
+        var owner = Application.Current?.MainWindow;
+        if (!KumoriDialog.Confirm(
+                owner,
+                $"Permanently delete tracked plays and account history older than {days} day(s) (before {cutoffDate:dd/MM/yyyy})? This cannot be undone.",
+                "Clear old performance data",
+                MessageBoxImage.Warning))
+        {
+            return;
+        }
+
+        DeleteOldTrackingData.IsEnabled = false;
+        CleanupAgeDays.IsEnabled = false;
+        SetStatus("Deleting old tracking data...");
+        try
+        {
+            var cutoff = cutoffDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var deleted = await Task.Run(() => _maintenance.DeleteTrackingBefore(cutoff));
+            if (_trackingDataChanged is not null)
+            {
+                await _trackingDataChanged();
+            }
+            SetStatus($"Deleted {deleted.Attempts:N0} old play(s) and {deleted.Sessions:N0} empty session(s). Newer history was kept.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetStatus(ex.Message, isError: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            SetStatus($"Could not clear old tracking data: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            DeleteOldTrackingData.IsEnabled = true;
+            CleanupAgeDays.IsEnabled = true;
+        }
+    }
 
     private void LoadCustomTheme(CustomThemeSettings theme)
     {

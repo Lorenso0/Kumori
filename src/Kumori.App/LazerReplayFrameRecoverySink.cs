@@ -142,8 +142,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
         AttemptSnapshot snapshot = checkpoint.Snapshot;
         if (snapshot.Score > 0
             || snapshot.Combo > 0
-            || snapshot.N300 + snapshot.N100 + snapshot.N50 + snapshot.Misses > 0
-            || snapshot.TimingOffsets.Count > 0)
+            || snapshot.N300 + snapshot.N100 + snapshot.N50 + snapshot.Misses > 0)
             return true;
 
         foreach (JudgementCapture.CapturedEvent capturedEvent in checkpoint.Events)

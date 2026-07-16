@@ -344,32 +344,6 @@ public partial class App : Application
             dashboardHydration,
             _backgroundCts.Token),
             "historical beatmap recovery");
-        var trackingRetentionDays = settings.Current.Tracking.RetentionDays;
-        if (trackingRetentionDays > 0)
-        {
-            TrackBackground(EnqueueAfterSafeStartupAsync(
-                store,
-                settings.Current.Tracking.Enabled,
-                gameplayWork,
-                "tracking-retention",
-                token => Task.Run(() =>
-                {
-                    token.ThrowIfCancellationRequested();
-                    var normalizedDays = Math.Clamp(trackingRetentionDays, 1, 36_500);
-                    var cutoff = DateTimeOffset.UtcNow
-                        .AddDays(-normalizedDays)
-                        .ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-                    var deleted = maintenance.DeleteBefore(cutoff);
-                    Log.Information(
-                        "Tracking retention removed {DeletedSessionCount} session(s) older than {RetentionDays} days",
-                        deleted,
-                        normalizedDays);
-                }, token),
-                dashboardHydration,
-                _backgroundCts.Token,
-                coalesce: true),
-                "tracking retention");
-        }
         if (!settings.Current.FirstRunCompleted ||
             settings.Current.OnboardingVersion < WelcomeWindow.CurrentOnboardingVersion)
         {

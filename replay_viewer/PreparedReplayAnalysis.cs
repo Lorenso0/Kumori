@@ -12,7 +12,7 @@ internal sealed record PreparedReplayAnalysis(
     // Version 7 verifies completed replay-frame coverage against the beatmap
     // before simulation. Version 6 could score a truncated completed capture
     // through the uncaptured remainder and fill it with synthetic misses.
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
 
     public static string PathFor(string contractPath) => contractPath + ".analysis.json";
 
@@ -71,7 +71,9 @@ internal sealed record PreparedReplaySimulationSummary(
     int MaxCombo,
     int CircleCount,
     int SliderCount,
-    int SpinnerCount);
+    int SpinnerCount,
+    double DurationSeconds,
+    double Progress);
 
 internal sealed record PreparedReplayJudgement(
     KumoriTimelineMarkerKind Kind,

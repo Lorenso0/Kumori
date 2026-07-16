@@ -29,7 +29,7 @@ public class SettingsMigrationTests
         var s = SettingsService.ImportLegacy(legacy);
 
         Assert.False(s.Tracking.Enabled);
-        Assert.Equal(30, s.Tracking.RetentionDays);
+        Assert.Equal(0, s.Tracking.RetentionDays);
         Assert.Equal(0.5, s.ReplayViewer.MasterVolume);
         Assert.Equal(@"C:\skins\my.osk", s.ReplayViewer.SkinPath);
         Assert.True(s.ReplayViewer.DisableHidden);
@@ -122,13 +122,13 @@ public class SettingsMigrationTests
 
             var service = new SettingsService(v2, legacy);
             var loaded = service.Load();
-            Assert.Equal(7, loaded.Tracking.RetentionDays);
+            Assert.Equal(0, loaded.Tracking.RetentionDays);
             Assert.True(File.Exists(v2)); // imported once, then persisted as v2
 
             // Second load reads v2, not legacy.
             File.WriteAllText(legacy, """{"osu_tracking_retention_days": 99}""");
             var second = new SettingsService(v2, legacy).Load();
-            Assert.Equal(7, second.Tracking.RetentionDays);
+            Assert.Equal(0, second.Tracking.RetentionDays);
         }
         finally
         {

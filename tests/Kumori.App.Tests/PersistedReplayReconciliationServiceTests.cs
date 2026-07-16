@@ -19,9 +19,11 @@ public sealed class PersistedReplayReconciliationServiceTests
     [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation\":\"completed\"}}", true)]
     [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":1}}", true)]
     [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":2}}", true)]
-    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":3}}", false)]
+    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":3}}", true)]
+    [InlineData("{\"result_recovery\":{\"reason\":\"tosu_gameplay_values_missing\",\"simulation_schema\":4}}", false)]
     [InlineData("{\"result_recovery\":{\"simulation_schema\":2}}", true)]
-    [InlineData("{\"result_recovery\":{\"simulation_schema\":3}}", false)]
+    [InlineData("{\"result_recovery\":{\"simulation_schema\":3}}", true)]
+    [InlineData("{\"result_recovery\":{\"simulation_schema\":4}}", false)]
     [InlineData("{}", false)]
     public void Detects_result_recoveries_that_need_current_simulation_schema(string json, bool expected)
     {
@@ -32,7 +34,8 @@ public sealed class PersistedReplayReconciliationServiceTests
 
     [Theory]
     [InlineData("{\"result_recovery\":{\"simulation_schema\":2}}", false)]
-    [InlineData("{\"result_recovery\":{\"simulation_schema\":3}}", true)]
+    [InlineData("{\"result_recovery\":{\"simulation_schema\":3}}", false)]
+    [InlineData("{\"result_recovery\":{\"simulation_schema\":4}}", true)]
     [InlineData("{\"result_recovery\":{\"simulation_schema\":1}}", false)]
     [InlineData("{}", false)]
     public void Detects_current_partial_capture_simulation(string json, bool expected)
@@ -56,7 +59,7 @@ public sealed class PersistedReplayReconciliationServiceTests
     [Theory]
     [InlineData("quit", "lazer_memory", 1000, 20, 10, 1, 0, 1, 11, "{}", true, false)]
     [InlineData("retried", "lazer_replay_frame", 0, 0, 0, 0, 0, 0, 11, "{}", true, true)]
-    [InlineData("failed", "lazer_memory", 1000, 20, 10, 1, 0, 1, 11, "{\"result_recovery\":{\"simulation_schema\":3}}", false, false)]
+    [InlineData("failed", "lazer_memory", 1000, 20, 10, 1, 0, 1, 11, "{\"result_recovery\":{\"simulation_schema\":4}}", false, false)]
     [InlineData("completed", "lazer_memory", 1000, 20, 10, 1, 0, 1, 11, "{}", false, false)]
     [InlineData("quit", "stable_memory", 1000, 20, 10, 1, 0, 1, 11, "{}", true, false)]
     [InlineData("quit", "lazer_memory", 0, 0, 0, 0, 0, 0, 0, "{}", false, false)]

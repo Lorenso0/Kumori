@@ -25,7 +25,7 @@ public sealed class AttemptRepository
     /// </summary>
     public List<AttemptSummary> GetRecentAttempts(
         long? beforeId = null, int limit = 100, string? search = null, long? sessionId = null,
-        string? mapKey = null)
+        string? mapKey = null, string? localDay = null)
     {
         var results = new List<AttemptSummary>(limit);
         if (!_factory.DatabaseExists)
@@ -45,6 +45,10 @@ public sealed class AttemptRepository
         var hasMaxCombo = HasColumn(con, "beatmaps", "max_combo");
         var hasKeyCounts = HasColumn(con, "attempts", "z_count") && HasColumn(con, "attempts", "x_count");
         var hasAttemptMods = HasTable(con, "attempt_mods");
+        var hasStartedAtUtc = HasColumn(con, "attempts", "started_at_utc_ms");
+        var localDayExpression = hasStartedAtUtc
+            ? "date(a.started_at_utc_ms / 1000, 'unixepoch', 'localtime')"
+            : "substr(a.started_at, 1, 10)";
         var mapBeatmapId = hasExternalBeatmapId ? "b.beatmap_id" : "NULL";
         var mapChecksum = hasChecksum ? "COALESCE(b.checksum, b.identity)" : "b.identity";
         var mapMapper = hasMapper ? "COALESCE(b.mapper,'')" : "''";
@@ -78,6 +82,7 @@ public sealed class AttemptRepository
             WHERE (@beforeId IS NULL OR a.id < @beforeId)
               AND (@sessionId IS NULL OR a.session_id = @sessionId)
               AND (@mapKey IS NULL OR {mapKeyExpression} = @mapKey)
+              AND (@localDay IS NULL OR {localDayExpression} = @localDay)
               AND (@search IS NULL OR
                    b.artist LIKE @search ESCAPE '\' OR
                    b.title LIKE @search ESCAPE '\' OR
@@ -90,6 +95,7 @@ public sealed class AttemptRepository
         cmd.Parameters.AddWithValue("@limit", limit);
         cmd.Parameters.AddWithValue("@sessionId", (object?)sessionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@mapKey", (object?)mapKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@localDay", (object?)localDay ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@search",
             string.IsNullOrWhiteSpace(search)
                 ? DBNull.Value
@@ -136,6 +142,21 @@ public sealed class AttemptRepository
 
     public List<AttemptSummary> GetAttemptsForSession(long sessionId, int limit = 100_000) =>
         GetRecentAttempts(limit: limit, sessionId: sessionId);
+
+    public List<AttemptSummary> GetAttemptsForDay(string localDay, int limit = 100_000)
+    {
+        if (!DateOnly.TryParseExact(
+                localDay,
+                "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out _))
+        {
+            return [];
+        }
+
+        return GetRecentAttempts(limit: limit, localDay: localDay);
+    }
 
     public AttemptSummary? GetAttempt(long attemptId)
     {

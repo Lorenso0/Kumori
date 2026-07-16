@@ -147,6 +147,10 @@ public sealed class SettingsService
         settings.Appearance.CustomTheme ??= new CustomThemeSettings();
         settings.Appearance.CustomTheme.Colors ??= CustomThemePalette.CreateDefaultColors();
         settings.Media.FallbackMirrors ??= [];
+        // Tracking history is retained indefinitely. RetentionDays remains in the
+        // serialized contract so older settings/backups still deserialize safely,
+        // but cleanup is now always an explicit user action.
+        settings.Tracking.RetentionDays = 0;
         return settings;
     }
 
@@ -207,7 +211,6 @@ public sealed class SettingsService
             _ => "refined-kumori",
         };
         s.Tracking.Enabled = B("osu_advanced_tracking_enabled", s.Tracking.Enabled);
-        s.Tracking.RetentionDays = I("osu_tracking_retention_days", s.Tracking.RetentionDays);
         s.Tracking.PacketRecordingEnabled = B("tosu_packet_recording_enabled", s.Tracking.PacketRecordingEnabled);
         s.ReplayViewer.Enabled = B("osu_native_replay_viewer_enabled", s.ReplayViewer.Enabled);
         s.ReplayViewer.MasterVolume = D("osu_replay_master_volume", s.ReplayViewer.MasterVolume);

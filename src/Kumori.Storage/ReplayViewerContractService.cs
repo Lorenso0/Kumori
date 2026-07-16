@@ -778,6 +778,8 @@ public sealed record ReplaySimulationResult
     public int CircleCount { get; init; }
     public int SliderCount { get; init; }
     public int SpinnerCount { get; init; }
+    public double DurationSeconds { get; init; }
+    public double Progress { get; init; }
     public IReadOnlyList<ReplaySimulationJudgement> Judgements { get; init; } = [];
 }
 

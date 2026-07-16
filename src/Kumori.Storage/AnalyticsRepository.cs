@@ -11,7 +11,7 @@ public sealed class AnalyticsRepository
         _factory = factory;
     }
 
-    public AnalyticsSummary GetSummary(int days = 30)
+    public AnalyticsSummary GetSummary(int days = int.MaxValue)
     {
         if (!_factory.DatabaseExists)
         {
@@ -51,6 +51,7 @@ public sealed class AnalyticsRepository
         };
         r.Close();
 
+        var dailyAccountChanges = ReadDailyProfileChanges(con);
         using var daily = con.CreateCommand();
         var dayExpression = hasUtc ? "date(a.started_at_utc_ms / 1000, 'unixepoch', 'localtime')" : "substr(a.started_at, 1, 10)";
         daily.CommandText = $"""
@@ -64,18 +65,22 @@ public sealed class AnalyticsRepository
             ORDER BY day DESC
             LIMIT @days
             """;
-        daily.Parameters.AddWithValue("@days", Math.Clamp(days, 1, 366));
+        daily.Parameters.AddWithValue("@days", Math.Clamp(days, 1, int.MaxValue));
         using var dailyReader = daily.ExecuteReader();
         var rows = new List<DailyAttemptTrend>();
         while (dailyReader.Read())
         {
+            var day = dailyReader.GetString(0);
+            dailyAccountChanges.TryGetValue(day, out var accountChange);
             rows.Add(new DailyAttemptTrend
             {
-                Day = dailyReader.GetString(0),
+                Day = day,
                 Attempts = dailyReader.GetInt64(1),
                 Completed = dailyReader.IsDBNull(2) ? 0 : dailyReader.GetInt64(2),
                 AverageAccuracy = dailyReader.GetDouble(3),
                 BestPp = dailyReader.GetDouble(4),
+                PpChange = accountChange?.PpChange,
+                RankChange = accountChange?.RankChange,
             });
         }
         dailyReader.Close();
@@ -89,6 +94,64 @@ public sealed class AnalyticsRepository
             LastSyncedAt = ReadLastSynced(con),
         };
     }
+
+    private static IReadOnlyDictionary<string, DailyAccountChange> ReadDailyProfileChanges(
+        Microsoft.Data.Sqlite.SqliteConnection con)
+    {
+        var changes = new Dictionary<string, DailyAccountChange>(StringComparer.Ordinal);
+        if (!HasTable(con, "profile_snapshots"))
+        {
+            return changes;
+        }
+
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = """
+            SELECT captured_at, total_pp, global_rank
+            FROM profile_snapshots
+            WHERE player_id = (
+                SELECT player_id
+                FROM profile_snapshots
+                WHERE player_id IS NOT NULL
+                ORDER BY id DESC
+                LIMIT 1)
+            ORDER BY captured_at ASC, id ASC
+            """;
+        using var reader = cmd.ExecuteReader();
+        var readings = new List<DailyProfileReading>();
+        while (reader.Read())
+        {
+            if (!DateTimeOffset.TryParse(
+                    reader.GetString(0),
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AllowWhiteSpaces,
+                    out var capturedAt))
+            {
+                continue;
+            }
+
+            readings.Add(new DailyProfileReading(
+                capturedAt.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                reader.IsDBNull(1) ? null : reader.GetDouble(1),
+                reader.IsDBNull(2) ? null : reader.GetInt64(2)));
+        }
+
+        DailyProfileReading? previousDayLast = null;
+        foreach (var group in readings.GroupBy(reading => reading.Day, StringComparer.Ordinal))
+        {
+            var first = group.First();
+            var latest = group.Last();
+            var baseline = previousDayLast ?? first;
+            changes[group.Key] = new DailyAccountChange(
+                baseline.TotalPp is { } oldPp && latest.TotalPp is { } newPp ? newPp - oldPp : null,
+                baseline.GlobalRank is { } oldRank && latest.GlobalRank is { } newRank ? oldRank - newRank : null);
+            previousDayLast = latest;
+        }
+
+        return changes;
+    }
+
+    private sealed record DailyProfileReading(string Day, double? TotalPp, long? GlobalRank);
+    private sealed record DailyAccountChange(double? PpChange, long? RankChange);
 
     private static (string Key1, string Key2) ReadLatestKeyBindings(Microsoft.Data.Sqlite.SqliteConnection con)
     {

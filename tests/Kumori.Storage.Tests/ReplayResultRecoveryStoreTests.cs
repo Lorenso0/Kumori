@@ -364,6 +364,72 @@ public sealed class ReplayResultRecoveryStoreTests : IDisposable
     }
 
     [Fact]
+    public void ApplySimulation_ZeroTosuCountersCannotBlockRecoveredGameplayAndLength()
+    {
+        var factory = new SqliteConnectionFactory(path, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(Start());
+        long id = sink.CurrentAttemptId!.Value;
+        AttemptFinalization final = Final(score: 0, accuracy: 100, combo: 0, n300: 0, n100: 0);
+        sink.Finalize(final with
+        {
+            Outcome = "failed",
+            Snapshot = final.Snapshot with
+            {
+                DurationSeconds = 0,
+                Progress = 0,
+                TimingOffsets = [-11, 4, 9],
+            },
+        });
+
+        var outcome = new ReplayResultRecoveryStore(factory).ApplySimulation(
+            id,
+            new ReplaySimulationResult
+            {
+                N300 = 73,
+                N100 = 6,
+                N50 = 2,
+                Misses = 3,
+                Accuracy = 90.674603,
+                Score = 123_456,
+                AchievedCombo = 41,
+                DurationSeconds = 44.868,
+                Progress = 0.953,
+                Judgements =
+                [
+                    new ReplaySimulationJudgement { Kind = 2, RootStartTime = 2_000 },
+                    new ReplaySimulationJudgement { Kind = 1, RootStartTime = 3_000 },
+                    new ReplaySimulationJudgement { Kind = 0, RootStartTime = 4_000 },
+                ],
+            },
+            simulationOwnsCoreResult: false,
+            tosuResultWasMissing: true);
+
+        Assert.True(outcome.Applied);
+        using var con = factory.Open();
+        using var values = con.CreateCommand();
+        values.CommandText = "SELECT n300, n100, n50, misses, accuracy, score, combo, duration_seconds, progress FROM attempts WHERE id=@id";
+        values.Parameters.AddWithValue("@id", id);
+        using var reader = values.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(73, reader.GetInt32(0));
+        Assert.Equal(6, reader.GetInt32(1));
+        Assert.Equal(2, reader.GetInt32(2));
+        Assert.Equal(3, reader.GetInt32(3));
+        Assert.Equal(90.674603, reader.GetDouble(4), 4);
+        Assert.Equal(123_456, reader.GetInt64(5));
+        Assert.Equal(41, reader.GetInt32(6));
+        Assert.Equal(44.868, reader.GetDouble(7), 3);
+        Assert.Equal(0.953, reader.GetDouble(8), 3);
+        reader.Close();
+
+        using var events = con.CreateCommand();
+        events.CommandText = "SELECT COUNT(*) FROM attempt_events WHERE attempt_id=@id AND event_type IN ('miss', 'hit_50', 'hit_100')";
+        events.Parameters.AddWithValue("@id", id);
+        Assert.Equal(3L, (long)events.ExecuteScalar()!);
+    }
+
+    [Fact]
     public void ApplySimulation_MissingTosuResultReplacesPerfectAccuracyPlaceholder()
     {
         var factory = new SqliteConnectionFactory(path, readOnly: false);

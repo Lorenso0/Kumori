@@ -4,8 +4,11 @@ using osu.Framework.Audio;
 using osu.Framework.Graphics;
 using osu.Framework.Platform;
 using osu.Framework.Screens;
+using osu.Framework.Testing;
 using osu.Game;
 using osu.Game.Beatmaps;
+using osu.Game.Input.Handlers;
+using osu.Game.Replays;
 using osu.Game.Rulesets.Judgements;
 using osu.Game.Rulesets.Difficulty;
 using osu.Game.Rulesets.Objects;
@@ -13,7 +16,9 @@ using osu.Game.Rulesets.Osu;
 using osu.Game.Rulesets.Osu.Difficulty;
 using osu.Game.Rulesets.Osu.Objects;
 using osu.Game.Rulesets.Osu.Replays;
+using osu.Game.Rulesets.Osu.UI;
 using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
 using osu.Game.Scoring;
 using osu.Game.Screens;
 using osu.Game.Screens.Play;
@@ -63,11 +68,13 @@ internal partial class ReplayAnalysisGame : OsuGameBase
             Score score = ReplayScoreFactory.Create(contract, ruleset, workingBeatmap, disableHidden: false);
             sourceScore = score;
             SelectedMods.Value = score.ScoreInfo.Mods;
-            (_, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
+            (double firstHitTime, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
             var player = new ReplaySimulationPlayer(
                 score,
                 ruleset,
                 workingBeatmap,
+                firstHitTime,
+                lastHitTime,
                 contract.ResolveAnalysisCoverageEnd(lastHitTime),
                 complete,
                 fail)
@@ -168,29 +175,63 @@ internal partial class ReplayAnalysisGame : OsuGameBase
     }
 }
 
+internal sealed class TransitionAccurateOsuReplayInputHandler
+    : OsuFramedReplayInputHandler
+{
+    private readonly HashSet<double> transitionFrames = [];
+
+    public TransitionAccurateOsuReplayInputHandler(Replay replay)
+        : base(replay)
+    {
+        OsuReplayFrame[] frames = replay.Frames.OfType<OsuReplayFrame>().ToArray();
+        for (int index = 1; index < frames.Length; index++)
+        {
+            if (!frames[index].Actions.Except(frames[index - 1].Actions).Any())
+                continue;
+            // Hold each newly pressed state through one nested drawable update.
+            // Releases continue through the standard 60fps frame-stable path.
+            transitionFrames.Add(frames[index].Time);
+        }
+    }
+
+    protected override double AllowedImportantTimeSpan => double.MaxValue;
+
+    // Cursor-only frames interpolate normally. Only button state changes must
+    // force a nested drawable update; this preserves short taps at 100x
+    // without serialising every held movement sample through the host.
+    protected override bool IsImportant(OsuReplayFrame frame)
+        => transitionFrames.Contains(frame.Time);
+}
+
 internal partial class ReplaySimulationPlayer : ReplayPlayer
 {
-    private const double simulation_playback_rate = 10;
+    private const double simulation_playback_rate = 100;
     private readonly Score sourceScore;
     private readonly OsuRuleset ruleset;
     private readonly WorkingBeatmap workingBeatmap;
+    private readonly double firstHitTime;
+    private readonly double lastHitTime;
     private readonly double? coverageEnd;
     private readonly Action<IReadOnlyList<PreparedReplayJudgement>, PreparedReplaySimulationSummary> completed;
     private readonly Action<Exception> failed;
     private readonly List<PreparedReplayJudgement> badJudgements = [];
     private readonly HashSet<(double Root, double Object, KumoriTimelineMarkerKind Kind)> seen = [];
     private readonly HashSet<(double Root, double Object, HitResult Result)> scored = [];
+    private readonly List<JudgementResult> deterministicJudgements = [];
     private readonly Dictionary<HitResult, int> resultCounts = [];
     private readonly List<double> timingOffsets = [];
     private int sliderTailMisses;
     private int maxCombo;
     private readonly Stopwatch stopwatch = Stopwatch.StartNew();
+    private bool coverageClockCapped;
     private bool finished;
 
     public ReplaySimulationPlayer(
         Score score,
         OsuRuleset ruleset,
         WorkingBeatmap workingBeatmap,
+        double firstHitTime,
+        double lastHitTime,
         double? coverageEnd,
         Action<IReadOnlyList<PreparedReplayJudgement>, PreparedReplaySimulationSummary> completed,
         Action<Exception> failed)
@@ -206,6 +247,8 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         sourceScore = score;
         this.ruleset = ruleset;
         this.workingBeatmap = workingBeatmap;
+        this.firstHitTime = firstHitTime;
+        this.lastHitTime = lastHitTime;
         this.coverageEnd = coverageEnd;
         this.completed = completed;
         this.failed = failed;
@@ -227,14 +270,30 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
             return;
         }
 
+        if (DrawableRuleset is not DrawableOsuRuleset drawable)
+        {
+            finishWithError(new InvalidOperationException(
+                "The osu! drawable ruleset was unavailable for accelerated replay analysis."));
+            return;
+        }
+        if (coverageEnd is not null)
+        {
+            // Complete replays are already handled exactly by lazer's native
+            // frame-stable playback. Retained partial captures need explicit
+            // press transitions because their artificial endpoint otherwise
+            // lets the 100x source clock overtake short taps near the cutoff.
+            var replayHandler = new TransitionAccurateOsuReplayInputHandler(sourceScore.Replay)
+            {
+                FrameAccuratePlayback = true,
+                GamefieldToScreenSpace = drawable.Playfield.GamefieldToScreenSpace,
+            };
+            ((IHasReplayHandler)drawable.KeyBindingInputManager).ReplayInputHandler = replayHandler;
+            drawable.ChildrenOfType<FrameStabilityContainer>().Single().ReplayInputHandler = replayHandler;
+        }
+
         ScoreProcessor.NewJudgement += collect;
         if (GameplayClockContainer is MasterGameplayClockContainer master)
         {
-            // At 100x the gameplay clock can cross an entire short key press
-            // between two ruleset updates. That makes lazer award a 300 for
-            // the surrounding slider while never emitting later bad results.
-            // 10x remains fast in the non-realtime headless host and keeps
-            // replay input transitions visible to the score processor.
             master.UserPlaybackRate.MaxValue = simulation_playback_rate;
             master.UserPlaybackRate.Value = simulation_playback_rate;
         }
@@ -243,9 +302,21 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
 
     protected override void Update()
     {
+        if (!coverageClockCapped
+            && coverageEnd is { } coverageCutoff
+            && GameplayClockContainer.CurrentTime >= coverageCutoff)
+        {
+            // The 100x source clock can get far ahead of the frame-stable
+            // ruleset. Pin its target to the retained replay boundary so the
+            // catch-up pass cannot score the uncaptured tail.
+            GameplayClockContainer.Seek(coverageCutoff);
+            GameplayClockContainer.Stop();
+            coverageClockCapped = true;
+        }
+
         if (!finished && coverageEnd is { } cutoff && LoadedBeatmapSuccessfully)
         {
-            double remaining = cutoff - GameplayClockContainer.CurrentTime;
+            double remaining = cutoff - DrawableRuleset.FrameStableClock.CurrentTime;
             if (remaining <= 0)
             {
                 finishSuccessfully();
@@ -273,7 +344,7 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         if (finished)
             return;
 
-        if (coverageEnd is { } end && GameplayClockContainer.CurrentTime >= end)
+        if (coverageEnd is { } end && DrawableRuleset.FrameStableClock.CurrentTime >= end)
             finishSuccessfully();
         else if (ScoreProcessor.HasCompleted.Value)
             finishSuccessfully();
@@ -296,6 +367,7 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         // numeric totals must use the identical object-level guarantee.
         if (!scored.Add((root.StartTime, result.HitObject.StartTime, result.Type)))
             return;
+        deterministicJudgements.Add(result);
 
         bool isSliderTailMiss = result.Type == HitResult.Miss && result.HitObject is SliderTailCircle;
         // Slider-tail failures are nested judgements. Keep them in their own
@@ -349,7 +421,23 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
 
         var score = sourceScore.ScoreInfo.DeepClone();
         score.BeatmapInfo = workingBeatmap.BeatmapInfo;
-        ScoreProcessor.PopulateScore(score);
+        // A frame-stable processor can briefly apply and revert the same
+        // judgement while catching up at 100x. Rebuild the score once from
+        // the object-level results we already deduplicated so identical
+        // retained input always produces the same normalised score.
+        ScoreProcessor deterministicProcessor = ruleset.CreateScoreProcessor();
+        deterministicProcessor.Mods.Value = score.Mods;
+        IBeatmap playableBeatmap = ScoreProcessor.Beatmap.Value
+                                  ?? throw new InvalidOperationException("The playable beatmap was unavailable while rebuilding replay score.");
+        deterministicProcessor.ApplyBeatmap(playableBeatmap);
+        foreach (JudgementResult result in deterministicJudgements
+                     .OrderBy(result => result.TimeAbsolute)
+                     .ThenBy(result => result.HitObject.StartTime)
+                     .ThenBy(result => result.Type))
+        {
+            deterministicProcessor.ApplyResult(result);
+        }
+        deterministicProcessor.PopulateScore(score);
         if (coverageEnd is not null)
         {
             // PopulateScore includes everything the accelerated player happened
@@ -373,6 +461,17 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         double clockRate = ModUtils.CalculateRateWithMods(score.Mods);
         double beatLength = workingBeatmap.Beatmap.GetMostCommonBeatLength();
         double bpm = beatLength > 0 ? 60000 / beatLength : 0;
+        double replayStart = sourceScore.Replay.Frames.Count == 0
+            ? 0
+            : Math.Min(0, sourceScore.Replay.Frames.Min(frame => frame.Time));
+        double replayEnd = coverageEnd
+                           ?? (sourceScore.Replay.Frames.Count == 0
+                               ? lastHitTime
+                               : sourceScore.Replay.Frames.Max(frame => frame.Time));
+        double durationSeconds = Math.Max(0, replayEnd - replayStart) / 1000;
+        double progress = coverageEnd is null
+            ? 1
+            : Math.Clamp((replayEnd - firstHitTime) / Math.Max(1, lastHitTime - firstHitTime), 0, 1);
 
         return new PreparedReplaySimulationSummary(
             score.Statistics.GetValueOrDefault(HitResult.Great),
@@ -410,7 +509,9 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
             adjustedDifficulty.MaxCombo,
             adjustedOsuDifficulty.HitCircleCount,
             adjustedOsuDifficulty.SliderCount,
-            adjustedOsuDifficulty.SpinnerCount);
+            adjustedOsuDifficulty.SpinnerCount,
+            durationSeconds,
+            progress);
     }
 
     private static ScoreInfo createFullComboProjection(ScoreInfo actual, int maxCombo)

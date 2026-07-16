@@ -11,10 +11,9 @@ namespace Kumori.Storage;
 /// </summary>
 public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory factory)
 {
-    // Schema 3 is produced by the scoring-safe replay pass. Schema 2 could
-    // skip short inputs at 100x and must be recomputed when retained frames or
-    // a persisted replay are still available.
-    public const int CurrentSimulationSchema = 3;
+    // Schema 4 restores frame-accurate 100x playback and lets simulation own a
+    // missing core result when timing existed but tosu's counters were all zero.
+    public const int CurrentSimulationSchema = 4;
 
     public ReplayResultRecoveryOutcome Apply(
         long attemptId,
@@ -184,7 +183,8 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                    a.pp, a.fc_pp, a.max_pp, a.base_stars, a.adjusted_stars, a.beatmap_id,
                    b.stars, b.ar, b.cs, b.od, b.hp, b.bpm, b.max_combo,
                    a.score, a.accuracy, a.grade, a.combo, a.n300, a.n100, a.n50,
-                   a.misses, a.geki, a.katu, COALESCE(c.source_json, '{}')
+                   a.misses, a.geki, a.katu, COALESCE(c.source_json, '{}'),
+                   a.duration_seconds, a.progress
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
             LEFT JOIN attempt_context c ON c.attempt_id = a.id
@@ -229,15 +229,19 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
             int geki = reader.GetInt32(31);
             int katu = reader.GetInt32(32);
             string sourceJson = reader.GetString(33);
+            double durationSeconds = reader.GetDouble(34);
+            double progress = reader.GetDouble(35);
             reader.Close();
             cancellationToken.ThrowIfCancellationRequested();
 
             var fields = new List<string>();
             bool replayRecovery = IsReplayRecovery(sourceJson);
             bool checkpointOwnsCoreResult = CheckpointOwnsCoreResult(sourceJson);
+            int currentCoreTotal = n300 + n100 + n50 + misses;
+            bool simulationOwnsMissingCore = tosuResultWasMissing && currentCoreTotal == 0;
             int simulatedCoreTotal = simulation.N300 + simulation.N100 + simulation.N50 + simulation.Misses;
-            if ((replayRecovery || simulationOwnsCoreResult)
-                && !checkpointOwnsCoreResult
+            if ((replayRecovery || simulationOwnsCoreResult || simulationOwnsMissingCore)
+                && (!checkpointOwnsCoreResult || currentCoreTotal == 0)
                 && simulatedCoreTotal > 0)
             {
                 Replace(ref n300, simulation.N300, "300");
@@ -247,7 +251,7 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 // The replay decoder (or valid tosu telemetry) owns final accuracy.
                 // Re-simulation can produce different modern-lazer slider judgements,
                 // so its core 300/100/50/miss counts are not an accuracy substitute.
-                if (simulationOwnsCoreResult && tosuResultWasMissing)
+                if ((simulationOwnsCoreResult || simulationOwnsMissingCore) && tosuResultWasMissing)
                     ReplaceDouble(ref accuracy, simulation.Accuracy, "accuracy");
                 else
                     accuracy = FillDouble(accuracy, simulation.Accuracy, "accuracy");
@@ -287,6 +291,8 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
             hp = FillNullable(hp, simulation.DrainRate, "HP", allowZero: true);
             bpm = FillNullable(bpm, simulation.Bpm, "BPM");
             maxCombo = FillInt(maxCombo, simulation.MaxCombo, "map max combo");
+            durationSeconds = FillDouble(durationSeconds, simulation.DurationSeconds, "duration");
+            progress = FillDouble(progress, simulation.Progress, "progress");
 
             using (var update = con.CreateCommand())
             {
@@ -312,7 +318,9 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                     fc_pp=@fc_pp,
                     max_pp=@max_pp,
                     base_stars=@base_stars,
-                    adjusted_stars=@adjusted_stars
+                    adjusted_stars=@adjusted_stars,
+                    duration_seconds=@duration_seconds,
+                    progress=@progress
                 WHERE id=@id AND outcome <> 'active'
                 """;
                 update.Parameters.AddWithValue("@slider_breaks", sliderBreaks);
@@ -335,6 +343,8 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 update.Parameters.AddWithValue("@max_pp", maxPp);
                 update.Parameters.AddWithValue("@base_stars", (object?)baseStars ?? DBNull.Value);
                 update.Parameters.AddWithValue("@adjusted_stars", (object?)adjustedStars ?? DBNull.Value);
+                update.Parameters.AddWithValue("@duration_seconds", durationSeconds);
+                update.Parameters.AddWithValue("@progress", progress);
                 update.Parameters.AddWithValue("@id", attemptId);
                 cancellationToken.ThrowIfCancellationRequested();
                 update.ExecuteNonQuery();
@@ -365,7 +375,7 @@ public sealed partial class ReplayResultRecoveryStore(SqliteConnectionFactory fa
                 UpsertSimulationTiming(con, tx, attemptId, simulation.TimingOffsets, cancellationToken);
                 fields.Add("timing offsets");
             }
-            if (replayRecovery || simulationOwnsCoreResult)
+            if (replayRecovery || simulationOwnsCoreResult || simulationOwnsMissingCore)
             {
                 UpsertScoreContext(
                     con, tx, attemptId, score, grade, n300, n100, n50, misses, geki, katu,

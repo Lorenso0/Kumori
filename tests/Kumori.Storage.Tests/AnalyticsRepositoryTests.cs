@@ -103,6 +103,8 @@ public class AnalyticsRepositoryTests : IDisposable
         Assert.Equal(6291.26, summary.LatestAccountChange.NewTotalPp);
         Assert.Equal(55747, summary.LatestAccountChange.OldGlobalRank);
         Assert.Equal(52590, summary.LatestAccountChange.NewGlobalRank);
+        Assert.Equal(25.36, summary.Daily[0].PpChange!.Value, precision: 2);
+        Assert.Equal(612, summary.Daily[0].RankChange);
     }
 
     public void Dispose()

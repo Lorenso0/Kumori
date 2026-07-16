@@ -63,6 +63,36 @@ public sealed class TrackingMaintenanceRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void DeleteTrackingBeforeRemovesOldPlaysWithoutDeletingNewerPlaysInSameSession()
+    {
+        var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
+        _ = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        using (var connection = factory.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO sessions(id, started_at, ended_at) VALUES
+                    (1, '2026-06-30T23:55:00Z', '2026-07-01T00:10:00Z'),
+                    (2, '2026-06-01T12:00:00Z', '2026-06-01T13:00:00Z');
+                INSERT INTO beatmaps(id, identity) VALUES(1, 'map-a');
+                INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome) VALUES
+                    (1, 1, 1, '2026-06-30T23:59:00Z', 'completed'),
+                    (2, 1, 1, '2026-07-01T00:01:00Z', 'completed'),
+                    (3, 2, 1, '2026-06-01T12:01:00Z', 'completed');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var deleted = new TrackingMaintenanceRepository(factory).DeleteTrackingBefore("2026-07-01");
+
+        Assert.Equal((2, 1), deleted);
+        using var verification = factory.Open();
+        using var count = verification.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM attempts WHERE id=2 AND session_id=1";
+        Assert.Equal(1L, (long)count.ExecuteScalar()!);
+    }
+
+    [Fact]
     public void StartupRecoveryFinalizesOnlyInterruptedOpenTrackingRows()
     {
         var factory = new SqliteConnectionFactory(databasePath, readOnly: false);

@@ -25,6 +25,9 @@ public sealed record DailyAttemptTrend
     public long Completed { get; init; }
     public double AverageAccuracy { get; init; }
     public double BestPp { get; init; }
+    public double? PpChange { get; init; }
+    /// <summary>Positive when global ranks were gained; negative when ranks were lost.</summary>
+    public long? RankChange { get; init; }
 }
 
 public sealed record AccountChangeSummary

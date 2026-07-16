@@ -122,6 +122,22 @@ public sealed class ReplayRecoveryTestAttemptSinkTests : IDisposable
             broken with { Outcome = "active" }));
     }
 
+    [Fact]
+    public void TimingEvidenceDoesNotClaimCoreResultAuthority()
+    {
+        var timingOnly = new AttemptCheckpoint(
+            new AttemptSnapshot { TimingOffsets = [-12, 4, 7] },
+            [],
+            false);
+        var populated = timingOnly with
+        {
+            Snapshot = timingOnly.Snapshot with { N300 = 3 },
+        };
+
+        Assert.False(LazerReplayFrameRecoverySink.HasGameplayResult(timingOnly));
+        Assert.True(LazerReplayFrameRecoverySink.HasGameplayResult(populated));
+    }
+
     private SettingsService CreateArmedSettings()
     {
         Directory.CreateDirectory(directory);

@@ -37,6 +37,19 @@ public sealed class DateDisplayViewModelTests
     }
 
     [Theory]
+    [InlineData("2026-07-16", "today")]
+    [InlineData("2026-07-15", "yesterday")]
+    [InlineData("2026-07-14", "14/07/2026")]
+    public void PerformanceDates_UseTodayYesterdayThenCalendarDates(string dayValue, string expected)
+    {
+        var day = new PerformanceDayViewModel(
+            new DailyAttemptTrend { Day = dayValue },
+            today: new DateTime(2026, 7, 16));
+
+        Assert.Equal(expected, day.DateText);
+    }
+
+    [Theory]
     [InlineData("completed", false, "")]
     [InlineData("failed", true, "PARTIAL")]
     [InlineData("retried", true, "PARTIAL")]

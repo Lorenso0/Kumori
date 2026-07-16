@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.4.5",
+    "date": "2026-07-16",
+    "features": [
+      "Added daily PP and global-rank gains or losses to Performance history",
+      "Made each Performance day expandable with every play shown in the same card style as the dashboard"
+    ],
+    "improvements": [
+      "Restored frame-accurate 100x replay judgement simulation while keeping complete and retained partial replays fast",
+      "Kept Performance and play history indefinitely while adding confirmed age-based cleanup choices in Settings",
+      "Showed today and yesterday for recent Performance entries before falling back to calendar dates"
+    ],
+    "fixes": [
+      "Recovered judgement totals, gameplay score context, combo, timing, PP, played duration, and progress when tosu omitted gameplay counters",
+      "Prevented timing offsets alone from blocking retained replay simulation",
+      "Made normalized replay scores deterministic during accelerated frame-stable recovery"
+    ]
+  },
+  {
     "version": "0.4.4",
     "date": "2026-07-16",
     "improvements": [

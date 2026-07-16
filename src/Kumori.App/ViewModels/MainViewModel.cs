@@ -178,7 +178,7 @@ public partial class MainViewModel : ObservableObject
     public bool CanLaunchTosu => CanStartTosu && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
     private bool CanMaintainTrackingData() => !HasActiveSession;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.4"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.5"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -442,9 +442,15 @@ public partial class MainViewModel : ObservableObject
         PerformanceDays.Clear();
         foreach (var trend in analytics.Daily)
         {
-            PerformanceDays.Add(new PerformanceDayViewModel(trend));
+            PerformanceDays.Add(new PerformanceDayViewModel(trend, LoadPerformanceDayAttemptsAsync));
         }
         OnPropertyChanged(nameof(HasNoPerformanceData));
+    }
+
+    private async Task<IReadOnlyList<AttemptRowViewModel>> LoadPerformanceDayAttemptsAsync(string day)
+    {
+        var attempts = await Task.Run(() => _attempts.GetAttemptsForDay(day));
+        return attempts.Select(attempt => new AttemptRowViewModel(attempt)).ToArray();
     }
 
     private static string FormatPlaytime(double seconds)

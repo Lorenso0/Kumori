@@ -602,6 +602,41 @@ public sealed class TrackingMaintenanceRepository
         return deleted;
     }
 
+    /// <summary>
+    /// Deletes individual plays and account snapshots older than a local calendar cutoff,
+    /// then removes ended sessions that no longer contain any plays.
+    /// </summary>
+    public (int Attempts, int Sessions) DeleteTrackingBefore(string isoTimestamp)
+    {
+        if (!_factory.DatabaseExists)
+        {
+            return (0, 0);
+        }
+
+        using var con = OpenWriteConnection();
+        EnsureNoActiveTracking(con);
+        using var tx = con.BeginTransaction();
+        using var attempts = con.CreateCommand();
+        attempts.Transaction = tx;
+        attempts.CommandText = "DELETE FROM attempts WHERE started_at < @before";
+        attempts.Parameters.AddWithValue("@before", isoTimestamp);
+        var deletedAttempts = attempts.ExecuteNonQuery();
+        DeleteIfExists(con, tx, "profile_snapshots", "captured_at < @before", ("@before", isoTimestamp));
+
+        using var sessions = con.CreateCommand();
+        sessions.Transaction = tx;
+        sessions.CommandText = """
+            DELETE FROM sessions
+            WHERE ended_at IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM attempts WHERE attempts.session_id = sessions.id)
+            """;
+        var deletedSessions = sessions.ExecuteNonQuery();
+        RebuildPersonalBests(con, tx);
+        PruneUnusedBeatmaps(con, tx);
+        tx.Commit();
+        return (deletedAttempts, deletedSessions);
+    }
+
     public int DeleteAll()
     {
         using var con = OpenWriteConnection();
