@@ -2,7 +2,7 @@
 
 Kumori is a Windows companion for [osu!](https://osu.ppy.sh/) that keeps your play history, sessions, map statistics, performance trends, and replay analysis together in one place.
 
-![A quick tour of the Kumori dashboard, performance, and maps pages](docs/media/kumori-product-tour-1180x820.gif)
+![A quick tour of the Kumori dashboard, performance, and maps pages](docs/media/kumori-product-tour-1180x920.gif)
 
 Kumori works with both osu!stable and osu!lazer. It does not change your osu! installation, and your play history stays on your computer.
 
@@ -19,15 +19,15 @@ Kumori works with both osu!stable and osu!lazer. It does not change your osu! in
 
 The Dashboard combines your recent plays with a detailed view of the selected result. Search your history, filter by outcome, group plays into sessions, and jump into replay analysis when capture data is available.
 
-![Kumori dashboard showing a recent session and selected play](docs/media/kumori-dashboard-1180x820.png)
+![Kumori dashboard showing a recent session, selected play, hit timing, and map pressure](docs/media/kumori-dashboard-1180x920.png)
 
 ## See the bigger picture
 
 The Maps page highlights the beatmaps you return to most and compares completion, accuracy, performance, and combo results. The Performance page summarizes your overall results and recent daily consistency.
 
-![Kumori maps page showing the most-played beatmaps](docs/media/kumori-maps-1180x820.png)
+![Kumori maps page showing the most-played beatmaps](docs/media/kumori-maps-1180x920.png)
 
-![Kumori performance page showing activity and accuracy over time](docs/media/kumori-performance-1180x820.png)
+![Kumori performance page showing activity and accuracy over time](docs/media/kumori-performance-1180x920.png)
 
 ## Getting started
 
