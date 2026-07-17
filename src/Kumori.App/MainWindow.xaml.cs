@@ -684,17 +684,17 @@ public partial class MainWindow : Window
 
         if (ActualHeight >= 1000)
         {
-            ScrollHitTimingRow.Height = new GridLength(108);
+            ScrollHitTimingRow.Height = new GridLength(146);
             ScrollMapPressureRow.Height = new GridLength(116);
         }
         else if (ActualHeight >= 700)
         {
-            ScrollHitTimingRow.Height = new GridLength(78);
+            ScrollHitTimingRow.Height = new GridLength(126);
             ScrollMapPressureRow.Height = new GridLength(86);
         }
         else
         {
-            ScrollHitTimingRow.Height = new GridLength(68);
+            ScrollHitTimingRow.Height = new GridLength(112);
             ScrollMapPressureRow.Height = new GridLength(74);
         }
 

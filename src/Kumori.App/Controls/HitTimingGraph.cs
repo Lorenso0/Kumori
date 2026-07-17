@@ -33,7 +33,10 @@ public sealed class HitTimingGraph : FrameworkElement
         DependencyProperty.Register(nameof(HoverReadout), typeof(string), typeof(HitTimingGraph),
             new FrameworkPropertyMetadata(""));
 
-    public static readonly DependencyProperty PointBrushProperty = BrushProperty(nameof(PointBrush), "#E46AA5");
+    public static readonly DependencyProperty PointBrushProperty = BrushProperty(nameof(PointBrush), "#F7F1F4");
+    public static readonly DependencyProperty EarlyPointBrushProperty = BrushProperty(nameof(EarlyPointBrush), "#E8558D");
+    public static readonly DependencyProperty LatePointBrushProperty = BrushProperty(nameof(LatePointBrush), "#A766C7");
+    public static readonly DependencyProperty BandBrushProperty = BrushProperty(nameof(BandBrush), "#2A1821");
     public static readonly DependencyProperty GridBrushProperty = BrushProperty(nameof(GridBrush), "#3A3047");
     public static readonly DependencyProperty MeanBrushProperty = BrushProperty(nameof(MeanBrush), "#E94FAE");
     public static readonly DependencyProperty HoverBrushProperty = BrushProperty(nameof(HoverBrush), "#82728E");
@@ -58,6 +61,9 @@ public sealed class HitTimingGraph : FrameworkElement
 
     public string HoverReadout { get => (string)GetValue(HoverReadoutProperty); set => SetValue(HoverReadoutProperty, value); }
     public Brush PointBrush { get => (Brush)GetValue(PointBrushProperty); set => SetValue(PointBrushProperty, value); }
+    public Brush EarlyPointBrush { get => (Brush)GetValue(EarlyPointBrushProperty); set => SetValue(EarlyPointBrushProperty, value); }
+    public Brush LatePointBrush { get => (Brush)GetValue(LatePointBrushProperty); set => SetValue(LatePointBrushProperty, value); }
+    public Brush BandBrush { get => (Brush)GetValue(BandBrushProperty); set => SetValue(BandBrushProperty, value); }
     public Brush GridBrush { get => (Brush)GetValue(GridBrushProperty); set => SetValue(GridBrushProperty, value); }
     public Brush MeanBrush { get => (Brush)GetValue(MeanBrushProperty); set => SetValue(MeanBrushProperty, value); }
     public Brush HoverBrush { get => (Brush)GetValue(HoverBrushProperty); set => SetValue(HoverBrushProperty, value); }
@@ -75,29 +81,54 @@ public sealed class HitTimingGraph : FrameworkElement
             return;
         }
 
-        const double margin = 8;
-        var left = margin;
-        var right = width - margin;
+        var showAxisLabels = width >= 220 && height >= 62;
+        var left = showAxisLabels ? 43d : 8d;
+        var right = width - 8;
         var plotWidth = right - left;
-        var top = 5d;
-        var bottom = height - 16;
+        var top = 7d;
+        var bottom = height - (showAxisLabels ? 23d : 16d);
         var plotHeight = bottom - top;
+        if (plotWidth <= 1 || plotHeight <= 1)
+        {
+            _lastState = default;
+            DrawKeyboardFocus(dc);
+            return;
+        }
 
-        var bound = Math.Max(10.0, offsets.Max(Math.Abs));
+        var maximumOffset = offsets.Max(Math.Abs);
+        var bound = Math.Max(50.0, Math.Ceiling(maximumOffset / 10.0) * 10.0);
         _lastState = (left, right, top, bottom, bound, offsets);
+
+        var centreY = top + plotHeight / 2;
+        var bandHeight = plotHeight / 4;
+        dc.DrawRectangle(BandBrush, null, new Rect(left, top, plotWidth, bandHeight));
+        dc.DrawRectangle(BandBrush, null, new Rect(left, bottom - bandHeight, plotWidth, bandHeight));
+
+        var gridPen = new Pen(GridBrush, 1);
+        dc.DrawLine(gridPen, new Point(left, top), new Point(right, top));
+        dc.DrawLine(new Pen(AxisTextBrush, 1), new Point(left, centreY), new Point(right, centreY));
+        dc.DrawLine(gridPen, new Point(left, bottom), new Point(right, bottom));
+
+        var mean = offsets.Average();
+        var meanY = top + (bound - Math.Clamp(mean, -bound, bound)) / (2 * bound) * plotHeight;
+        dc.DrawLine(
+            new Pen(MeanBrush, 1) { DashStyle = new DashStyle(new double[] { 4, 4 }, 0) },
+            new Point(left, meanY),
+            new Point(right, meanY));
+
+        dc.PushClip(new RectangleGeometry(new Rect(left, top - 3, plotWidth, plotHeight + 6)));
         for (var i = 0; i < offsets.Count; i++)
         {
             var x = left + (offsets.Count == 1 ? plotWidth / 2 : i / (double)(offsets.Count - 1) * plotWidth);
             var y = top + (bound - Math.Clamp(offsets[i], -bound, bound)) / (2 * bound) * plotHeight;
-            dc.DrawEllipse(PointBrush, null, new Point(x, y), 1.6, 1.6);
+            var brush = offsets[i] < 0
+                ? EarlyPointBrush
+                : offsets[i] > 0
+                    ? LatePointBrush
+                    : PointBrush;
+            dc.DrawEllipse(brush, null, new Point(x, y), 2, 2);
         }
-
-        var centreY = top + plotHeight / 2;
-        dc.DrawLine(new Pen(GridBrush, 1), new Point(left, centreY), new Point(right, centreY));
-
-        var mean = offsets.Average();
-        var meanY = top + (bound - mean) / (2 * bound) * plotHeight;
-        dc.DrawLine(new Pen(MeanBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 3 }, 0) }, new Point(left, meanY), new Point(right, meanY));
+        dc.Pop();
 
         if ((_hoverIndex ?? _keyboardIndex) is { } hoverIndex)
         {
@@ -106,8 +137,27 @@ public sealed class HitTimingGraph : FrameworkElement
             dc.DrawLine(new Pen(HoverBrush, 1) { DashStyle = new DashStyle(new double[] { 2, 2 }, 0) }, new Point(x, top), new Point(x, bottom));
         }
 
-        DrawText(dc, "0", left, bottom + 2, TextAlignment.Left);
-        DrawText(dc, Invariant($"{offsets.Count:N0} hits"), right, bottom + 2, TextAlignment.Right);
+        if (showAxisLabels)
+        {
+            DrawText(dc, Invariant($"+{bound:0} ms"), left - 7, top - 5, TextAlignment.Right);
+            DrawText(dc, "0 ms", left - 7, centreY - 6, TextAlignment.Right);
+            DrawText(dc, Invariant($"-{bound:0} ms"), left - 7, bottom - 7, TextAlignment.Right);
+            DrawText(dc, "1", left, bottom + 5, TextAlignment.Left);
+            DrawText(dc, Invariant($"{offsets.Count:N0}"), right, bottom + 5, TextAlignment.Right);
+            DrawText(dc, "Hit #", left + plotWidth / 2, bottom + 5, TextAlignment.Center);
+            DrawText(
+                dc,
+                Invariant($"{mean:+0.0;-0.0;0.0} ms"),
+                right - 3,
+                meanY - 13,
+                TextAlignment.Right,
+                MeanBrush);
+        }
+        else
+        {
+            DrawText(dc, "1", left, bottom + 2, TextAlignment.Left);
+            DrawText(dc, Invariant($"{offsets.Count:N0}"), right, bottom + 2, TextAlignment.Right);
+        }
         DrawKeyboardFocus(dc);
     }
 
@@ -344,7 +394,13 @@ public sealed class HitTimingGraph : FrameworkElement
         return Invariant($"{offsets.Count:N0} hits; mean offset {offsets.Average():+0.0;-0.0;0.0} milliseconds");
     }
 
-    private void DrawText(DrawingContext dc, string text, double x, double y, TextAlignment alignment)
+    private void DrawText(
+        DrawingContext dc,
+        string text,
+        double x,
+        double y,
+        TextAlignment alignment,
+        Brush? brush = null)
     {
         var formatted = new FormattedText(
             text,
@@ -352,7 +408,7 @@ public sealed class HitTimingGraph : FrameworkElement
             FlowDirection.LeftToRight,
             new Typeface("Segoe UI"),
             9,
-            AxisTextBrush,
+            brush ?? AxisTextBrush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
         var drawX = alignment switch
         {

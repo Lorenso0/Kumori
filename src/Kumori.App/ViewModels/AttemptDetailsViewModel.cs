@@ -185,6 +185,27 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string FcPpText => Details is { } d ? Invariant($"{d.FcPp:0.0}pp") : "";
     public string TimingMeanText => Details?.Timing is { } t ? Invariant($"{t.Mean:+0.00;-0.00;0.00}ms") : "—";
     public string TimingDeviationText => Details?.Timing is { } t ? Invariant($"{t.Deviation:0.00}ms") : "—";
+    public string TimingHitCountText => Details?.Timing is { } t
+        ? Invariant($"{t.HitCount:N0} hits")
+        : "";
+    public string TimingOverviewText => Details?.Timing is { } t
+        ? Invariant($"{TimingTendency(t)} \u00B7 UR {UrText}")
+        : "";
+    public string TimingBiasText => Details?.Timing is { } t
+        ? Invariant($"{t.Mean:+0.0;-0.0;0.0} ms")
+        : "—";
+    public string TimingBiasDirectionText => Details?.Timing is { } t
+        ? t.Mean < -0.05 ? "EARLY" : t.Mean > 0.05 ? "LATE" : "CENTERED"
+        : "";
+    public string TimingSpreadText => Details?.Timing is { } t
+        ? Invariant($"{t.Deviation:0.0} ms")
+        : "—";
+    public string TimingEarlyCountText => Details?.Timing is { } t
+        ? t.EarlyCount.ToString("N0", CultureInfo.InvariantCulture)
+        : "0";
+    public string TimingLateCountText => Details?.Timing is { } t
+        ? t.LateCount.ToString("N0", CultureInfo.InvariantCulture)
+        : "0";
     public string LargeTickText => IsStablePlay ? "—" : Details is { } d ? HitTotal(d.LargeTickHits, d.LargeTickMisses) : "";
     public string SmallTickText => Details is { } d ? HitTotal(d.SmallTickHits, d.SmallTickMisses) : "";
     public string SliderTailText => IsStablePlay ? "—" : Details is { } d ? HitTotal(d.SliderTailHits, d.SliderTailMisses) : "";
@@ -454,6 +475,13 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(FcPpText));
         OnPropertyChanged(nameof(TimingMeanText));
         OnPropertyChanged(nameof(TimingDeviationText));
+        OnPropertyChanged(nameof(TimingHitCountText));
+        OnPropertyChanged(nameof(TimingOverviewText));
+        OnPropertyChanged(nameof(TimingBiasText));
+        OnPropertyChanged(nameof(TimingBiasDirectionText));
+        OnPropertyChanged(nameof(TimingSpreadText));
+        OnPropertyChanged(nameof(TimingEarlyCountText));
+        OnPropertyChanged(nameof(TimingLateCountText));
         OnPropertyChanged(nameof(LargeTickText));
         OnPropertyChanged(nameof(SmallTickText));
         OnPropertyChanged(nameof(SliderTailText));
@@ -552,6 +580,13 @@ public partial class AttemptDetailsViewModel : ObservableObject
     }
 
     private static readonly Brush PositiveBrush = FrozenBrush("#4ade80");
+
+    private static string TimingTendency(TimingSummary timing) =>
+        timing.EarlyCount > timing.LateCount
+            ? "Mostly early"
+            : timing.LateCount > timing.EarlyCount
+                ? "Mostly late"
+                : "Evenly timed";
 
     private static readonly Dictionary<string, string> SettingAliases = new(StringComparer.OrdinalIgnoreCase)
     {

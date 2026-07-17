@@ -50,6 +50,35 @@ public sealed class AttemptDetailsViewModelTests
     }
 
     [Fact]
+    public void Timing_summary_exposes_bias_spread_and_split_for_the_chart_card()
+    {
+        var viewModel = new AttemptDetailsViewModel(null!)
+        {
+            Details = new AttemptDetails
+            {
+                UnstableRate = 206.1,
+                Timing = new TimingSummary
+                {
+                    HitCount = 204,
+                    EarlyCount = 169,
+                    LateCount = 35,
+                    Mean = -13.5,
+                    Deviation = 20.61,
+                    Offsets = [-13.5],
+                },
+            },
+        };
+
+        Assert.Equal("204 hits", viewModel.TimingHitCountText);
+        Assert.Equal("Mostly early \u00B7 UR 206.1", viewModel.TimingOverviewText);
+        Assert.Equal("-13.5 ms", viewModel.TimingBiasText);
+        Assert.Equal("EARLY", viewModel.TimingBiasDirectionText);
+        Assert.Equal("20.6 ms", viewModel.TimingSpreadText);
+        Assert.Equal("169", viewModel.TimingEarlyCountText);
+        Assert.Equal("35", viewModel.TimingLateCountText);
+    }
+
+    [Fact]
     public void Replay_recovery_notice_explains_missing_tosu_data_and_simulation()
     {
         var viewModel = new AttemptDetailsViewModel(null!)

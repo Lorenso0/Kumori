@@ -231,9 +231,12 @@
         </Style>
 
         <Style TargetType="{x:Type controls:HitTimingGraph}">
-            <Setter Property="PointBrush" Value="{DynamicResource Brush.AccentPink}" />
+            <Setter Property="PointBrush" Value="{DynamicResource Brush.TextPrimary}" />
+            <Setter Property="EarlyPointBrush" Value="{DynamicResource Brush.AccentPink}" />
+            <Setter Property="LatePointBrush" Value="{DynamicResource Brush.AccentPurple}" />
+            <Setter Property="BandBrush" Value="{DynamicResource Brush.CardSelectedBackground}" />
             <Setter Property="GridBrush" Value="{DynamicResource Brush.BorderSubtle}" />
-            <Setter Property="MeanBrush" Value="{DynamicResource Brush.AccentPurple}" />
+            <Setter Property="MeanBrush" Value="{DynamicResource Brush.AccentPink}" />
             <Setter Property="HoverBrush" Value="{DynamicResource Brush.TextMuted}" />
             <Setter Property="AxisTextBrush" Value="{DynamicResource Brush.TextMuted}" />
         </Style>
@@ -1594,11 +1597,12 @@
                                         </UniformGrid>
 
                                         <Border BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,1,0,0">
-                                            <UniformGrid Columns="6">
+                                            <UniformGrid Columns="7">
                                                 <Border Style="{StaticResource StatCellSecondary}"><StackPanel><TextBlock Text="300" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Cyan}" HorizontalAlignment="Center" ToolTip="GREAT judgement"/><TextBlock Text="{Binding N300Text}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
                                                 <Border Style="{StaticResource StatCellSecondary}"><StackPanel><TextBlock Text="100" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}" HorizontalAlignment="Center" ToolTip="OK judgement"/><TextBlock Text="{Binding N100Text}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
                                                 <Border Style="{StaticResource StatCellSecondary}"><StackPanel><TextBlock Text="50" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Warning}" HorizontalAlignment="Center" ToolTip="MEH judgement"/><TextBlock Text="{Binding N50Text}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
                                                 <Border Style="{StaticResource StatCellSecondary}"><StackPanel><TextBlock Text="MISS" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Danger}" HorizontalAlignment="Center"/><TextBlock Text="{Binding MissCountText}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
+                                                <Border Style="{StaticResource StatCellSecondary}"><StackPanel ToolTip="Slider breaks"><TextBlock Text="SLIDER BREAKS" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Danger}" HorizontalAlignment="Center"/><TextBlock Text="{Binding SliderBreakText}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
                                                 <Border Style="{StaticResource StatCellSecondary}"><StackPanel ToolTip="Lazer LargeTickHit judgement"><TextBlock Text="LARGE TICK" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AccentPurple}" HorizontalAlignment="Center"/><TextBlock Text="{Binding LargeTickText}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
                                                 <Border Style="{StaticResource StatCellSecondary}" BorderThickness="0"><StackPanel ToolTip="Lazer SliderTailHit judgement"><TextBlock Text="SLIDER TAIL" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}" HorizontalAlignment="Center"/><TextBlock Text="{Binding SliderTailText}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,0"/></StackPanel></Border>
                                             </UniformGrid>
@@ -1688,11 +1692,17 @@
                                                     <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding FcPpText}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AccentPink}" VerticalAlignment="Center"/>
                                                 </Grid>
                                             </Border>
-                                            <Border Grid.Column="4" Grid.ColumnSpan="2" Margin="8,7" Background="{DynamicResource Brush.CardSelectedBackground}" CornerRadius="12">
-                                                <StackPanel VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding UrText}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="UNSTABLE RATE" Style="{StaticResource Text.LabelUpper}" FontSize="10" HorizontalAlignment="Center"/>
-                                                </StackPanel>
+                                            <Border Grid.Column="4" Grid.ColumnSpan="2" Margin="8,7">
+                                                <UniformGrid Columns="2" VerticalAlignment="Center">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding TechnicalKey1Presses}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                        <TextBlock Text="K1 PRESSES" Style="{StaticResource Text.LabelUpper}" FontSize="10" HorizontalAlignment="Center"/>
+                                                    </StackPanel>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding TechnicalKey2Presses}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                        <TextBlock Text="K2 PRESSES" Style="{StaticResource Text.LabelUpper}" FontSize="10" HorizontalAlignment="Center"/>
+                                                    </StackPanel>
+                                                </UniformGrid>
                                             </Border>
                                         </Grid>
                                         </Border>
@@ -1710,45 +1720,116 @@
 
                                 <!-- e. charts, stacked full width -->
                                 <StackPanel x:Name="ScrollableChartsPanel" Margin="10,6,10,0" Visibility="Visible">
-                                    <Border Style="{StaticResource ChartPanel}" Padding="8,6" Margin="0,0,0,6">
+                                    <Border Style="{StaticResource ChartPanel}" Padding="12,9" Margin="0,0,0,6">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
-                                                <RowDefinition x:Name="ScrollHitTimingRow" Height="92" />
-                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition x:Name="ScrollHitTimingRow" Height="126" />
                                             </Grid.RowDefinitions>
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="HIT TIMING" Style="{StaticResource ChartTitle}" FontSize="10" VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding TimingLine}"
-                                                           Style="{StaticResource Text.Muted}"
-                                                           FontSize="11"
-                                                           VerticalAlignment="Center"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           Margin="6,0,0,0"
-                                                           Visibility="{Binding HasTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
-                                                <TextBlock Text="{Binding UrText, StringFormat=' · UR {0}'}"
-                                                           Style="{StaticResource Text.Muted}"
-                                                           FontSize="11"
-                                                           VerticalAlignment="Center"
-                                                           Visibility="{Binding HasTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
-                                                <TextBlock Text="{Binding ElementName=ScrollHitTimingGraph, Path=HoverReadout, StringFormat=' - {0}'}"
-                                                           Foreground="{DynamicResource Brush.AccentPink}"
-                                                           FontSize="11"
-                                                           VerticalAlignment="Center" />
-                                            </StackPanel>
-                                            <Grid Grid.Row="1">
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="84"/></Grid.ColumnDefinitions>
-                                                <controls:HitTimingGraph x:Name="ScrollHitTimingGraph"
-                                                                         Offsets="{Binding TimingOffsets}" Margin="0,3,0,0"
-                                                                         Visibility="{Binding HasTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
-                                                <TextBlock Text="No hit-timing samples were captured." Style="{StaticResource Text.Muted}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                           Visibility="{Binding NoTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
-                                                    <TextBlock Text="Mean" Style="{StaticResource Text.Metadata}" FontSize="11"/>
-                                                    <TextBlock Text="{Binding TimingMeanText}" FontSize="11" FontWeight="SemiBold" Margin="0,2,0,10"/>
-                                                    <TextBlock Text="Std. Dev." Style="{StaticResource Text.Metadata}" FontSize="11"/>
-                                                    <TextBlock Text="{Binding TimingDeviationText}" FontSize="11" FontWeight="SemiBold" Margin="0,2,0,0"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="HIT TIMING"
+                                                                   Style="{StaticResource ChartTitle}"
+                                                                   FontSize="11"
+                                                                   VerticalAlignment="Center" />
+                                                        <TextBlock Text="{Binding TimingHitCountText}"
+                                                                   Style="{StaticResource Text.Muted}"
+                                                                   FontSize="11"
+                                                                   Margin="8,0,0,0"
+                                                                   VerticalAlignment="Center"
+                                                                   Visibility="{Binding HasTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding TimingOverviewText}"
+                                                               Style="{StaticResource Text.Muted}"
+                                                               FontSize="10"
+                                                               Margin="0,2,0,0"
+                                                               Visibility="{Binding HasTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
                                                 </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding ElementName=ScrollHitTimingGraph, Path=HoverReadout}"
+                                                           Foreground="{DynamicResource Brush.AccentPink}"
+                                                           FontSize="10"
+                                                           VerticalAlignment="Top"
+                                                           Margin="10,0,0,0" />
+                                            </Grid>
+                                            <Grid Grid.Row="1" Margin="0,7,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="140" />
+                                                </Grid.ColumnDefinitions>
+                                                <controls:HitTimingGraph x:Name="ScrollHitTimingGraph"
+                                                                         Offsets="{Binding TimingOffsets}"
+                                                                         Margin="0,0,10,0"
+                                                                         Visibility="{Binding HasTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
+                                                <TextBlock Text="No hit-timing samples were captured."
+                                                           Style="{StaticResource Text.Muted}"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Margin="0,0,10,0"
+                                                           Visibility="{Binding NoTimingSamples, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
+                                                <Border Grid.Column="1"
+                                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                        BorderThickness="1,0,0,0"
+                                                        Padding="10,0,0,0">
+                                                    <Grid>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="*" />
+                                                            <RowDefinition Height="*" />
+                                                            <RowDefinition Height="*" />
+                                                        </Grid.RowDefinitions>
+                                                        <Border BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                                BorderThickness="0,0,0,1"
+                                                                Padding="0,0,0,4">
+                                                            <StackPanel VerticalAlignment="Center">
+                                                                <TextBlock Text="BIAS" Style="{StaticResource Text.LabelUpper}" FontSize="9" />
+                                                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                                    <TextBlock Text="{Binding TimingBiasText}" FontSize="15" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding TimingBiasDirectionText}"
+                                                                               FontSize="9"
+                                                                               FontWeight="SemiBold"
+                                                                               Margin="7,4,0,0">
+                                                                        <TextBlock.Style>
+                                                                            <Style TargetType="TextBlock">
+                                                                                <Setter Property="Foreground" Value="{DynamicResource Brush.AccentPink}" />
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding TimingBiasDirectionText}" Value="LATE">
+                                                                                        <Setter Property="Foreground" Value="{DynamicResource Brush.AccentPurple}" />
+                                                                                    </DataTrigger>
+                                                                                    <DataTrigger Binding="{Binding TimingBiasDirectionText}" Value="CENTERED">
+                                                                                        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </TextBlock.Style>
+                                                                    </TextBlock>
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <Border Grid.Row="1"
+                                                                BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                                BorderThickness="0,0,0,1"
+                                                                Padding="0,3,0,4">
+                                                            <StackPanel VerticalAlignment="Center">
+                                                                <TextBlock Text="SPREAD" Style="{StaticResource Text.LabelUpper}" FontSize="9" />
+                                                                <TextBlock Text="{Binding TimingSpreadText}" FontSize="15" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <StackPanel Grid.Row="2" VerticalAlignment="Center" Margin="0,4,0,0">
+                                                            <TextBlock Text="SPLIT" Style="{StaticResource Text.LabelUpper}" FontSize="9" />
+                                                            <TextBlock FontSize="11" FontWeight="SemiBold" Margin="0,2,0,0">
+                                                                <Run Text="{Binding TimingEarlyCountText, Mode=OneWay}" Foreground="{DynamicResource Brush.AccentPink}" />
+                                                                <Run Text=" early  &#x00B7;  " Foreground="{DynamicResource Brush.TextSecondary}" />
+                                                                <Run Text="{Binding TimingLateCountText, Mode=OneWay}" Foreground="{DynamicResource Brush.AccentPurple}" />
+                                                                <Run Text=" late" Foreground="{DynamicResource Brush.TextSecondary}" />
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
                                             </Grid>
                                         </Grid>
                                     </Border>

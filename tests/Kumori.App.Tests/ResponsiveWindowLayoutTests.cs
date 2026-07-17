@@ -163,6 +163,21 @@ public sealed class ResponsiveWindowLayoutTests
                     {
                         Summary = stressAttempt.Model,
                         Mods = stressAttempt.ModEntries,
+                        UnstableRate = 206.1,
+                        Timing = new TimingSummary
+                        {
+                            HitCount = 24,
+                            EarlyCount = 18,
+                            LateCount = 6,
+                            Mean = -13.5,
+                            Deviation = 20.6,
+                            Offsets =
+                            [
+                                -14, -17, -20, 4, -26, -15, -23, -18,
+                                8, -21, -24, -13, -29, 6, -19, -22,
+                                -16, 12, -25, -17, 5, -27, -22, 9,
+                            ],
+                        },
                     };
                     var noModDetails = new AttemptDetails
                     {
