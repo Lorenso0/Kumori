@@ -35,3 +35,4 @@ capture_tests/bin/
 capture_tests/obj/
 third_party/osu/
 push-to-github.bat
+/UPDATE.md
