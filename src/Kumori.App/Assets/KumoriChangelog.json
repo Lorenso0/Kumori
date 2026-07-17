@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.4.6",
+    "date": "2026-07-17",
+    "features": [
+      "Added theme-aware tray colors and an automatic LG dual-mode toggle synchronized with Settings"
+    ],
+    "improvements": [
+      "Improved compatible LG UltraGear detection with connected monitor metadata and EDID before showing dual-mode controls",
+      "Made every manual update action open the same updater dialog used by startup notifications"
+    ],
+    "fixes": [
+      "Show Waiting for osu! instead of a canceled-task error while tosu is waiting for the game",
+      "Removed stray tray selection borders and matched checked items to Kumori's in-app toggle style",
+      "Prevented abandoned early retries from adding false miss markers to Map Pressure"
+    ]
+  },
+  {
     "version": "0.4.5",
     "date": "2026-07-16",
     "features": [

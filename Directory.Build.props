@@ -2,7 +2,7 @@
   <PropertyGroup>
     <!-- Keep every first-party assembly aligned for local, CI, and IDE builds.
          A command-line Version (for example, a release tag) still takes precedence. -->
-    <Version>0.4.5</Version>
+    <Version>0.4.6</Version>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <TreatWarningsAsErrors Condition="'$(CI)' == 'true'">true</TreatWarningsAsErrors>
