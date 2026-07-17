@@ -143,6 +143,37 @@ public sealed class AttemptRepository
     public List<AttemptSummary> GetAttemptsForSession(long sessionId, int limit = 100_000) =>
         GetRecentAttempts(limit: limit, sessionId: sessionId);
 
+    /// <summary>
+    /// Distinct persisted mod keys used to populate history filtering choices.
+    /// Parsing remains in the app because keys can be packed acronyms or JSON.
+    /// </summary>
+    public List<string> GetDistinctModsKeys()
+    {
+        var results = new List<string>();
+        if (!_factory.DatabaseExists)
+        {
+            return results;
+        }
+
+        using var con = _factory.Open();
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT mods_key
+            FROM attempts
+            WHERE mods_key IS NOT NULL
+              AND length(trim(mods_key)) > 0
+              AND upper(trim(mods_key)) <> 'NM'
+            ORDER BY mods_key
+            """;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add(reader.GetString(0));
+        }
+
+        return results;
+    }
+
     public List<AttemptSummary> GetAttemptsForDay(string localDay, int limit = 100_000)
     {
         if (!DateOnly.TryParseExact(

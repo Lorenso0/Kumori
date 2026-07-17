@@ -347,6 +347,16 @@ public partial class MainViewModel
             _ => string.Equals(a.Outcome, mode, StringComparison.OrdinalIgnoreCase),
         });
 
+        var selectedMods = AvailableMods
+            .Where(mod => mod.IsSelected)
+            .Select(mod => mod.Acronym)
+            .ToArray();
+        if (selectedMods.Length > 0)
+        {
+            var exact = SelectedModFilterMode == "Exact";
+            filtered = filtered.Where(attempt => ModFilterMatcher.Matches(attempt, selectedMods, exact));
+        }
+
         if (IsGroupRepeats)
         {
             filtered = filtered

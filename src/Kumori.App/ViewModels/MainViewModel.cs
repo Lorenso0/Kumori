@@ -37,6 +37,7 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>Interleaved session separators + attempt rows bound by the list.</summary>
     public ObservableCollection<object> Rows { get; } = new();
+    public ObservableCollection<ModFilterOptionViewModel> AvailableMods { get; } = new();
     public ObservableCollection<PerformanceDayViewModel> PerformanceDays { get; } = new();
     public List<MapCardViewModel> MapCards { get; } = new();
     public IReadOnlyList<MapCardRowViewModel> MapRows
@@ -107,6 +108,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _isGroupSessions;
     [ObservableProperty] private bool _isWideHistoryLayout;
     [ObservableProperty] private string _selectedFilterMode = "All";
+    [ObservableProperty] private string _selectedModFilterMode = "Contains";
     [ObservableProperty] private string _selectedArtworkMode = "Thumbnail cards";
 
     private readonly List<AttemptSummary> _loadedAttempts = new();
@@ -137,6 +139,7 @@ public partial class MainViewModel : ObservableObject
     private long _reloadGeneration;
     private AppState? _pendingUiState;
     private int _stateDispatchScheduled;
+    private bool _updatingModFilter;
 
     public MainViewModel(
         AppStateStore store,
@@ -173,12 +176,30 @@ public partial class MainViewModel : ObservableObject
     public bool IsThumbnailArtwork => SelectedArtworkMode == "Thumbnail cards";
     public string ResultsText => $"{Attempts.Count:N0} results";
     public string ResultsShortText => $"{Attempts.Count:N0}";
+    public bool HasAvailableMods => AvailableMods.Count > 0;
+    public bool IsModFilterActive => AvailableMods.Any(mod => mod.IsSelected);
+    public string ModsFilterLabel
+    {
+        get
+        {
+            var selected = AvailableMods.Where(mod => mod.IsSelected).Select(mod => mod.Acronym).ToArray();
+            return selected.Length switch
+            {
+                0 => "Mods",
+                <= 2 => $"Mods · {string.Join(" + ", selected)}",
+                _ => $"Mods · {selected.Length}",
+            };
+        }
+    }
+    public string ModFilterModeDescription => SelectedModFilterMode == "Exact"
+        ? "Only plays with exactly the selected combination."
+        : "Plays may include other mods in addition to your selection.";
     public bool HasNoPerformanceData => PerformanceDays.Count == 0;
     public bool HasNoMapData => MapCards.Count == 0;
     public bool CanLaunchTosu => CanStartTosu && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
     private bool CanMaintainTrackingData() => !HasActiveSession;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.6"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.7"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -197,6 +218,11 @@ public partial class MainViewModel : ObservableObject
     }
 
     partial void OnSelectedFilterModeChanged(string value) => ApplyVisibleAttempts();
+    partial void OnSelectedModFilterModeChanged(string value)
+    {
+        OnPropertyChanged(nameof(ModFilterModeDescription));
+        ApplyVisibleAttempts();
+    }
 
     partial void OnIsGroupRepeatsChanged(bool value) => ApplyVisibleAttempts();
     partial void OnIsGroupSessionsChanged(bool value)
@@ -358,6 +384,8 @@ public partial class MainViewModel : ObservableObject
                 cancellationToken.ThrowIfCancellationRequested();
                 var analytics = _analytics.GetSummary();
                 cancellationToken.ThrowIfCancellationRequested();
+                var modKeys = _attempts.GetDistinctModsKeys();
+                cancellationToken.ThrowIfCancellationRequested();
                 var dbBytes = SafeFileSize(AppPaths.TrackingDatabase);
                 var cacheBytes = GetCachedMediaBytes(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -367,6 +395,7 @@ public partial class MainViewModel : ObservableObject
                 {
                     Maps = maps,
                     Analytics = analytics,
+                    ModKeys = modKeys,
                     DbBytes = dbBytes,
                     CacheBytes = cacheBytes,
                     UsingLazerRealm = usingLazerRealm,
@@ -385,6 +414,7 @@ public partial class MainViewModel : ObservableObject
             }
             OnPropertyChanged(nameof(MapRows));
             OnPropertyChanged(nameof(HasNoMapData));
+            UpdateAvailableMods(secondary.ModKeys);
             _dbBytes = secondary.DbBytes;
             _cacheBytes = secondary.CacheBytes;
             _currentAnalytics = secondary.Analytics;
@@ -445,6 +475,83 @@ public partial class MainViewModel : ObservableObject
             PerformanceDays.Add(new PerformanceDayViewModel(trend, LoadPerformanceDayAttemptsAsync));
         }
         OnPropertyChanged(nameof(HasNoPerformanceData));
+    }
+
+    private void UpdateAvailableMods(IEnumerable<string> modKeys)
+    {
+        var selected = AvailableMods
+            .Where(mod => mod.IsSelected)
+            .Select(mod => mod.Acronym)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var acronyms = ModDisplayOrder.Sort(modKeys
+            .SelectMany(ModDisplayText.AcronymsFromKey)
+            .Where(acronym => !string.Equals(acronym, "NM", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+
+        _updatingModFilter = true;
+        try
+        {
+            AvailableMods.Clear();
+            foreach (var acronym in acronyms)
+            {
+                var option = new ModFilterOptionViewModel(acronym)
+                {
+                    IsSelected = selected.Contains(acronym),
+                };
+                option.PropertyChanged += (_, args) =>
+                {
+                    if (args.PropertyName == nameof(ModFilterOptionViewModel.IsSelected))
+                    {
+                        OnModFilterSelectionChanged();
+                    }
+                };
+                AvailableMods.Add(option);
+            }
+        }
+        finally
+        {
+            _updatingModFilter = false;
+        }
+
+        OnPropertyChanged(nameof(HasAvailableMods));
+        OnPropertyChanged(nameof(IsModFilterActive));
+        OnPropertyChanged(nameof(ModsFilterLabel));
+        if (selected.Count > 0)
+        {
+            ApplyVisibleAttempts(selectFirst: false);
+        }
+    }
+
+    private void OnModFilterSelectionChanged()
+    {
+        if (_updatingModFilter)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(IsModFilterActive));
+        OnPropertyChanged(nameof(ModsFilterLabel));
+        ApplyVisibleAttempts();
+    }
+
+    private void ClearSelectedMods()
+    {
+        _updatingModFilter = true;
+        try
+        {
+            foreach (var mod in AvailableMods)
+            {
+                mod.IsSelected = false;
+            }
+        }
+        finally
+        {
+            _updatingModFilter = false;
+        }
+
+        OnPropertyChanged(nameof(IsModFilterActive));
+        OnPropertyChanged(nameof(ModsFilterLabel));
+        ApplyVisibleAttempts();
     }
 
     private async Task<IReadOnlyList<AttemptRowViewModel>> LoadPerformanceDayAttemptsAsync(string day)

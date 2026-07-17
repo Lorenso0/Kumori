@@ -157,6 +157,14 @@ public class AttemptRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void GetDistinctModsKeys_ReturnsOnlyPersistedNonNoModKeys()
+    {
+        var keys = CreateRepository().GetDistinctModsKeys();
+
+        Assert.Equal(["HDDA", "HDDT"], keys);
+    }
+
+    [Fact]
     public void CountAttempts_CountsAll()
     {
         Assert.Equal(250, CreateRepository().CountAttempts());

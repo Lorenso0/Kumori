@@ -301,6 +301,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ModMatchMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string mode } && DataContext is MainViewModel viewModel)
+        {
+            viewModel.SelectedModFilterMode = mode;
+        }
+    }
+
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)

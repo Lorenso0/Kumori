@@ -28,9 +28,13 @@ public partial class MainViewModel
         SearchText = "";
         SelectedFilterMode = "All";
         IsGroupRepeats = false;
+        ClearSelectedMods();
         _mapFilterKey = null;
         ApplyVisibleAttempts();
     }
+
+    [RelayCommand]
+    private void ClearModFilter() => ClearSelectedMods();
 
     [RelayCommand]
     private void OpenHealthDashboard()

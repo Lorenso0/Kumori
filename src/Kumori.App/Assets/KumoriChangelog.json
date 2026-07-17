@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.4.7",
+    "date": "2026-07-17",
+    "features": [
+      "Added history filtering by mod combinations with Contains and Exact matching modes",
+      "Added K1 and K2 press totals plus slider breaks to the selected-play score summary"
+    ],
+    "improvements": [
+      "Redesigned Hit Timing with early and late color cues, bias, spread, split counts, and more room for the plot"
+    ]
+  },
+  {
     "version": "0.4.6",
     "date": "2026-07-17",
     "features": [
