@@ -1,10 +1,44 @@
 using Kumori.Native;
+using System.Text;
 using Xunit;
 
 namespace Kumori.App.Tests;
 
 public sealed class DualModeServiceTests
 {
+    [Theory]
+    [InlineData("LG ULTRAGEAR+", true)]
+    [InlineData("LG Electronics 5K2K", true)]
+    [InlineData("GSM", false)]
+    [InlineData("Generic PnP Monitor", false)]
+    [InlineData("", false)]
+    public void CompatibilityDetectionOnlyAcceptsLgDualModeDescriptions(
+        string description,
+        bool expected)
+    {
+        Assert.Equal(expected, DualModeService.IsCompatibleMonitorDescription(description));
+    }
+
+    [Theory]
+    [InlineData(@"\\?\DISPLAY#GSM7862#5&14613921&1&UID4357", "GSM7862")]
+    [InlineData(@"MONITOR\AUS27FD\5&14613921&1&UID4355", "AUS27FD")]
+    public void MonitorHardwareIdHandlesDeviceInterfaceAndMonitorIds(
+        string deviceId,
+        string expected)
+    {
+        Assert.Equal(expected, DualModeService.MonitorHardwareId(deviceId));
+    }
+
+    [Fact]
+    public void EdidMonitorNameReadsWindowsFriendlyNameDescriptor()
+    {
+        var edid = new byte[128];
+        edid[57] = 0xFC;
+        Encoding.ASCII.GetBytes("LG ULTRAGEAR+").CopyTo(edid, 59);
+
+        Assert.Equal("LG ULTRAGEAR+", DualModeService.EdidMonitorName(edid));
+    }
+
     [Fact]
     public void SlowDetectionSendsToggleExactlyOnce()
     {

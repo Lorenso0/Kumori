@@ -83,6 +83,7 @@ public partial class App
         try
         {
             var result = await new KumoriUpdateService().CheckAsync(cancellationToken: cancellationToken);
+            _availableUpdate = result.IsUpdateAvailable ? result : null;
             UpdateApplicationUpdateStatus(store, result);
             if (result.IsUpdateAvailable)
             {
@@ -111,7 +112,13 @@ public partial class App
         _manualUpdateCheckRunning = true;
         try
         {
-            var result = await new KumoriUpdateService().CheckAsync(cancellationToken: _backgroundCts.Token);
+            var result = _availableUpdate;
+            if (result is null)
+            {
+                result = await new KumoriUpdateService().CheckAsync(cancellationToken: _backgroundCts.Token);
+                _availableUpdate = result.IsUpdateAvailable ? result : null;
+            }
+
             if (_store is { } store)
             {
                 UpdateApplicationUpdateStatus(store, result);

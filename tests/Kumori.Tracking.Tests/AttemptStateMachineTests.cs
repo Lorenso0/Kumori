@@ -69,6 +69,18 @@ public class AttemptStateMachineTests
     }
 
     [Fact]
+    public void EarlyTimeRewindToMapOrigin_IsRetryBoundary()
+    {
+        var m = InPlay("mapA");
+        m.Ingest(Play(1, live: 701));
+
+        var d = Assert.Single(m.Ingest(Play(2, live: 8)));
+
+        Assert.Equal(Kind.RetryBoundary, d.Kind);
+        Assert.Equal("fresh_gameplay_same_map", d.Evidence);
+    }
+
+    [Fact]
     public void SmallTimeJitter_IsNotRetry()
     {
         var m = InPlay("mapA");

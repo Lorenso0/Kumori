@@ -451,7 +451,7 @@ public partial class App
                         observation.ProcessIds.Order().ToArray());
                 }
                 SyncOpenTabletDriverLifetime(settings.Current);
-                UpdateTrayDualModeToggle(settings.Current.Display.AutoSwitchDualMode);
+                RefreshTrayDualModeControls(settings.Current);
                 store.Update(s => s with
                 {
                     Companions = s.Companions with
@@ -546,6 +546,14 @@ public partial class App
 
     private void HandleSettingsChanged(KumoriSettings settings)
     {
+        UpdateTrayDualModeControls(
+            _trayDualModeCompatible == true,
+            settings.Display.AutoSwitchDualMode);
+        PublishCompanionStatus(c => c with
+        {
+            DualModeEnabled = settings.Display.AutoSwitchDualMode,
+        });
+
         if (_trackingRuntime is not null && !_backgroundCts.IsCancellationRequested)
             TrackBackground(_trackingRuntime.ApplyAsync(settings), "apply saved tracking settings");
 
@@ -781,24 +789,69 @@ public partial class App
         _tray?.SetEndSessionEnabled(endSessionEnabled);
     }
 
-    private void UpdateTrayDualModeToggle(bool enabled)
+    internal static string FormatTrayTrackingStatus(AppState state)
     {
-        if (_trayDualModeToggleEnabled == enabled)
+        if (!state.Companions.OsuRunning)
+        {
+            return "tosu: Waiting for osu!";
+        }
+
+        return state.Tracking.TosuConnected
+            ? state.Tracking.CurrentBeatmap ?? "tosu: Connected"
+            : state.Tracking.Detail ?? "tosu: Starting...";
+    }
+
+    private void RefreshTrayDualModeControls(
+        KumoriSettings settings,
+        bool forceCompatibilityCheck = false)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var compatible = _trayDualModeCompatible == true;
+        if (forceCompatibilityCheck || now >= _nextDualModeCompatibilityCheckUtc)
+        {
+            compatible = DualModeService.HasCompatibleMonitor();
+            _nextDualModeCompatibilityCheckUtc = now.AddSeconds(10);
+        }
+
+        UpdateTrayDualModeControls(compatible, settings.Display.AutoSwitchDualMode);
+    }
+
+    private void UpdateTrayDualModeControls(bool compatible, bool autoSwitchEnabled)
+    {
+        if (_trayDualModeCompatible == compatible
+            && _trayDualModeAutoSwitchEnabled == autoSwitchEnabled)
         {
             return;
         }
 
-        _trayDualModeToggleEnabled = enabled;
-        Dispatcher.InvokeAsync(() => _tray?.SetDualModeToggleEnabled(enabled));
+        _trayDualModeCompatible = compatible;
+        _trayDualModeAutoSwitchEnabled = autoSwitchEnabled;
+        Dispatcher.InvokeAsync(() => _tray?.SetDualModeControls(compatible, autoSwitchEnabled));
+    }
+
+    private void ToggleDualModeAutoSwitchFromTray(SettingsService settings)
+    {
+        try
+        {
+            settings.Update(current =>
+                current.Display.AutoSwitchDualMode = !current.Display.AutoSwitchDualMode);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Could not update LG dual-mode auto-switch from the tray");
+            UpdateTrayDualModeControls(
+                _trayDualModeCompatible == true,
+                settings.Current.Display.AutoSwitchDualMode);
+        }
     }
 
     private async Task ToggleDualModeFromTrayAsync()
     {
         var settings = new SettingsService();
         settings.Load();
-        if (!settings.Current.Display.AutoSwitchDualMode)
+        if (!DualModeService.HasCompatibleMonitor())
         {
-            UpdateTrayDualModeToggle(false);
+            UpdateTrayDualModeControls(false, settings.Current.Display.AutoSwitchDualMode);
             return;
         }
 

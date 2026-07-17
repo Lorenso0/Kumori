@@ -90,8 +90,15 @@ public sealed class AttemptStateMachine
             _closeDeadline = null;
             var restarted = HasAttempt
                 && p.Identity == AttemptIdentity
-                && _lastLiveTimeMs > 1500
-                && p.LiveTimeMs + 1000 < _lastLiveTimeMs;
+                && ((_lastLiveTimeMs > 1500
+                     && p.LiveTimeMs + 1000 < _lastLiveTimeMs)
+                    // A very early retry can rewind before the ordinary
+                    // 1.5-second boundary. Require both a meaningful amount
+                    // of elapsed play and a return to the map origin so
+                    // normal clock jitter cannot split the attempt.
+                    || (_lastLiveTimeMs >= 500
+                        && p.LiveTimeMs <= 100
+                        && p.LiveTimeMs + 250 < _lastLiveTimeMs));
 
             if (!HasAttempt)
             {

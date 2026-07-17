@@ -29,6 +29,44 @@ public sealed class MapPressureGraphTests
         Assert.Contains(curve, point => point.Value >= 0.999);
     }
 
+    [Fact]
+    public void SelectGraphEventsDropsAbandonedRetryPrefixBeyondFinalMissCount()
+    {
+        var details = new AttemptDetails
+        {
+            Summary = new AttemptSummary { Misses = 2 },
+            Events =
+            [
+                new JudgementEvent { Id = 10, EventType = "miss", MapTimeMs = 245, Value = 1 },
+                new JudgementEvent { Id = 11, EventType = "miss", MapTimeMs = 540, Value = 2 },
+                new JudgementEvent { Id = 20, EventType = "miss", MapTimeMs = 11_073, Value = 1 },
+                new JudgementEvent { Id = 21, EventType = "miss", MapTimeMs = 11_993, Value = 2 },
+                new JudgementEvent { Id = 22, EventType = "slider_break", MapTimeMs = 12_500, Value = 1 },
+            ],
+        };
+
+        var events = MapPressureGraph.SelectGraphEvents(details);
+
+        Assert.Equal(new long[] { 20, 21 }, events.Where(e => e.EventType == "miss").Select(e => e.Id));
+        Assert.Contains(events, e => e.Id == 22 && e.EventType == "slider_break");
+    }
+
+    [Fact]
+    public void SelectGraphEventsKeepsAllMissesWhenCountMatchesFinalResult()
+    {
+        var details = new AttemptDetails
+        {
+            Summary = new AttemptSummary { Misses = 2 },
+            Events =
+            [
+                new JudgementEvent { Id = 10, EventType = "miss", MapTimeMs = 245 },
+                new JudgementEvent { Id = 11, EventType = "miss", MapTimeMs = 540 },
+            ],
+        };
+
+        Assert.Equal(2, MapPressureGraph.SelectGraphEvents(details).Length);
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = AppContext.BaseDirectory;

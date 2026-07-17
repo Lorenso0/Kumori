@@ -119,7 +119,7 @@ public sealed class MapPressureGraph : FrameworkElement
         var bottom = height - 18;
         var eventY = height - 8;
 
-        var events = details.Events.Where(e => e.MapTimeMs is >= 0).ToArray();
+        var events = SelectGraphEvents(details);
         var missTimes = events.Where(e => e.EventType == "miss" && e.MapTimeMs is not null)
             .Select(e => (int)e.MapTimeMs!.Value).OrderBy(t => t).ToArray();
         var breakTimes = events.Where(e => e.EventType == "slider_break" && e.MapTimeMs is not null)
@@ -498,17 +498,42 @@ public sealed class MapPressureGraph : FrameworkElement
         return System.Math.Max(System.Math.Max(fromEvents, fromDuration), 1);
     }
 
+    internal static JudgementEvent[] SelectGraphEvents(AttemptDetails details)
+    {
+        var events = details.Events.Where(e => e.MapTimeMs is >= 0).ToArray();
+        var misses = events.Where(e => e.EventType == "miss").ToArray();
+        var authoritativeMissCount = Math.Max(0, details.Summary.Misses);
+        if (misses.Length <= authoritativeMissCount)
+        {
+            return events;
+        }
+
+        // A retry can briefly remain in tosu's play state while the map clock
+        // rewinds. Older builds consequently persisted the abandoned prefix
+        // and the real run under one attempt. The final result count is the
+        // authority; newer event IDs belong to the run that produced it.
+        var authoritativeMissIds = misses
+            .OrderByDescending(e => e.Id)
+            .Take(authoritativeMissCount)
+            .Select(e => e.Id)
+            .ToHashSet();
+        return events
+            .Where(e => e.EventType != "miss" || authoritativeMissIds.Contains(e.Id))
+            .ToArray();
+    }
+
     private string BuildHoverText(int mapTime)
     {
         var details = Details;
-        var curve = Curve is { Count: > 1 } c ? c : details is null ? Array.Empty<PressurePoint>() : FallbackCurve(details.Events, details);
+        var events = details is null ? Array.Empty<JudgementEvent>() : SelectGraphEvents(details);
+        var curve = Curve is { Count: > 1 } c ? c : details is null ? Array.Empty<PressurePoint>() : FallbackCurve(events, details);
         var pressure = curve.Count > 0 ? PressureAt(curve, mapTime) : 0;
         var samples = UrSamples ?? Array.Empty<UrPoint>();
         var nearestUr = samples.Count > 0
             ? samples.OrderBy(s => Math.Abs(s.TimeMs - mapTime)).First()
             : (UrPoint?)null;
-        var missCount = details?.Events.Count(e => e.EventType == "miss" && e.MapTimeMs is { } t && Math.Abs(t - mapTime) <= 500) ?? 0;
-        var breakCount = details?.Events.Count(e => e.EventType == "slider_break" && e.MapTimeMs is { } t && Math.Abs(t - mapTime) <= 500) ?? 0;
+        var missCount = events.Count(e => e.EventType == "miss" && e.MapTimeMs is { } t && Math.Abs(t - mapTime) <= 500);
+        var breakCount = events.Count(e => e.EventType == "slider_break" && e.MapTimeMs is { } t && Math.Abs(t - mapTime) <= 500);
         var seconds = mapTime / 1000;
         var parts = new List<string>
         {
@@ -568,7 +593,7 @@ public sealed class MapPressureGraph : FrameworkElement
         {
             mapTime = Math.Clamp(mapTime, 0, TimelineEnd());
             _keyboardTimeMs = mapTime;
-            var curve = Curve is { Count: > 1 } c ? c : FallbackCurve(details.Events, details);
+            var curve = Curve is { Count: > 1 } c ? c : FallbackCurve(SelectGraphEvents(details), details);
             HoverReadout = BuildHoverSummary(mapTime, PressureAt(curve, mapTime));
             ToolTip = BuildHoverText(mapTime);
             return;
@@ -626,9 +651,10 @@ public sealed class MapPressureGraph : FrameworkElement
                 return "No map pressure data is available.";
             }
 
-            var curve = Curve is { Count: > 1 } c ? c : FallbackCurve(details.Events, details);
-            var missCount = details.Events.Count(e => e.EventType == "miss" && e.MapTimeMs is >= 0);
-            var breakCount = details.Events.Count(e => e.EventType == "slider_break" && e.MapTimeMs is >= 0);
+            var events = SelectGraphEvents(details);
+            var curve = Curve is { Count: > 1 } c ? c : FallbackCurve(events, details);
+            var missCount = events.Count(e => e.EventType == "miss");
+            var breakCount = events.Count(e => e.EventType == "slider_break");
             var urCount = UrSamples?.Count ?? 0;
             var parts = new List<string>
             {

@@ -58,10 +58,13 @@ public partial class App : Application
     private bool _dualModeActivatedForOsu;
     private bool _managedOsuSessionActive;
     private bool _tosuStartedForOsu;
-    private bool? _trayDualModeToggleEnabled;
+    private bool? _trayDualModeCompatible;
+    private bool? _trayDualModeAutoSwitchEnabled;
+    private DateTimeOffset _nextDualModeCompatibilityCheckUtc;
     private bool _exitRequested;
     private bool _shutdownCleanupCompleted;
     private KumoriUpdateResult? _pendingUpdatePrompt;
+    private KumoriUpdateResult? _availableUpdate;
     private string? _promptedUpdateVersion;
     private bool _updatePromptOpen;
     private bool _manualUpdateCheckRunning;
@@ -362,6 +365,10 @@ public partial class App : Application
         _tray = new TrayIconService(
             "Kumori — osu! Tracking",
             Path.Combine(AppContext.BaseDirectory, "assets", "logo.ico"));
+        ApplyTrayTheme();
+        if (Themes is { } themes)
+            themes.ThemeChanged += (_, _) => ApplyTrayTheme();
+        _tray.UpdateStatus(FormatTrayTrackingStatus(store.Current));
         _tray.OpenRequested += ShowMainWindow;
         _tray.SettingsRequested += () => Dispatcher.InvokeAsync(() =>
         {
@@ -377,8 +384,10 @@ public partial class App : Application
             PublishCompanionStatus(c => c with { DualModeDetail = "Dual mode left active after osu! closed" }));
         _tray.DualModeToggleRequested += () =>
             TrackBackground(ToggleDualModeFromTrayAsync(), "tray dual-mode toggle");
+        _tray.DualModeAutoSwitchToggleRequested += () =>
+            ToggleDualModeAutoSwitchFromTray(settings);
         _tray.UpdateRequested += () => Dispatcher.InvokeAsync(() => OpenAvailableUpdate(store.Current.ApplicationUpdate.ReleaseUrl));
-        UpdateTrayDualModeToggle(settings.Current.Display.AutoSwitchDualMode);
+        RefreshTrayDualModeControls(settings.Current, forceCompatibilityCheck: true);
         _tray.ExitRequested += () =>
         {
             if (_exitRequested)
@@ -406,9 +415,7 @@ public partial class App : Application
             () => Dispatcher.InvokeAsync(ShowMainWindow));
         store.StateChanged += state =>
         {
-            var status = state.Tracking.TosuConnected
-                ? state.Tracking.CurrentBeatmap ?? "Tracker connected"
-                : state.Tracking.Detail ?? "Tracker not running";
+            var status = FormatTrayTrackingStatus(state);
             lock (_trayStateGate)
             {
                 _pendingTrayStatus = status;

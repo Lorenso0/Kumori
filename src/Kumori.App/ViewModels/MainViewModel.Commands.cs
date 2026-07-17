@@ -90,16 +90,7 @@ public partial class MainViewModel
     }
 
     [RelayCommand]
-    private async Task CheckForUpdatesAsync()
-    {
-        if (_checkForUpdates is not null)
-        {
-            await _checkForUpdates();
-            return;
-        }
-
-        OpenInWorkspace(new UpdateCheckWindow(), "Updates");
-    }
+    private Task CheckForUpdatesAsync() => OpenApplicationUpdaterAsync();
 
     [RelayCommand]
     private void OpenChangelog()
@@ -108,11 +99,16 @@ public partial class MainViewModel
     }
 
     [RelayCommand]
-    private async Task OpenAvailableUpdateAsync()
+    private Task OpenAvailableUpdateAsync() => OpenApplicationUpdaterAsync();
+
+    private async Task OpenApplicationUpdaterAsync()
     {
-        if (_checkForUpdates is not null)
+        Func<Task>? updateFlow = _checkForUpdates;
+        if (updateFlow is null && Application.Current is App app)
+            updateFlow = app.CheckForKumoriUpdatesManuallyAsync;
+        if (updateFlow is not null)
         {
-            await _checkForUpdates();
+            await updateFlow();
             return;
         }
 

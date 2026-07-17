@@ -108,6 +108,13 @@ public sealed class WebSocketPacketSource : ITosuPacketSource, IAsyncDisposable
             {
                 yield break;
             }
+            catch (OperationCanceledException)
+            {
+                // A linked connect token expiring is an ordinary "tosu is not
+                // listening yet" state, not an actionable cancellation error.
+                Log.Debug("tosu websocket connection timed out for {Uri}", _uri);
+                Disconnected?.Invoke("not reachable");
+            }
             catch (Exception ex)
             {
                 Log.Warning(ex, "tosu websocket connect failed for {Uri}", _uri);

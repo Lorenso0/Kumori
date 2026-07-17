@@ -31,6 +31,7 @@ public partial class SettingsWindow : Window
     private readonly ObservableCollection<CustomColorRow> _customColors = [];
     private bool _loading = true;
     private bool _accepted;
+    private bool _observedAutoSwitchDualMode;
     private CustomColorRow? _selectedColor;
 
     public SettingsWindow(
@@ -44,6 +45,7 @@ public partial class SettingsWindow : Window
             new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false));
         _themes = (Application.Current as App)?.Themes;
         _originalThemeId = ThemeManager.Resolve(settings.Current.Appearance.ThemeId).Id;
+        _observedAutoSwitchDualMode = settings.Current.Display.AutoSwitchDualMode;
         InitializeComponent();
         var colorView = new ListCollectionView(_customColors);
         colorView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(CustomColorRow.Group)));
@@ -52,13 +54,28 @@ public partial class SettingsWindow : Window
         IntegratedColorPicker.CloseRequested += () => CustomColorPickerPopup.IsOpen = false;
         LoadValues();
         _loading = false;
+        _settings.Changed += Settings_Changed;
         Closed += (_, _) =>
         {
+            _settings.Changed -= Settings_Changed;
             if (!_accepted)
             {
                 _themes?.Apply(_originalThemeId, persist: false);
             }
         };
+    }
+
+    private void Settings_Changed(KumoriSettings settings)
+    {
+        var autoSwitchDualMode = settings.Display.AutoSwitchDualMode;
+        if (_observedAutoSwitchDualMode == autoSwitchDualMode)
+            return;
+
+        _observedAutoSwitchDualMode = autoSwitchDualMode;
+        if (Dispatcher.CheckAccess())
+            DualModeEnabled.IsChecked = autoSwitchDualMode;
+        else
+            Dispatcher.InvokeAsync(() => DualModeEnabled.IsChecked = autoSwitchDualMode);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
