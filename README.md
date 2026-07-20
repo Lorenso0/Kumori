@@ -104,6 +104,9 @@ Create a self-contained release at `dist\app\Kumori.exe`:
 build-app.cmd publish
 ```
 
+Compatibility with the custom BPM Adjust client is tracked against a specific
+upstream commit in [docs/BPM_ADJUST_UPSTREAM.md](docs/BPM_ADJUST_UPSTREAM.md).
+
 ## Project note
 
 Kumori is an independent project and is not affiliated with, endorsed by, or supported by ppy Pty Ltd, osu!, or tosu.

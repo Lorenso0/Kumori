@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not defined KUMORI_VERSION set KUMORI_VERSION=0.4.8
+if not defined KUMORI_VERSION set KUMORI_VERSION=0.4.9
 
 REM ============================================================
 REM  Kumori WPF app (new .NET solution) build script.

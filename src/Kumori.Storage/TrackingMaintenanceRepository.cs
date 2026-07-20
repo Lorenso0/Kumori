@@ -402,14 +402,32 @@ public sealed class TrackingMaintenanceRepository
         return checkpoints;
 
         static int Count(JsonElement root, string name)
-            => root.TryGetProperty(name, out var value) && value.TryGetDouble(out double number)
+            => TryReadNumber(root, name, out double number)
                 ? Math.Max(0, (int)Math.Round(number))
                 : 0;
 
         static double Number(JsonElement root, string name)
-            => root.TryGetProperty(name, out var value) && value.TryGetDouble(out double number)
+            => TryReadNumber(root, name, out double number)
                 ? Math.Max(0, number)
                 : 0;
+
+        static bool TryReadNumber(JsonElement root, string name, out double number)
+        {
+            number = 0;
+            if (!root.TryGetProperty(name, out JsonElement value))
+                return false;
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.Number => value.TryGetDouble(out number),
+                JsonValueKind.String => double.TryParse(
+                    value.GetString(),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out number),
+                _ => false,
+            };
+        }
     }
 
     private static string RestoreScoreJsonCore(string scoreJson, RecoveryCheckpoint checkpoint)

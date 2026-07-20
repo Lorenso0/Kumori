@@ -318,13 +318,22 @@ public static class LazerReplayAdapter
     /// - A release frame at the last known position is appended out to just
     ///   past the final hit object when the capture ends early.
     /// </summary>
-    public static void FitCapturedReplay(Replay replay, double firstHitTime, double lastHitTime, double clockRate = 1)
+    public static void FitCapturedReplay(
+        Replay replay,
+        double firstHitTime,
+        double lastHitTime,
+        double clockRate = 1,
+        string? movementSource = null)
     {
         var frames = replay.Frames.OfType<OsuReplayFrame>().OrderBy(f => f.Time).ToList();
         if (frames.Count == 0)
             return;
 
-        frames = scaleRateAdjustedCaptureIfNeeded(frames, lastHitTime, clockRate);
+        // lazer replay frames are stamped in the gameplay clock's map-time domain.
+        // Their timestamps already line up with hit object times regardless of the
+        // active rate. Scaling them again desynchronises incomplete DT/BPM captures.
+        if (movementSource?.StartsWith("lazer_", StringComparison.OrdinalIgnoreCase) != true)
+            frames = scaleRateAdjustedCaptureIfNeeded(frames, lastHitTime, clockRate);
 
         double minAllowed = firstHitTime - 30_000;
         double maxAllowed = lastHitTime + 10_000;

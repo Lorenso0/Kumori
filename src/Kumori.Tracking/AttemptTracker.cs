@@ -405,19 +405,26 @@ public sealed class AttemptTracker
 
         Checkpoint(frame, force: true);
         var snapshot = _latestSnapshot ?? Snapshot(frame);
+        double observedDurationSeconds = Math.Max(0, frame.Packet.MonoTime - _attemptStartedMonoTime);
         // Do not discard a sustained play solely because the telemetry source
         // temporarily cannot expose its score counters. osu!lazer updates can
         // leave tosu able to report state transitions while its GameBase reader
         // is recovering, which previously turned real plays into
         // `invalid_final_attempt` records. The short-attempt guard and the
-        // retry/pre-play discard path still filter spurious transitions.
-        if (snapshot.DurationSeconds < _attemptMinimumSeconds)
+        // retry/pre-play discard path still filter spurious transitions. A
+        // mid-play attachment with no score or judgement evidence must itself
+        // remain observable for the minimum duration; otherwise one stale
+        // gameplay/results packet can manufacture a long phantom attempt from
+        // the inherited map clock.
+        if (snapshot.DurationSeconds < _attemptMinimumSeconds
+            || (!HasJudgement(snapshot) && observedDurationSeconds < _attemptMinimumSeconds))
         {
             Log.Information(
-                "Discarding attempt {Ordinal}: {Reason}; duration={DurationSeconds:0.00}s score={Score} hits={N300}/{N100}/{N50}/{Misses} progress={Progress:P1} outcome={Outcome} evidence={Evidence}",
+                "Discarding attempt {Ordinal}: {Reason}; duration={DurationSeconds:0.00}s observed={ObservedDurationSeconds:0.00}s score={Score} hits={N300}/{N100}/{N50}/{Misses} progress={Progress:P1} outcome={Outcome} evidence={Evidence}",
                 _attemptOrdinal,
                 "invalid_final_attempt",
                 snapshot.DurationSeconds,
+                observedDurationSeconds,
                 snapshot.Score,
                 snapshot.N300,
                 snapshot.N100,

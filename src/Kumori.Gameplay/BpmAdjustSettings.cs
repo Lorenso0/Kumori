@@ -3,6 +3,8 @@ using System.Text.Json;
 
 namespace Kumori.Gameplay;
 
+// Canonical implementation and verified commit:
+// docs/BPM_ADJUST_UPSTREAM.md
 public enum BpmAdjustAudioMode
 {
     PreservePitch = 0,

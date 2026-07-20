@@ -370,6 +370,18 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void MidPlayAttachmentWithoutPlayEvidenceDoesNotCreatePhantomAttempt()
+    {
+        _tracker.Ingest(Play(0, live: 95_405, hp: 0, progress: 0.636));
+        _tracker.Ingest(Results(0.151, grade: "F", progress: 0.639));
+
+        Assert.Empty(_sink.Finals);
+        var discard = Assert.Single(_sink.Discards);
+        Assert.Equal("invalid_final_attempt", discard.Reason);
+        Assert.True(discard.Snapshot.DurationSeconds >= 95);
+    }
+
+    [Fact]
     public void EndInterrupted_FinalizesAValidActiveAttempt()
     {
         _tracker.Ingest(Play(0));

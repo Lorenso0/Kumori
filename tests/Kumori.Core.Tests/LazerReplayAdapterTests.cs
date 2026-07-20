@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Kumori.ReplayViewer;
+using osu.Game.Rulesets.Osu;
 using osu.Game.Rulesets.Osu.Mods;
 using osu.Game.Rulesets.Osu.Replays;
 using osu.Game.Rulesets.Mods;
@@ -234,6 +235,28 @@ public class LazerReplayAdapterTests
         Assert.Empty(frame.Actions);
         Assert.Equal(11, frame.Position.X);
         Assert.Equal(21, frame.Position.Y);
+    }
+
+    [Fact]
+    public void FitCapturedReplay_DoesNotRescaleLazerMemoryGameplayClockTimestamps()
+    {
+        var replay = new osu.Game.Replays.Replay();
+        replay.Frames.Add(new OsuReplayFrame(
+            12_407,
+            new osuTK.Vector2(256, 192),
+            OsuAction.LeftButton));
+
+        LazerReplayAdapter.FitCapturedReplay(
+            replay,
+            firstHitTime: 530,
+            lastHitTime: 151_655,
+            clockRate: 1.875,
+            movementSource: "lazer_memory");
+
+        OsuReplayFrame actionFrame = Assert.Single(
+            replay.Frames.OfType<OsuReplayFrame>(),
+            frame => frame.Actions.Count > 0);
+        Assert.Equal(12_407, actionFrame.Time);
     }
 
     [Fact]

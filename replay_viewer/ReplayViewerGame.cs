@@ -650,7 +650,12 @@ internal static class ReplayScoreFactory
         }
 
         (double firstHitTime, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
-        LazerReplayAdapter.FitCapturedReplay(replay, firstHitTime, lastHitTime, contract.Attempt.ClockRate);
+        LazerReplayAdapter.FitCapturedReplay(
+            replay,
+            firstHitTime,
+            lastHitTime,
+            contract.Attempt.ClockRate,
+            contract.Attempt.MovementSource);
 
         Mod[] mods = filterMods(
             LazerReplayAdapter.ResolveMods(contract.Attempt, beatmap: workingBeatmap.Beatmap),

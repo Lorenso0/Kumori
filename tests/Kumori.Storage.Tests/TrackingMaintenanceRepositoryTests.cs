@@ -280,6 +280,58 @@ public sealed class TrackingMaintenanceRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void StartupRepairAcceptsNullAndStringCheckpointNumbers()
+    {
+        var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
+        _ = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        using (var connection = factory.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO sessions(id, started_at, ended_at)
+                VALUES(1, '2026-07-20T13:00:00Z', '2026-07-20T13:02:00Z');
+                INSERT INTO beatmaps(id, identity) VALUES(1, 'map-a');
+                INSERT INTO attempts(
+                    id, session_id, beatmap_id, started_at, ended_at, outcome,
+                    termination_evidence, score, accuracy, combo,
+                    n300, n100, n50, misses)
+                VALUES(1, 1, 1, '2026-07-20T13:00:10Z', '2026-07-20T13:01:30Z',
+                       'completed', 'results_screen', 0, 100, 0, 0, 0, 0, 0);
+                INSERT INTO attempt_context(attempt_id, source_json, score_json)
+                VALUES(1, '{"client_kind":"lazer"}', '{}');
+                INSERT INTO attempt_events(
+                    attempt_id, captured_at, map_time_ms, event_type, value, data_json)
+                VALUES(1, '2026-07-20T13:01:25Z', 75000, 'checkpoint', 0,
+                    '{"accuracy":"97.5","combo":"123","pp":null,"progress":"0.75",'
+                    || '"unstable_rate":null,"n300":"200","n100":10,"n50":null,'
+                    || '"misses":"2","slider_breaks":null}');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var repository = new TrackingMaintenanceRepository(factory);
+
+        Assert.Equal(1, repository.RepairMissingTosuResults());
+        using var verification = factory.Open();
+        using var values = verification.CreateCommand();
+        values.CommandText = """
+            SELECT accuracy, combo, pp, progress, unstable_rate, n300, n100, n50, misses
+            FROM attempts WHERE id=1
+            """;
+        using var reader = values.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(97.5, reader.GetDouble(0), precision: 6);
+        Assert.Equal(123, reader.GetInt32(1));
+        Assert.Equal(0, reader.GetDouble(2));
+        Assert.Equal(0.75, reader.GetDouble(3), precision: 6);
+        Assert.Equal(0, reader.GetDouble(4));
+        Assert.Equal(200, reader.GetInt32(5));
+        Assert.Equal(10, reader.GetInt32(6));
+        Assert.Equal(0, reader.GetInt32(7));
+        Assert.Equal(2, reader.GetInt32(8));
+    }
+
+    [Fact]
     public void StartupRepairRestoresPartialTosuCountsAndEventsOverwrittenBySimulation()
     {
         var factory = new SqliteConnectionFactory(databasePath, readOnly: false);
