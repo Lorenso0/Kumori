@@ -324,6 +324,90 @@ public partial class MainViewModel
         }
     }
 
+    public async Task ExportPlayAsync(AttemptRowViewModel row)
+    {
+        if (_playShare is null)
+            throw new InvalidOperationException("Play sharing is not available.");
+        SelectedAttempt = row;
+        await Inspector.LoadAsync(row.Id);
+        AttemptDetails details = Inspector.Details
+            ?? throw new InvalidOperationException("Kumori could not load this play.");
+        if (details.Movement?.Available != true)
+            throw new InvalidOperationException("This play does not contain a captured replay and cannot be exported.");
+
+        string? playerName = _playShare.GetPlayerName(row.Id);
+        if (string.IsNullOrWhiteSpace(playerName))
+        {
+            playerName = PlayerNamePrompt.Show(ActiveOwner());
+            if (string.IsNullOrWhiteSpace(playerName))
+                return;
+            _playShare.RememberPlayerName(row.Id, playerName);
+        }
+        playerName = playerName.Trim();
+
+        ResolvedShareMedia media = await Task.Run(() => ShareMediaResolver.Resolve(details));
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export Kumori shared play",
+            Filter = "Kumori shared play (*.kumori)|*.kumori",
+            DefaultExt = PlaySharePackageService.FileExtension,
+            AddExtension = true,
+            FileName = SuggestedShareFileName(playerName, details),
+        };
+        if (dialog.ShowDialog(ActiveOwner()) != true)
+            return;
+
+        HistoryStatus = "Exporting shared play...";
+        string destination = await _playShare.ExportAsync(
+            row.Id,
+            playerName,
+            dialog.FileName,
+            media.Files,
+            media.OptionalOmissions);
+        HistoryStatus = "Shared play exported";
+        KumoriDialog.Show(
+            ActiveOwner(),
+            media.OptionalOmissions.Count == 0
+                ? $"Exported:\n{destination}"
+                : $"Exported with optional media omissions:\n{string.Join("\n", media.OptionalOmissions)}\n\n{destination}",
+            "Export complete",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+    }
+
+    public bool CanExportPlay(AttemptRowViewModel row)
+    {
+        if (_playShare is null || !row.Model.HasMovement)
+            return false;
+        try
+        {
+            AttemptDetails? details = _detailsRepository.GetDetails(row.Id);
+            if (details?.Movement?.Available != true)
+                return false;
+            ResolvedShareMedia media = ShareMediaResolver.Resolve(details);
+            return media.Files.Any(file => file.Role == "beatmap")
+                   && media.Files.Any(file => file.Role == "audio");
+        }
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or InvalidDataException
+                                   or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static string SuggestedShareFileName(string playerName, AttemptDetails details)
+    {
+        string raw = $"{playerName} - {details.Summary.Artist} - {details.Summary.Title} [{details.Summary.Difficulty}]";
+        char[] invalid = Path.GetInvalidFileNameChars();
+        string safe = new(raw.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
+        safe = string.Join(" ", safe.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().TrimEnd('.');
+        if (safe.Length > 160)
+            safe = safe[..160].TrimEnd();
+        return safe + PlaySharePackageService.FileExtension;
+    }
+
     [RelayCommand]
     private Task OpenSelectedReplayInspector()
     {

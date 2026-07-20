@@ -28,7 +28,7 @@ internal static class ModDisplayOrder
         new(StringComparer.OrdinalIgnoreCase)
         {
             "AD", "AS", "BM", "BR", "BU", "DF", "DP", "FF", "FR", "GR", "MF", "MG",
-            "MU", "NS", "RP", "SI", "SY", "TR", "WD", "WG", "WU",
+            "MU", "NS", "RP", "SI", "SY", "TR", "WD", "WG", "WU", "BPM",
         };
 
     private static readonly HashSet<string> system =

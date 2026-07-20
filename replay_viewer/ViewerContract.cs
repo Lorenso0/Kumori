@@ -200,6 +200,9 @@ public sealed record AttemptContract
     [JsonPropertyName("id")]
     public long Id { get; init; }
 
+    [JsonPropertyName("player_name")]
+    public string PlayerName { get; init; } = "";
+
     [JsonPropertyName("artist")]
     public string Artist { get; init; } = "";
 

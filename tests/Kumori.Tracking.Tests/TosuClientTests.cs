@@ -490,6 +490,168 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_PreservesBpmAdjustSettingsFromLocalLazerScore()
+    {
+        var client = new TosuClient();
+
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "global": {
+                    "menuMods": {
+                        "array": [{"acronym": "FR"}],
+                        "rate": 1
+                    }
+                },
+                "beatmap": {
+                    "stats": {"bpm": {"common": 120, "realtime": 120}}
+                },
+                "play": {
+                    "mode": {"number": 0, "name": "osu"},
+                    "mods": {
+                        "array": [{
+                            "acronym": "BPM",
+                            "settings": {
+                                "target_bpm": 174.5,
+                                "audio_mode": "Nightcore",
+                                "scale_map_stats_with_bpm": false
+                            }
+                        }],
+                        "rate": 1
+                    }
+                }
+            }
+            """));
+
+        var snapshot = client.LastSnapshot!;
+        Assert.Equal("BPM", snapshot.ModsKey);
+        AttemptMod mod = Assert.Single(snapshot.Mods);
+        Assert.Equal("BPM", mod.Acronym);
+        using var settings = System.Text.Json.JsonDocument.Parse(mod.SettingsJson);
+        Assert.Equal(174.5, settings.RootElement.GetProperty("target_bpm").GetDouble());
+        Assert.Equal("Nightcore", settings.RootElement.GetProperty("audio_mode").GetString());
+        Assert.False(settings.RootElement.GetProperty("scale_map_stats_with_bpm").GetBoolean());
+        Assert.Equal(120, snapshot.BeatmapStats.Bpm);
+    }
+
+    [Fact]
+    public void Ingest_ResultScoreModsOverrideTosuMenuMisidentification()
+    {
+        var client = new TosuClient();
+
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "ResultScreen"},
+                "beatmap": {"checksum": "bpm-map", "stats": {"bpm": {"common": 120}}},
+                "play": {"mods": {"array": [{"acronym": "FR"}], "rate": 1}},
+                "resultsScreen": {
+                    "score": {
+                        "mods": {
+                            "array": [{
+                                "acronym": "BPM",
+                                "settings": {
+                                    "target_bpm": 180,
+                                    "audio_mode": 1,
+                                    "scale_map_stats_with_bpm": false
+                                }
+                            }],
+                            "rate": 1
+                        }
+                    }
+                }
+            }
+            """));
+
+        TosuSnapshot snapshot = client.LastSnapshot!;
+        AttemptMod mod = Assert.Single(snapshot.Mods);
+        Assert.Equal("BPM", snapshot.ModsKey);
+        Assert.Equal("BPM", mod.Acronym);
+        Assert.Contains("\"target_bpm\": 180", mod.SettingsJson);
+        Assert.Equal(120, snapshot.BeatmapStats.Bpm);
+    }
+
+    [Fact]
+    public void Ingest_TransitionCannotDowngradeCapturedBpmToMenuMappedFr()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "Gameplay"},
+                "beatmap": {"checksum": "bpm-map", "time": {"live": 5000}},
+                "play": {
+                    "mods": {"array": [{
+                        "acronym": "BPM",
+                        "settings": {
+                            "target_bpm": 174.5,
+                            "audio_mode": 2,
+                            "scale_map_stats_with_bpm": true
+                        }
+                    }]}
+                }
+            }
+            """, 100));
+
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "ResultScreen"},
+                "beatmap": {"checksum": "bpm-map", "time": {"live": 5000}},
+                "play": {"mods": {"array": [{"acronym": "FR"}], "rate": 1}}
+            }
+            """, 101));
+
+        TosuSnapshot result = client.LastSnapshot!;
+        AttemptMod mod = Assert.Single(result.Mods);
+        Assert.Equal("BPM", result.ModsKey);
+        Assert.Equal("BPM", mod.Acronym);
+        Assert.Contains("174.5", mod.SettingsJson);
+
+        // A real new attempt is allowed to use a different mod set, even on
+        // the same beatmap.
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "Gameplay"},
+                "beatmap": {"checksum": "bpm-map", "time": {"live": 0}},
+                "play": {"mods": {"array": [{"acronym": "HD"}]}}
+            }
+            """, 102));
+
+        Assert.Equal("HD", client.LastSnapshot!.ModsKey);
+    }
+
+    [Fact]
+    public void Ingest_TransitionRetainsPopulatedBpmSettings()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "Gameplay"},
+                "beatmap": {"checksum": "bpm-map", "time": {"live": 1000}},
+                "play": {"mods": {"array": [{
+                    "acronym": "BPM",
+                    "settings": {"target_bpm": 150, "audio_mode": 0}
+                }]}}
+            }
+            """, 100));
+
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "ResultScreen"},
+                "beatmap": {"checksum": "bpm-map", "time": {"live": 1000}},
+                "play": {"mods": {"array": [{"acronym": "BPM"}]}}
+            }
+            """, 101));
+
+        AttemptMod mod = Assert.Single(client.LastSnapshot!.Mods);
+        Assert.Contains("\"target_bpm\": 150", mod.SettingsJson);
+    }
+
+    [Fact]
     public void Ingest_ReusesAndAppendsCumulativeHitErrorsUntilAttemptReset()
     {
         var client = new TosuClient();

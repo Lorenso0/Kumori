@@ -20,7 +20,7 @@ internal static class ModBadgeInfo
         "HR" or "SD" or "PF" or "DT" or "NC" or "HD" or "FL" or "FI" or "BL" or "AC" => ColorIncrease,
         "RX" or "AP" or "SO" or "AT" or "CN" => ColorAutomation,
         "DA" or "CL" or "TP" or "RD" or "MR" or "AL" => ColorConversion,
-        "WU" or "WD" or "MU" or "NS" or "MG" or "RP" or "AS" or "FR" or "DP" or "BM" or "BR" or "SI" or "TC" or "GR" or "WG" or "DF" => ColorFun,
+        "WU" or "WD" or "MU" or "NS" or "MG" or "RP" or "AS" or "FR" or "DP" or "BM" or "BR" or "SI" or "TC" or "GR" or "WG" or "DF" or "BPM" => ColorFun,
         _ => ColorUnknown,
     };
 
@@ -30,7 +30,7 @@ internal static class ModBadgeInfo
         "HR" or "SD" or "PF" or "DT" or "NC" or "HD" or "FL" or "FI" or "BL" or "AC" => "#1A0A0A",
         "RX" or "AP" or "SO" or "AT" or "CN" => "#0A141A",
         "DA" or "CL" or "TP" or "RD" or "MR" or "AL" => "#0E0A1A",
-        "WU" or "WD" or "MU" or "NS" or "MG" or "RP" or "AS" or "FR" or "DP" or "BM" or "BR" or "SI" or "TC" or "GR" or "WG" or "DF" => "#1A0A11",
+        "WU" or "WD" or "MU" or "NS" or "MG" or "RP" or "AS" or "FR" or "DP" or "BM" or "BR" or "SI" or "TC" or "GR" or "WG" or "DF" or "BPM" => "#1A0A11",
         _ => "#1A1403",
     };
 
@@ -46,6 +46,9 @@ internal static class ModBadgeInfo
         "BR" => "mod-barrel-roll.png",
         "BL" => "mod-blinds.png",
         "BM" => "mod-bloom.png",
+        // The local BPM Adjust mod deliberately has no borrowed lazer icon. Its
+        // acronym is the logo, so score badges render "BPM" plus the target.
+        "BPM" => null,
         "BU" => "mod-bubbles.png",
         "CN" => "mod-cinema.png",
         "CL" => "mod-classic.png",
@@ -124,6 +127,7 @@ internal static class ModBadgeInfo
             "BR" => "Barrel Roll",
             "BL" => "Blinds",
             "BM" => "Bloom",
+            "BPM" => "BPM Adjust",
             "BU" => "Bubbles",
             "CN" => "Cinema",
             "CL" => "Classic",

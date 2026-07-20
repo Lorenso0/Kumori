@@ -4,6 +4,8 @@ namespace Kumori.App;
 
 public static class KumoriDialog
 {
+    public readonly record struct ToggleConfirmation(bool Confirmed, bool IsChecked);
+
     public static MessageBoxResult Show(
         Window? owner,
         string message,
@@ -28,6 +30,29 @@ public static class KumoriDialog
     public static bool Confirm(Window? owner, string message, string title = "Kumori", MessageBoxImage image = MessageBoxImage.Question) =>
         Show(owner, message, title, MessageBoxButton.YesNo, image, MessageBoxResult.No) == MessageBoxResult.Yes;
 
+    public static ToggleConfirmation ConfirmWithToggle(
+        Window? owner,
+        string message,
+        string toggleLabel,
+        bool isChecked,
+        string title = "Kumori",
+        MessageBoxImage image = MessageBoxImage.Question)
+    {
+        var dialog = Create(
+            owner,
+            message,
+            title,
+            MessageBoxButton.YesNo,
+            image,
+            MessageBoxResult.No,
+            toggleLabel: toggleLabel,
+            toggleValue: isChecked);
+        dialog.ShowDialog();
+        return new ToggleConfirmation(
+            dialog.Result == MessageBoxResult.Yes,
+            dialog.ToggleValue);
+    }
+
     public static string Input(Window? owner, string message, string title, string defaultValue = "")
     {
         var dialog = Create(owner, message, title, MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.OK, defaultValue);
@@ -42,14 +67,24 @@ public static class KumoriDialog
         MessageBoxButton buttons,
         MessageBoxImage image,
         MessageBoxResult defaultResult,
-        string? inputValue = null)
+        string? inputValue = null,
+        string? toggleLabel = null,
+        bool toggleValue = false)
     {
         var dialog = new KumoriDialogWindow();
         if (owner is not null && owner.IsLoaded)
         {
             dialog.Owner = owner;
         }
-        dialog.Configure(message, title, buttons, image, defaultResult, inputValue);
+        dialog.Configure(
+            message,
+            title,
+            buttons,
+            image,
+            defaultResult,
+            inputValue,
+            toggleLabel,
+            toggleValue);
         return dialog;
     }
 

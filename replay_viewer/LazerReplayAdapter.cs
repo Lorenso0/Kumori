@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Kumori.Gameplay;
 using osu.Game.Beatmaps;
 using osu.Game.Online.API;
 using osu.Game.Replays;
@@ -25,7 +26,7 @@ public static class LazerReplayAdapter
 
     public static Score? DecodedScore { get; private set; }
 
-    public static Mod[] CreateCapturedMods(string modsKey)
+    public static Mod[] CreateCapturedMods(string modsKey, IBeatmap? beatmap = null)
     {
         if (string.IsNullOrWhiteSpace(modsKey) || modsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
             return [];
@@ -33,12 +34,7 @@ public static class LazerReplayAdapter
         {
             var parsed = parseModEntries(modsKey);
             if (parsed.Length == 0) return createModsFromApiJson(modsKey);
-            var structured = parsed.Select(entry => new
-            {
-                acronym = entry.Acronym,
-                settings = NormaliseSettings(entry.Settings),
-            });
-            return createModsFromApiJson(System.Text.Json.JsonSerializer.Serialize(structured));
+            return createMods(parsed, beatmap);
         }
 
         var entries = Enumerable.Range(0, modsKey.Length / 2)
@@ -46,18 +42,17 @@ public static class LazerReplayAdapter
         return createModsFromApiJson(System.Text.Json.JsonSerializer.Serialize(entries));
     }
 
-    public static Mod[] CreateCapturedMods(AttemptContract attempt)
+    public static Mod[] CreateCapturedMods(AttemptContract attempt, IBeatmap? beatmap = null)
     {
         if (attempt.Mods.Count == 0)
-            return CreateCapturedMods(attempt.ModsKey);
+            return CreateCapturedMods(attempt.ModsKey, beatmap);
 
-        var entries = attempt.Mods.Select(entry => new
-        {
-            acronym = entry.Acronym.Trim().ToUpperInvariant(),
-            settings = NormaliseSettings(entry.Settings),
-        });
-        var converted = createModsFromApiJson(System.Text.Json.JsonSerializer.Serialize(entries));
-        return converted.Length == 0 ? CreateCapturedMods(attempt.ModsKey) : converted;
+        var entries = attempt.Mods.Select(entry => new ModEntry(
+            entry.Acronym.Trim().ToUpperInvariant(),
+            rateFromSettings(entry.Settings),
+            NormaliseSettings(entry.Settings)));
+        var converted = createMods(entries, beatmap);
+        return converted.Length == 0 ? CreateCapturedMods(attempt.ModsKey, beatmap) : converted;
     }
 
     /// <summary>
@@ -66,9 +61,12 @@ public static class LazerReplayAdapter
     /// configurable settings such as a custom clock rate or Difficulty Adjust.
     /// Decoded replay mods remain a fallback for older contracts.
     /// </summary>
-    public static Mod[] ResolveMods(AttemptContract attempt, IEnumerable<Mod>? decodedMods = null)
+    public static Mod[] ResolveMods(
+        AttemptContract attempt,
+        IEnumerable<Mod>? decodedMods = null,
+        IBeatmap? beatmap = null)
     {
-        Mod[] contractMods = CreateCapturedMods(attempt);
+        Mod[] contractMods = CreateCapturedMods(attempt, beatmap);
         if (decodedMods == null)
             return contractMods;
 
@@ -80,6 +78,34 @@ public static class LazerReplayAdapter
         }
 
         return resolved.ToArray();
+    }
+
+    private static Mod[] createMods(IEnumerable<ModEntry> entries, IBeatmap? beatmap)
+    {
+        var result = new List<Mod>();
+        foreach (ModEntry entry in entries)
+        {
+            if (entry.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase))
+            {
+                if (beatmap != null)
+                {
+                    string settingsJson = JsonSerializer.Serialize(entry.Settings);
+                    result.Add(new OsuModBpmAdjust(beatmap, BpmAdjustSettings.Parse(settingsJson)));
+                }
+                continue;
+            }
+
+            var structured = new[]
+            {
+                new
+                {
+                    acronym = entry.Acronym,
+                    settings = NormaliseSettings(entry.Settings),
+                },
+            };
+            result.AddRange(createModsFromApiJson(JsonSerializer.Serialize(structured)));
+        }
+        return result.ToArray();
     }
 
     private static IReadOnlyDictionary<string, JsonElement> NormaliseSettings(IReadOnlyDictionary<string, JsonElement> settings)

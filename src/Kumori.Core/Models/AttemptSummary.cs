@@ -32,4 +32,10 @@ public sealed record AttemptSummary
     public bool IsPersonalBest { get; init; }
     public bool IsMultiplayer { get; init; }
     public bool HasMovement { get; init; }
+    public string? PlayerName { get; init; }
+    public string? SharedByPlayerName { get; init; }
+    public string? ImportedAt { get; init; }
+    public string? LocalBeatmapPath { get; init; }
+    public string? LocalBackgroundPath { get; init; }
+    public bool IsImported => !string.IsNullOrWhiteSpace(SharedByPlayerName);
 }

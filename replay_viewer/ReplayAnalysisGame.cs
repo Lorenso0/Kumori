@@ -419,7 +419,7 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
             unstableRate = Math.Sqrt(timingOffsets.Average(value => Math.Pow(value - mean, 2))) * 10;
         }
 
-        var score = sourceScore.ScoreInfo.DeepClone();
+        ScoreInfo score = cloneScoreInfoPreservingCustomMods(sourceScore.ScoreInfo);
         score.BeatmapInfo = workingBeatmap.BeatmapInfo;
         // A frame-stable processor can briefly apply and revert the same
         // judgement while catching up at 100x. Rebuild the score once from
@@ -516,7 +516,7 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
 
     private static ScoreInfo createFullComboProjection(ScoreInfo actual, int maxCombo)
     {
-        ScoreInfo projected = actual.DeepClone();
+        ScoreInfo projected = cloneScoreInfoPreservingCustomMods(actual);
         int misses = projected.Statistics.GetValueOrDefault(HitResult.Miss);
         projected.Statistics[HitResult.Great] = projected.Statistics.GetValueOrDefault(HitResult.Great) + misses;
         projected.Statistics[HitResult.Miss] = 0;
@@ -535,13 +535,23 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
 
     private static ScoreInfo createPerfectProjection(ScoreInfo actual, int maxCombo)
     {
-        ScoreInfo projected = actual.DeepClone();
+        ScoreInfo projected = cloneScoreInfoPreservingCustomMods(actual);
         projected.Statistics = new Dictionary<HitResult, int>(projected.MaximumStatistics);
         projected.MaxCombo = maxCombo;
         projected.Accuracy = 1;
         projected.IsLegacyScore = false;
         projected.LegacyTotalScore = null;
         return projected;
+    }
+
+    private static ScoreInfo cloneScoreInfoPreservingCustomMods(ScoreInfo source)
+    {
+        ScoreInfo clone = source.DeepClone();
+        // ScoreInfo's API-oriented clone resolves acronyms through the stock
+        // ruleset and therefore drops local mods such as BPM. Restore exact
+        // runtime clones before difficulty, performance, and rate calculations.
+        clone.Mods = source.Mods.Select(mod => mod.DeepClone()).ToArray();
+        return clone;
     }
 
     private static double accuracyFrom(IReadOnlyDictionary<HitResult, int> statistics)
@@ -583,7 +593,8 @@ internal partial class ReplaySimulationPlayer : ReplayPlayer
         if (finished)
             return;
         finished = true;
-        ScoreProcessor.NewJudgement -= collect;
+        if (ScoreProcessor != null)
+            ScoreProcessor.NewJudgement -= collect;
         failed(ex);
     }
 

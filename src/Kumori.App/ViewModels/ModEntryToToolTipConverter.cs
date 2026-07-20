@@ -20,6 +20,7 @@ public sealed class ModEntryToToolTipConverter : IValueConverter
             using var document = JsonDocument.Parse(mod.SettingsJson);
             if (document.RootElement.ValueKind != JsonValueKind.Object) return title;
             var settings = document.RootElement.EnumerateObject()
+                .Where(property => !IsHiddenInternalSetting(mod.Acronym, property.Name))
                 .Select(property => new Setting(property.Name, Format(property.Name, property.Value)))
                 .Where(setting => !string.IsNullOrWhiteSpace(setting.Text))
                 .ToArray();
@@ -41,18 +42,43 @@ public sealed class ModEntryToToolTipConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 
+    private static bool IsHiddenInternalSetting(string acronym, string key) =>
+        acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase) &&
+        key.Equals("target_initialised", StringComparison.OrdinalIgnoreCase);
+
     private static string Format(string key, JsonElement value)
     {
         var label = key.ToLowerInvariant() switch
         {
             "speed_change" => "Speed",
+            "target_bpm" => "Target BPM",
+            "audio_mode" => "Audio mode",
+            "scale_map_stats_with_bpm" => "Scale map stats",
             "approach_rate" or "ar" => "AR",
             "circle_size" or "cs" => "CS",
             "overall_difficulty" or "od" => "OD",
             "drain_rate" or "hp" => "HP",
             _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(key.Replace('_', ' ').ToLowerInvariant()),
         };
-        var rendered = value.ValueKind switch
+        string rendered;
+        if (key.Equals("target_bpm", StringComparison.OrdinalIgnoreCase) &&
+            TryNumber(value) is { } targetBpm)
+        {
+            rendered = targetBpm.ToString("0.##", CultureInfo.InvariantCulture) + " BPM";
+        }
+        else if (key.Equals("audio_mode", StringComparison.OrdinalIgnoreCase))
+        {
+            string normalized = value.ToString().Replace("_", "", StringComparison.Ordinal)
+                .Replace(" ", "", StringComparison.Ordinal)
+                .ToLowerInvariant();
+            rendered = normalized switch
+            {
+                "1" or "adjustpitch" => "Adjust pitch",
+                "2" or "nightcore" => "Nightcore",
+                _ => "Preserve pitch",
+            };
+        }
+        else rendered = value.ValueKind switch
         {
             JsonValueKind.Number when key.Equals("speed_change", StringComparison.OrdinalIgnoreCase)
                 => value.GetDouble().ToString("0.###", CultureInfo.InvariantCulture) + "×",
@@ -64,6 +90,17 @@ public sealed class ModEntryToToolTipConverter : IValueConverter
         };
         return string.IsNullOrWhiteSpace(rendered) ? "" : $"{label}: {rendered}";
     }
+
+    private static double? TryNumber(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Number when value.TryGetDouble(out double number) => number,
+        JsonValueKind.String when double.TryParse(
+            value.GetString(),
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out double number) => number,
+        _ => null,
+    };
 
     private static int DifficultyAdjustOrder(string key) => key.ToLowerInvariant() switch
     {

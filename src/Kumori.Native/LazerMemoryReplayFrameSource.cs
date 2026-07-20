@@ -447,6 +447,14 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
                 var reader = GetReaderLocked(offsets, out _);
                 if (reader is null)
                     return false;
+                // Official tosu offsets describe the exact managed layout of
+                // ppy's published client. The Kumori-branded fork intentionally
+                // keeps the public version for tosu compatibility, but a local
+                // publish can lay out managed fields differently. Do not let its
+                // unreliable ReplayScore offset veto genuine plays. Official
+                // lazer and every other build retain the existing behaviour.
+                if (IsKumoriCustomClient(_cachedProcessPath))
+                    return false;
                 var replay = reader.IsWatchingReplay();
                 if (reader.LastGameBase != 0)
                     _lastGameBase = reader.LastGameBase;
@@ -458,6 +466,25 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
                 _nextProcessSearchAt = DateTimeOffset.UtcNow + ProcessSearchInterval;
                 return false;
             }
+        }
+    }
+
+    internal static bool IsKumoriCustomProduct(string? productName, string? fileDescription) =>
+        string.Equals(productName, "Kumori", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(fileDescription, "Kumori", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsKumoriCustomClient(string? processPath)
+    {
+        if (string.IsNullOrWhiteSpace(processPath))
+            return false;
+        try
+        {
+            var version = FileVersionInfo.GetVersionInfo(processPath);
+            return IsKumoriCustomProduct(version.ProductName, version.FileDescription);
+        }
+        catch
+        {
+            return false;
         }
     }
 

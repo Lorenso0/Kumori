@@ -260,6 +260,8 @@ public sealed class AttemptDetailsRepository
         var hasBeatmapDiff = HasColumn(con, "beatmaps", "ar");
         var hasBpm = HasColumn(con, "beatmaps", "bpm");
         var hasMaxCombo = HasColumn(con, "beatmaps", "max_combo");
+        var hasAttemptPlayer = HasColumn(con, "attempts", "player_name");
+        var hasSessionPlayer = HasColumn(con, "sessions", "player_name");
         cmd.CommandText = $"""
             SELECT a.id, a.session_id, a.started_at, a.ended_at, a.outcome,
                    a.grade, a.accuracy, a.score, a.pp, a.combo, a.misses,
@@ -281,9 +283,13 @@ public sealed class AttemptDetailsRepository
                    {(hasBeatmapDiff ? "b.ar" : "NULL")}, {(hasBeatmapDiff ? "b.cs" : "NULL")},
                    {(hasBeatmapDiff ? "b.od" : "NULL")}, {(hasBeatmapDiff ? "b.hp" : "NULL")},
                    {(hasBpm ? "b.bpm" : "NULL")},
-                   {(hasMaxCombo ? "COALESCE(b.max_combo, 0)" : "0")}
+                   {(hasMaxCombo ? "COALESCE(b.max_combo, 0)" : "0")},
+                   {(hasAttemptPlayer && hasSessionPlayer
+                       ? "COALESCE(NULLIF(a.player_name, ''), s.player_name)"
+                       : hasAttemptPlayer ? "a.player_name" : hasSessionPlayer ? "s.player_name" : "NULL")}
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
+            JOIN sessions s ON s.id = a.session_id
             WHERE a.id = @id
             """;
         cmd.Parameters.AddWithValue("@id", attemptId);
@@ -316,6 +322,7 @@ public sealed class AttemptDetailsRepository
             Checksum = r.IsDBNull(19) ? null : r.GetString(19),
             Key1Count = (int)r.GetInt64(31),
             Key2Count = (int)r.GetInt64(32),
+            PlayerName = r.IsDBNull(50) ? null : r.GetString(50),
         };
         return new AttemptDetails
         {

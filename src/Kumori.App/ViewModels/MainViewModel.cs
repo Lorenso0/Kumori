@@ -31,6 +31,7 @@ public partial class MainViewModel : ObservableObject
     private readonly AttemptDetailsRepository _detailsRepository;
     private readonly ReplayViewerContractService? _replayViewer;
     private readonly Func<Task>? _checkForUpdates;
+    private readonly PlaySharePackageService? _playShare;
 
     /// <summary>Attempt rows only — used for compare selection and the inspector.</summary>
     public ObservableCollection<AttemptRowViewModel> Attempts { get; } = new();
@@ -150,7 +151,8 @@ public partial class MainViewModel : ObservableObject
         ReplayViewerContractService? replayViewer = null,
         TrackingMaintenanceRepository? maintenance = null,
         SessionRepository? sessions = null,
-        Func<Task>? checkForUpdates = null)
+        Func<Task>? checkForUpdates = null,
+        PlaySharePackageService? playShare = null)
     {
         _store = store;
         _appState = store;
@@ -160,6 +162,7 @@ public partial class MainViewModel : ObservableObject
         _detailsRepository = details;
         _replayViewer = replayViewer;
         _checkForUpdates = checkForUpdates;
+        _playShare = playShare;
         _maintenance = maintenance ?? new TrackingMaintenanceRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false));
         _sessionsRepo = sessions ?? new SessionRepository(new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: true));
         Inspector = new AttemptDetailsViewModel(details, replayViewer);
@@ -198,8 +201,9 @@ public partial class MainViewModel : ObservableObject
     public bool HasNoMapData => MapCards.Count == 0;
     public bool CanLaunchTosu => CanStartTosu && !IsLaunchingTosu;
     public bool HasActiveSession => _activeSessionId is not null;
+    public bool ShowSessionGrouping => true;
     private bool CanMaintainTrackingData() => !HasActiveSession;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.7"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.8"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();

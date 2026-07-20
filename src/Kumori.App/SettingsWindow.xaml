@@ -385,6 +385,24 @@
 
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
+                        <TextBlock Text=".kumori files" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Kumori registers itself as the per-user handler for portable shared plays. Windows keeps the final default-app choice under your control."
+                                   Style="{StaticResource SettingsHint}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock x:Name="KumoriAssociationStatus"
+                                   Margin="0,2,0,10"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   TextWrapping="Wrap" />
+                        <WrapPanel>
+                            <Button Content="Repair association" Click="RepairKumoriAssociation_Click" Margin="0,0,8,8" />
+                            <Button Content="Windows default apps" Click="OpenDefaultApps_Click" Margin="0,0,8,8" />
+                            <Button Content="Remove association" Click="RemoveKumoriAssociation_Click" Margin="0,0,0,8" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
                         <TextBlock Text="Companion Automation" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Controls optional helpers managed by Kumori." Style="{StaticResource SettingsHint}" />
 

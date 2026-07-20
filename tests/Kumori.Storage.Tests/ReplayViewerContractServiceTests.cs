@@ -37,6 +37,7 @@ public class ReplayViewerContractServiceTests : IDisposable
         Assert.Equal(1, root.GetProperty("contract_version").GetInt32());
         Assert.Equal(_beatmapPath, root.GetProperty("beatmap_path").GetString());
         Assert.Equal("Song", root.GetProperty("attempt").GetProperty("title").GetString());
+        Assert.Equal("Test Player", root.GetProperty("attempt").GetProperty("player_name").GetString());
         Assert.Equal("live", root.GetProperty("attempt").GetProperty("movement_source").GetString());
         Assert.Equal(900000, root.GetProperty("attempt").GetProperty("score").GetInt64());
         Assert.Equal("completed", root.GetProperty("attempt").GetProperty("outcome").GetString());
@@ -145,6 +146,93 @@ public class ReplayViewerContractServiceTests : IDisposable
         var attempt = doc.RootElement.GetProperty("attempt");
         Assert.Equal(2, attempt.GetProperty("clock_rate").GetDouble());
         Assert.Equal(2, attempt.GetProperty("mods")[0].GetProperty("settings").GetProperty("speed_change").GetDouble());
+    }
+
+    [Fact]
+    public void WriteContract_DerivesBpmAdjustClockRateFromReplayBeatmap()
+    {
+        File.WriteAllText(_beatmapPath, """
+            osu file format v14
+
+            [General]
+            Mode: 0
+
+            [Metadata]
+            Title:Test
+            Artist:Kumori
+            Creator:Tests
+            Version:BPM
+
+            [Difficulty]
+            HPDrainRate:5
+            CircleSize:4
+            OverallDifficulty:8
+            ApproachRate:9
+            SliderMultiplier:1.4
+            SliderTickRate:1
+
+            [TimingPoints]
+            0,500,4,2,1,60,1,0
+
+            [HitObjects]
+            256,192,1000,1,0,0:0:0:0:
+            256,192,5000,1,0,0:0:0:0:
+            """);
+        using (var con = Open())
+        {
+            using var tx = con.BeginTransaction();
+            Execute(con, tx, "UPDATE attempts SET mods_key = 'BPM' WHERE id = 1");
+            Execute(con, tx, "DELETE FROM attempt_mods WHERE attempt_id = 1");
+            Execute(con, tx,
+                """
+                INSERT INTO attempt_mods(attempt_id, position, acronym, settings_json)
+                VALUES(1, 0, 'BPM', '{"target_bpm":180,"audio_mode":0,"scale_map_stats_with_bpm":true}')
+                """);
+            tx.Commit();
+        }
+
+        string path = CreateService().WriteContract(1, _beatmapPath);
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        JsonElement attempt = doc.RootElement.GetProperty("attempt");
+        Assert.Equal(1.5, attempt.GetProperty("clock_rate").GetDouble(), 6);
+        JsonElement mod = Assert.Single(attempt.GetProperty("mods").EnumerateArray().ToArray());
+        Assert.Equal("BPM", mod.GetProperty("acronym").GetString());
+        Assert.Equal(180, mod.GetProperty("settings").GetProperty("target_bpm").GetDouble());
+    }
+
+    [Fact]
+    public void WriteContract_FallsBackToCapturedCommonBpmWhenBeatmapIsTemporarilyUnavailable()
+    {
+        using (var con = Open())
+        {
+            using var tx = con.BeginTransaction();
+            Execute(con, tx, "ALTER TABLE beatmaps ADD COLUMN bpm REAL");
+            Execute(con, tx, "UPDATE beatmaps SET bpm = 200 WHERE id = 1");
+            Execute(con, tx, "UPDATE attempts SET mods_key = 'BPM' WHERE id = 1");
+            Execute(con, tx, "DELETE FROM attempt_mods WHERE attempt_id = 1");
+            Execute(con, tx,
+                """
+                INSERT INTO attempt_mods(attempt_id, position, acronym, settings_json)
+                VALUES(1, 0, 'BPM', '{"target_bpm":150}')
+                """);
+            tx.Commit();
+        }
+
+        // Simulate a temporarily unavailable local beatmap while retaining the
+        // common BPM captured from tosu's beatmap telemetry.
+        using var lockedBeatmap = new FileStream(
+            _beatmapPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None);
+        string path = CreateService().WriteContract(1, _beatmapPath);
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.Equal(
+            0.75,
+            doc.RootElement.GetProperty("attempt").GetProperty("clock_rate").GetDouble(),
+            6);
     }
 
     [Fact]
@@ -381,6 +469,7 @@ public class ReplayViewerContractServiceTests : IDisposable
                 z_count INTEGER NOT NULL DEFAULT 0, x_count INTEGER NOT NULL DEFAULT 0,
                 key1_binding TEXT NOT NULL DEFAULT 'Z',
                 key2_binding TEXT NOT NULL DEFAULT 'X',
+                player_name TEXT,
                 mods_key TEXT NOT NULL DEFAULT 'NM');
             CREATE TABLE attempt_mods(
                 attempt_id INTEGER NOT NULL, position INTEGER NOT NULL,
@@ -428,11 +517,11 @@ public class ReplayViewerContractServiceTests : IDisposable
             INSERT INTO attempts(id, session_id, beatmap_id, started_at, outcome,
                 accuracy, score, grade, pp, fc_pp, max_pp, combo,
                 n300, n100, n50, misses, slider_breaks, unstable_rate,
-                duration_seconds, progress, mods_key)
+                duration_seconds, progress, mods_key, player_name)
             VALUES (1, 1, 1, '2026-07-07T10:05:00', 'completed',
                 97.2, 900000, 'S', 150.5, 160.0, 200.0, 450,
                 500, 20, 3, 2, 1, 95.5,
-                123.4, 1.0, 'HD');
+                123.4, 1.0, 'HD', 'Test Player');
             INSERT INTO attempt_events(attempt_id, captured_at, map_time_ms, event_type, value, data_json)
                 VALUES (1, '2026-07-07T10:06:00', 5000, 'miss', 1, '{}'),
                        (1, '2026-07-07T10:06:30', 15000, 'hit_100', 5, '{"delta": 2}');

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using Kumori.Core.Models;
+using Kumori.Gameplay;
 using osu.Game.Beatmaps;
 using osu.Game.Beatmaps.Formats;
 using osu.Game.IO;
@@ -31,7 +32,7 @@ internal static class DifficultyStrainCurveBuilder
         }
 
         var ruleset = new OsuRuleset();
-        var mods = BuildMods(ruleset, modEntries);
+        var mods = BuildMods(ruleset, decoded, modEntries);
         var playable = new FlatWorkingBeatmap(decoded).GetPlayableBeatmap(ruleset.RulesetInfo, mods);
         if (playable.HitObjects.Count < 2)
         {
@@ -95,7 +96,10 @@ internal static class DifficultyStrainCurveBuilder
         return result;
     }
 
-    private static Mod[] BuildMods(OsuRuleset ruleset, IReadOnlyList<ModEntry> modEntries)
+    private static Mod[] BuildMods(
+        OsuRuleset ruleset,
+        IBeatmap decoded,
+        IReadOnlyList<ModEntry> modEntries)
     {
         var mods = new List<Mod>();
         var settings = new List<KeyValuePair<string, JsonElement>>();
@@ -103,7 +107,11 @@ internal static class DifficultyStrainCurveBuilder
         foreach (var entry in modEntries)
         {
             var acronym = (entry.Acronym ?? string.Empty).Trim();
-            if (acronym.Length > 0 && ruleset.CreateModFromAcronym(acronym) is { } mod)
+            if (acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase))
+            {
+                mods.Add(new OsuModBpmAdjust(decoded, BpmAdjustSettings.Parse(entry.SettingsJson)));
+            }
+            else if (acronym.Length > 0 && ruleset.CreateModFromAcronym(acronym) is { } mod)
             {
                 mods.Add(mod);
             }

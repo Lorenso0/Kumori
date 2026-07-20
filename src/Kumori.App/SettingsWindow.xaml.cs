@@ -105,6 +105,7 @@ public partial class SettingsWindow : Window
         BackupInterval.Text = s.Backup.IntervalHours.ToString(CultureInfo.InvariantCulture);
         BackupRetention.Text = s.Backup.RetentionCount.ToString(CultureInfo.InvariantCulture);
         BackupDirectory.Text = s.Backup.Directory;
+        RefreshKumoriAssociationStatus();
         LoadCustomTheme(CustomThemePalette.Normalize(s.Appearance.CustomTheme));
         switch (ThemeManager.Resolve(s.Appearance.ThemeId).Id)
         {
@@ -647,6 +648,64 @@ public partial class SettingsWindow : Window
         SkinLibraryService.DeleteImported(path);
         SkinPath.Text = "";
         SetStatus("Imported skin deleted. The built-in Argon Pro skin will be used.");
+    }
+
+    private void RepairKumoriAssociation_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _settings.Update(settings => settings.Startup.RegisterKumoriFiles = true);
+            KumoriFileAssociation.Register();
+            RefreshKumoriAssociationStatus();
+            SetStatus("The .kumori file handler was registered.");
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            SetStatus($"Could not register .kumori files: {ex.Message}", isError: true);
+        }
+    }
+
+    private void RemoveKumoriAssociation_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            KumoriFileAssociation.Remove();
+            _settings.Update(settings => settings.Startup.RegisterKumoriFiles = false);
+            RefreshKumoriAssociationStatus();
+            SetStatus("Kumori's .kumori file-handler registration was removed and will stay disabled.");
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            SetStatus($"Could not remove the .kumori registration: {ex.Message}", isError: true);
+        }
+    }
+
+    private void OpenDefaultApps_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            KumoriFileAssociation.OpenWindowsDefaultApps();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not open Windows default-app settings: {ex.Message}", isError: true);
+        }
+    }
+
+    private void RefreshKumoriAssociationStatus()
+    {
+        try
+        {
+            KumoriAssociationStatus.Text = !KumoriFileAssociation.IsRegistered()
+                ? "The Kumori handler is not currently registered."
+                : KumoriFileAssociation.IsCurrentDefault()
+                    ? "Double-clicking .kumori files opens them in Kumori."
+                    : "Kumori is available in Open with, but Windows currently uses another default.";
+        }
+        catch
+        {
+            KumoriAssociationStatus.Text = "The current Windows file association could not be read.";
+        }
     }
 
     private void SetStatus(string message, bool isError = false)

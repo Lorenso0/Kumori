@@ -126,6 +126,38 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void LazerResultMenuMapping_DoesNotReplaceCapturedBpm()
+    {
+        var bpm = new AttemptMod(
+            "BPM",
+            """{"target_bpm":174.5,"audio_mode":2,"scale_map_stats_with_bpm":true}""");
+        _tracker.Ingest(Play(0, live: 0) with
+        {
+            ClientKind = OsuClientKind.Lazer,
+            ModsKey = "BPM",
+            Mods = [bpm],
+        });
+        _tracker.Ingest(Play(3.5, live: 3500, score: 50_000, n300: 100, progress: 1) with
+        {
+            ClientKind = OsuClientKind.Lazer,
+            ModsKey = "BPM",
+            Mods = [bpm],
+        });
+        _tracker.Ingest(Results(3.8, score: 50_000, n300: 100, progress: 1) with
+        {
+            ClientKind = OsuClientKind.Lazer,
+            ModsKey = "FR",
+            Mods = [new AttemptMod("FR")],
+        });
+
+        AttemptSnapshot final = Assert.Single(_sink.Finals).Snapshot;
+        AttemptMod mod = Assert.Single(final.Mods);
+        Assert.Equal("BPM", final.ModsKey);
+        Assert.Equal("BPM", mod.Acronym);
+        Assert.Contains("174.5", mod.SettingsJson);
+    }
+
+    [Fact]
     public void ResultsScreenRichHitCounts_AreFinalized()
     {
         _tracker.Ingest(Play(0, live: 0));

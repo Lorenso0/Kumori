@@ -89,10 +89,27 @@ public partial class App : Application
             Shutdown();
             return;
         }
+        if (!TryParseImportArgument(e.Args, out string? startupImportPath, out string? importArgumentError))
+        {
+            MessageBox.Show(importArgumentError, "Kumori", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+            return;
+        }
         _singleInstance = new SingleInstance();
         if (!_singleInstance.IsPrimaryInstance)
         {
-            _singleInstance.SignalPrimaryInstance();
+            try
+            {
+                _singleInstance.SignalPrimaryInstance(startupImportPath);
+            }
+            catch (Exception ex) when (ex is IOException or TimeoutException)
+            {
+                MessageBox.Show(
+                    $"Kumori is already running, but the request could not be delivered.\n\n{ex.Message}",
+                    "Kumori",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
             _singleInstance.Dispose();
             Shutdown();
             return;
@@ -175,6 +192,7 @@ public partial class App : Application
             && settings.Current.Startup.RunAtLogin
             && settings.Current.Startup.StartMinimized
             && !showChangelogRequested
+            && startupImportPath is null
             && e.Args.Any(argument => string.Equals(
                 argument,
                 StartupRegistration.StartMinimizedArgument,
@@ -192,6 +210,12 @@ public partial class App : Application
         var replayViewer = new ReplayViewerContractService(details, movement, () => settings.Current);
         var maintenance = new TrackingMaintenanceRepository(factory);
         var sessions = new SessionRepository(factory);
+        var playShare = new PlaySharePackageService(
+            details,
+            movement,
+            sessions,
+            localAssetCandidates: ShareMediaResolver.FindLocalAssetCandidates);
+        var importsViewModel = new ImportsViewModel(playShare, replayViewer);
         var viewModel = new MainViewModel(
             store,
             attempts,
@@ -201,10 +225,11 @@ public partial class App : Application
             replayViewer,
             maintenance,
             sessions,
-            CheckForKumoriUpdatesManuallyAsync);
+            CheckForKumoriUpdatesManuallyAsync,
+            playShare);
 
         // Shell first — no data work before first paint.
-        _mainWindow = new MainWindow(viewModel, settings);
+        _mainWindow = new MainWindow(viewModel, settings, importsViewModel, playShare);
         _mainWindow.StateChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         _mainWindow.IsVisibleChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         if (startMinimizedToTray)
@@ -225,7 +250,18 @@ public partial class App : Application
         {
             _mainWindow.Show();
         }
+        try
+        {
+            if (settings.Current.Startup.RegisterKumoriFiles)
+                KumoriFileAssociation.Register();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            Log.Warning(ex, "Could not register the .kumori file association");
+        }
         await Dispatcher.Yield(DispatcherPriority.Loaded);
+        if (startupImportPath is not null)
+            _ = HandleActivationAsync(new SingleInstanceActivationRequest(startupImportPath));
         TrackBackground(
             RunBelowNormalAsync(
                 () =>
@@ -411,8 +447,7 @@ public partial class App : Application
                 DispatcherPriority.ContextIdle);
         };
 
-        _singleInstance.ListenForActivation(
-            () => Dispatcher.InvokeAsync(ShowMainWindow));
+        _singleInstance.ListenForActivation(request => _ = HandleActivationAsync(request));
         store.StateChanged += state =>
         {
             var status = FormatTrayTrackingStatus(state);
@@ -833,5 +868,76 @@ public partial class App : Application
         // initialized successfully.
         KumoriUpdateInstaller.SignalHealthy(e.Args);
 
+    }
+
+    internal static bool TryParseImportArgument(
+        IReadOnlyList<string> arguments,
+        out string? importPath,
+        out string? error)
+    {
+        importPath = null;
+        error = null;
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            if (!string.Equals(arguments[index], "--import", StringComparison.Ordinal))
+                continue;
+            if (importPath is not null)
+            {
+                error = "Only one .kumori file can be opened at a time.";
+                return false;
+            }
+            if (++index >= arguments.Count || string.IsNullOrWhiteSpace(arguments[index]))
+            {
+                error = "The --import option requires one .kumori file path.";
+                return false;
+            }
+            string candidate = arguments[index];
+            if (!Path.IsPathFullyQualified(candidate)
+                || !candidate.EndsWith(PlaySharePackageService.FileExtension, StringComparison.OrdinalIgnoreCase))
+            {
+                error = "The import path must be an absolute .kumori file path.";
+                return false;
+            }
+            importPath = Path.GetFullPath(candidate);
+        }
+        return true;
+    }
+
+    private async Task HandleActivationAsync(SingleInstanceActivationRequest request)
+    {
+        try
+        {
+            string? importPath = null;
+            string? error = null;
+            if (!string.IsNullOrWhiteSpace(request.ImportPath)
+                && !TryParseImportArgument(
+                    ["--import", request.ImportPath],
+                    out importPath,
+                    out error))
+            {
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    ShowMainWindow();
+                    if (_mainWindow is not null)
+                        KumoriDialog.Show(
+                        _mainWindow,
+                        error ?? "The activation request was invalid.",
+                        "Open shared play",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                });
+                return;
+            }
+            await Dispatcher.InvokeAsync(async () =>
+            {
+                ShowMainWindow();
+                if (importPath is not null && _mainWindow is not null)
+                    await _mainWindow.ImportPackageFromPathAsync(importPath);
+            }).Task.Unwrap();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Could not handle Kumori activation request");
+        }
     }
 }

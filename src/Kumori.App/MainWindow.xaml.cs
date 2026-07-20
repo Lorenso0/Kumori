@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Globalization;
 using System.Windows;
@@ -11,6 +12,7 @@ using System.Windows.Threading;
 using Kumori.App.ViewModels;
 using Kumori.Core.Settings;
 using Kumori.Native;
+using Kumori.Storage;
 
 namespace Kumori.App;
 
@@ -24,6 +26,10 @@ public partial class MainWindow : Window
     private static readonly Geometry RestoreIconGeometry = Geometry.Parse("M 3.5 1.5 L 10.5 1.5 L 10.5 8.5 M 1.5 3.5 L 8.5 3.5 L 8.5 10.5 L 1.5 10.5 Z");
 
     private readonly SettingsService _settings;
+    private readonly MainViewModel _mainViewModel;
+    private readonly ImportsViewModel? _importsViewModel;
+    private readonly PlaySharePackageService? _playShare;
+    private readonly SemaphoreSlim _importGate = new(1, 1);
     private ResponsiveLayoutState _layoutState;
     private bool _compactInspectorOpen;
     private string _selectedPage = "Dashboard";
@@ -35,9 +41,16 @@ public partial class MainWindow : Window
     /// <summary>Set by App before Shutdown so the tray Exit actually closes the window.</summary>
     public bool ForceClose { get; set; }
 
-    public MainWindow(MainViewModel viewModel, SettingsService settings)
+    public MainWindow(
+        MainViewModel viewModel,
+        SettingsService settings,
+        ImportsViewModel? importsViewModel = null,
+        PlaySharePackageService? playShare = null)
     {
         _settings = settings;
+        _mainViewModel = viewModel;
+        _importsViewModel = importsViewModel;
+        _playShare = playShare;
         DataContext = viewModel;
         viewModel.WorkspaceWindowRequested += OpenWorkspaceTab;
         InitializeComponent();
@@ -90,7 +103,7 @@ public partial class MainWindow : Window
     }
 
     private void TechnicalDetailsExpander_Expanded(object sender, RoutedEventArgs e)
-        => _expandedTechnicalDetailsAttemptId = (DataContext as MainViewModel)?.SelectedAttempt?.Id;
+        => _expandedTechnicalDetailsAttemptId = CurrentSelectedAttemptId();
 
     private void TechnicalDetailsExpander_Collapsed(object sender, RoutedEventArgs e)
         => _expandedTechnicalDetailsAttemptId = null;
@@ -106,7 +119,7 @@ public partial class MainWindow : Window
             DispatcherPriority.ContextIdle,
             new Action(() =>
             {
-                var selectedAttemptId = (DataContext as MainViewModel)?.SelectedAttempt?.Id;
+                var selectedAttemptId = CurrentSelectedAttemptId();
                 if (TechnicalDetailsExpander.IsExpanded
                     && selectedAttemptId != _expandedTechnicalDetailsAttemptId)
                 {
@@ -232,19 +245,35 @@ public partial class MainWindow : Window
 
     private void CardOverflow_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { DataContext: AttemptRowViewModel row } button
-            || DataContext is not MainViewModel vm)
+        if (sender is not Button { DataContext: AttemptRowViewModel row } button)
         {
             return;
         }
         var menu = new ContextMenu();
         var replay = new MenuItem { Header = "Open Replay Analyzer", IsEnabled = row.CanOpenReplayInspector };
-        replay.Click += async (_, _) => await vm.OpenReplayInspectorAsync(row);
+        if (DashboardRoot.DataContext is ImportsViewModel imports)
+        {
+            replay.Click += async (_, _) => await TryUiActionAsync(() => imports.OpenReplayInspectorAsync(row));
+            var deleteImport = new MenuItem { Header = "Delete imported play" };
+            deleteImport.Click += async (_, _) => await TryUiActionAsync(() => imports.DeleteAsync(row, this));
+            menu.Items.Add(replay);
+            menu.Items.Add(new Separator());
+            menu.Items.Add(deleteImport);
+            menu.PlacementTarget = button;
+            menu.IsOpen = true;
+            return;
+        }
+        if (DashboardRoot.DataContext is not MainViewModel vm)
+            return;
+        replay.Click += async (_, _) => await TryUiActionAsync(() => vm.OpenReplayInspectorAsync(row));
+        var export = new MenuItem { Header = "Export play as .kumori", IsEnabled = vm.CanExportPlay(row) };
+        export.Click += async (_, _) => await TryUiActionAsync(() => vm.ExportPlayAsync(row));
         var showAll = new MenuItem { Header = "Show all plays for this map" };
         showAll.Click += async (_, _) => await vm.ShowAllPlaysForMapAsync(row);
         var delete = new MenuItem { Header = "Delete this attempt", IsEnabled = !vm.HasActiveSession };
         delete.Click += async (_, _) => await vm.DeleteAttemptAsync(row);
         menu.Items.Add(replay);
+        menu.Items.Add(export);
         menu.Items.Add(new Separator());
         menu.Items.Add(showAll);
         menu.Items.Add(new Separator());
@@ -270,7 +299,7 @@ public partial class MainWindow : Window
 
     private void History_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm)
+        if (DashboardRoot.DataContext is not MainViewModel vm)
         {
             return;
         }
@@ -295,17 +324,29 @@ public partial class MainWindow : Window
 
     private void FilterChip_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string filter } && DataContext is MainViewModel viewModel)
+        if (sender is not FrameworkElement { Tag: string filter })
+            return;
+        if (DashboardRoot.DataContext is MainViewModel viewModel)
         {
             viewModel.SelectedFilterMode = filter;
+        }
+        else if (DashboardRoot.DataContext is ImportsViewModel imports)
+        {
+            imports.SelectedFilterMode = filter;
         }
     }
 
     private void ModMatchMode_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string mode } && DataContext is MainViewModel viewModel)
+        if (sender is not FrameworkElement { Tag: string mode })
+            return;
+        if (DashboardRoot.DataContext is MainViewModel viewModel)
         {
             viewModel.SelectedModFilterMode = mode;
+        }
+        else if (DashboardRoot.DataContext is ImportsViewModel imports)
+        {
+            imports.SelectedModFilterMode = mode;
         }
     }
 
@@ -343,6 +384,12 @@ public partial class MainWindow : Window
 
     private void PerformanceNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Performance");
     private void MapsNavigation_Click(object sender, RoutedEventArgs e) => ShowPage("Maps");
+    private async void ImportsNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        ShowPage("Imports");
+        if (_importsViewModel is not null)
+            await _importsViewModel.RefreshAsync(_importsViewModel.SelectedAttempt?.Id);
+    }
     private void ChangelogNavigation_Click(object sender, RoutedEventArgs e) =>
         OpenWorkspaceTab(new ChangelogWindow(), "Changelog");
     private void DiscordNavigation_Click(object sender, RoutedEventArgs e)
@@ -369,11 +416,117 @@ public partial class MainWindow : Window
     {
         _selectedPage = page;
         NavigationView.SelectedPage = page;
-        DashboardRoot.Visibility = page == "Dashboard" ? Visibility.Visible : Visibility.Collapsed;
+        bool playBrowser = page is "Dashboard" or "Imports";
+        DashboardRoot.Visibility = playBrowser ? Visibility.Visible : Visibility.Collapsed;
+        DashboardRoot.DataContext = page == "Imports" && _importsViewModel is not null
+            ? _importsViewModel
+            : _mainViewModel;
+        DashboardTitleText.Text = page == "Imports" ? "Imports" : "Dashboard";
+        DashboardSubtitleText.Text = page == "Imports"
+            ? "Shared plays imported from .kumori files"
+            : "Overview of your recent session";
+        HistoryHeaderTitle.Text = page == "Imports" ? "Imported Plays" : "Play History";
+        InspectorHeaderTitle.Text = page == "Imports" ? "Shared Play" : "Selected Play";
         PerformancePage.Visibility = page == "Performance" ? Visibility.Visible : Visibility.Collapsed;
         MapsPage.Visibility = page == "Maps" ? Visibility.Visible : Visibility.Collapsed;
         WorkspacePage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         ApplyResponsiveLayout();
+    }
+
+    private async void ImportSharedPlay_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import Kumori shared play",
+            Filter = "Kumori shared play (*.kumori)|*.kumori",
+            DefaultExt = PlaySharePackageService.FileExtension,
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) == true)
+            await ImportPackageFromPathAsync(dialog.FileName);
+    }
+
+    public async Task ImportPackageFromPathAsync(string path)
+    {
+        if (_playShare is null || _importsViewModel is null)
+        {
+            KumoriDialog.Show(this, "Shared-play importing is not available.", "Import failed",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        await _importGate.WaitAsync();
+        try
+        {
+            KumoriPackagePreview preview = await _playShare.PreviewAsync(path);
+            SharedPlayV1 play = preview.Play;
+            string omissions = preview.OptionalMediaOmissions.Count == 0
+                ? ""
+                : $"\n\nOptional media not included:\n{string.Join("\n", preview.OptionalMediaOmissions)}";
+            KumoriDialog.ToggleConfirmation confirmation = KumoriDialog.ConfirmWithToggle(
+                this,
+                $"Shared by {preview.PlayerName}\n\n" +
+                $"{play.Map.Artist} — {play.Map.Title} [{play.Map.Difficulty}]\n" +
+                $"Score {play.Score:N0}  ·  {play.Accuracy:0.00}%  ·  {play.ModsKey}\n" +
+                $"Replay {TimeSpan.FromSeconds(play.Results.DurationSeconds):m\\:ss}  ·  {FormatBytes(preview.PackageSize)}" +
+                omissions +
+                "\n\nPlayer attribution is supplied by the sender and is not verified.",
+                "Delete the .kumori file after a successful import",
+                _settings.Current.Startup.DeleteSharedPackageAfterImport,
+                "Import shared play",
+                MessageBoxImage.Question);
+            if (confirmation.IsChecked != _settings.Current.Startup.DeleteSharedPackageAfterImport)
+            {
+                _settings.Update(settings =>
+                    settings.Startup.DeleteSharedPackageAfterImport = confirmation.IsChecked);
+            }
+            if (!confirmation.Confirmed)
+                return;
+            KumoriImportResult result = await _playShare.ImportAsync(path);
+            string? packageDeleteWarning = null;
+            if (confirmation.IsChecked)
+            {
+                try
+                {
+                    File.Delete(Path.GetFullPath(path));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    packageDeleteWarning = ex.Message;
+                }
+            }
+            await _importsViewModel.RefreshAsync(result.ImportId);
+            _compactInspectorOpen = false;
+            ShowPage("Imports");
+            if (result.AlreadyImported)
+                _importsViewModel.HistoryStatus = "This shared play was already imported";
+            else if (result.ReusedLocalAssetCount > 0)
+                _importsViewModel.HistoryStatus =
+                    $"Imported play · reused {result.ReusedLocalAssetCount} local file(s), saving {FormatBytes(result.ReusedLocalAssetBytes)}";
+            if (packageDeleteWarning is not null)
+            {
+                KumoriDialog.Show(
+                    this,
+                    $"The play was imported, but the .kumori file could not be deleted.\n\n{packageDeleteWarning}",
+                    "Import complete",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            Activate();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+        {
+            KumoriDialog.Show(
+                this,
+                $"Kumori could not import that file.\n\n{ex.Message}",
+                "Import failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            _importGate.Release();
+        }
     }
 
     public void OpenWorkspaceTab(Window window, string title)
@@ -670,7 +823,9 @@ public partial class MainWindow : Window
         MapsSortBadge.Visibility = showPageBadges ? Visibility.Visible : Visibility.Collapsed;
 
         MetricsGrid.Columns = _layoutState.IsCompact ? 3 : 6;
-        MetricsRow.Height = new GridLength(_layoutState.IsCompact ? 136 : 88);
+        MetricsRow.Height = _selectedPage == "Imports"
+            ? new GridLength(0)
+            : new GridLength(_layoutState.IsCompact ? 136 : 88);
         var compactInspector = _layoutState.IsCompact && _compactInspectorOpen;
         TopBarRow.Height = compactInspector
             ? new GridLength(0)
@@ -687,8 +842,10 @@ public partial class MainWindow : Window
         ArtworkModeComboBox.Visibility = Visibility.Collapsed;
         ResultsTextBlock.Visibility = Visibility.Collapsed;
         ClearFiltersButton.Visibility = Visibility.Collapsed;
-        SyncStatusText.Visibility = _layoutState.IsWide ? Visibility.Visible : Visibility.Collapsed;
-        TopSettingsButton.Visibility = Visibility.Collapsed;
+        SyncStatusText.Visibility = _selectedPage != "Imports" && _layoutState.IsWide
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        TopSettingsButton.Visibility = _selectedPage == "Imports" ? Visibility.Visible : Visibility.Collapsed;
 
         if (ActualHeight >= 1000)
         {
@@ -793,6 +950,38 @@ public partial class MainWindow : Window
             && left + 100 < vsRight
             && top + 40 > vsTop
             && top + 40 < vsBottom;
+    }
+
+    private long? CurrentSelectedAttemptId() => DashboardRoot.DataContext switch
+    {
+        MainViewModel main => main.SelectedAttempt?.Id,
+        ImportsViewModel imports => imports.SelectedAttempt?.Id,
+        _ => null,
+    };
+
+    private async Task TryUiActionAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+        {
+            KumoriDialog.Show(this, ex.Message, "Kumori", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        double value = Math.Max(0, bytes);
+        int unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+        return $"{value:0.#} {units[unit]}";
     }
 
     private void SaveBounds()

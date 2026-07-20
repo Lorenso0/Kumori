@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Kumori.Core.Models;
+using Kumori.Gameplay;
 
 namespace Kumori.Storage;
 
@@ -15,7 +16,7 @@ internal static class ReplayComparisonCompatibility
     private static readonly HashSet<string> replayAlignmentMods = new(StringComparer.OrdinalIgnoreCase)
     {
         // Playback clock.
-        "DT", "NC", "HT", "DC", "WU", "WD", "AS",
+        "DT", "NC", "HT", "DC", "WU", "WD", "AS", "BPM",
 
         // Hit geometry, hit windows, approach timing, or layout conversion.
         "EZ", "HR", "DA", "MR", "RD", "TP",
@@ -34,8 +35,37 @@ internal static class ReplayComparisonCompatibility
             .Where(mod => !string.IsNullOrWhiteSpace(mod.Acronym)
                           && (replayAlignmentMods.Contains(mod.Acronym.Trim())
                               || mod.Acronym.Equals("RAW", StringComparison.OrdinalIgnoreCase)))
-            .Select(mod => $"{mod.Acronym.Trim().ToUpperInvariant()}:{canonicalJson(mod.SettingsJson)}")
+            .Select(mod =>
+            {
+                string acronym = mod.Acronym.Trim().ToUpperInvariant();
+                string settings = acronym == "BPM"
+                    ? canonicalBpmSettings(mod.SettingsJson)
+                    : canonicalJson(mod.SettingsJson);
+                return $"{acronym}:{settings}";
+            })
             .OrderBy(value => value, StringComparer.Ordinal));
+    }
+
+    private static string canonicalBpmSettings(string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(
+                string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return canonicalJson(json);
+
+            BpmAdjustSettings settings = BpmAdjustSettings.Parse(document.RootElement);
+            return JsonSerializer.Serialize(new
+            {
+                target_bpm = settings.TargetBpm,
+                scale_map_stats_with_bpm = settings.ScaleMapStatsWithBpm,
+            });
+        }
+        catch (JsonException)
+        {
+            return canonicalJson(json);
+        }
     }
 
     private static IReadOnlyList<ModEntry> fallbackMods(string modsKey)

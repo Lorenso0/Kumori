@@ -73,8 +73,11 @@ public sealed class KumoriSettings
     {
         public bool RunAtLogin { get; set; } = false;
         public bool StartMinimized { get; set; } = false;
+        public bool RegisterKumoriFiles { get; set; } = true;
+        public bool DeleteSharedPackageAfterImport { get; set; } = false;
         public string ExecutablePath { get; set; } = "";
     }
+
 
     public sealed class WindowSettings
     {

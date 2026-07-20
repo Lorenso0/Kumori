@@ -3,6 +3,7 @@ using System.Text.Json;
 using Kumori.Core;
 using Kumori.Core.Models;
 using Kumori.Core.Settings;
+using Kumori.Gameplay;
 using Serilog;
 
 namespace Kumori.Storage;
@@ -72,6 +73,7 @@ public sealed class ReplayViewerContractService
             attempt = new
             {
                 id = attemptId,
+                player_name = ReplayPlayerName(details),
                 artist = details.Summary.Artist,
                 title = details.Summary.Title,
                 difficulty = details.Summary.Difficulty,
@@ -81,7 +83,7 @@ public sealed class ReplayViewerContractService
                     acronym = mod.Acronym,
                     settings = SettingsObject(mod.SettingsJson),
                 }).ToArray(),
-                clock_rate = ClockRate(details),
+                clock_rate = ClockRate(details, beatmapPath),
                 movement_source = "replay_result_recovery",
                 accuracy = details.Summary.Accuracy,
                 score = details.Summary.Score,
@@ -212,6 +214,7 @@ public sealed class ReplayViewerContractService
             attempt = new
             {
                 id = details.Summary.Id,
+                player_name = ReplayPlayerName(details),
                 artist = details.Summary.Artist,
                 title = details.Summary.Title,
                 difficulty = details.Summary.Difficulty,
@@ -221,7 +224,7 @@ public sealed class ReplayViewerContractService
                     acronym = m.Acronym,
                     settings = SettingsObject(m.SettingsJson),
                 }).ToArray(),
-                clock_rate = ClockRate(details),
+                clock_rate = ClockRate(details, beatmapPath),
                 movement_source = metadata?.Source ?? "live",
                 accuracy = details.Summary.Accuracy,
                 score = details.Summary.Score,
@@ -291,6 +294,91 @@ public sealed class ReplayViewerContractService
         File.WriteAllText(contractPath, JsonSerializer.Serialize(payload, JsonOptions));
         return contractPath;
     }
+
+    public string WriteExternalContract(
+        AttemptDetails details,
+        IReadOnlyList<MovementSample> samples,
+        string beatmapPath,
+        string? mediaDirectory = null,
+        IReadOnlyDictionary<string, string>? mediaPaths = null)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        ArgumentNullException.ThrowIfNull(samples);
+        if (samples.Count == 0)
+            throw new InvalidOperationException("No movement samples are available for this imported play.");
+        if (!File.Exists(beatmapPath))
+            throw new FileNotFoundException("Imported beatmap file not found.", beatmapPath);
+
+        Directory.CreateDirectory(_contractDirectory);
+        string contractPath = Path.Combine(
+            _contractDirectory,
+            $"import-{details.Summary.Id}-{Guid.NewGuid():N}.json");
+        var payload = new
+        {
+            contract_version = 1,
+            attempt = new
+            {
+                id = details.Summary.Id,
+                player_name = ReplayPlayerName(details),
+                artist = details.Summary.Artist,
+                title = details.Summary.Title,
+                difficulty = details.Summary.Difficulty,
+                mods_key = details.Summary.ModsKey,
+                mods = details.Mods.Select(mod => new
+                {
+                    acronym = mod.Acronym,
+                    settings = SettingsObject(mod.SettingsJson),
+                }).ToArray(),
+                clock_rate = ClockRate(details, beatmapPath),
+                movement_source = details.Movement?.Source ?? "shared",
+                accuracy = details.Summary.Accuracy,
+                score = details.Summary.Score,
+                max_combo = details.BeatmapMaxCombo,
+                grade = details.Summary.Grade ?? "",
+                outcome = details.Summary.Outcome,
+                progress = details.Summary.Progress,
+                mean_offset = details.Timing?.Mean,
+            },
+            beatmap_path = Path.GetFullPath(beatmapPath),
+            media_directory = Path.GetFullPath(mediaDirectory ?? Path.GetDirectoryName(beatmapPath)!),
+            media_paths = mediaPaths ?? new Dictionary<string, string>(),
+            replay_path = (string?)null,
+            settings = ReplaySettings(),
+            judgement_events = details.Events
+                .Where(e => e.EventType is "miss" or "slider_break" or "hit_100" or "hit_50")
+                .Select(ToViewerJudgement)
+                .ToArray(),
+            final_hits = new
+            {
+                n300 = details.N300,
+                n100 = details.N100,
+                n50 = details.N50,
+                misses = details.Summary.Misses,
+            },
+            recent_attempts = Array.Empty<object>(),
+            comparison = (object?)null,
+            comparison_options = Array.Empty<object>(),
+            samples = samples.Select(sample => new
+            {
+                map_time_ms = sample.MapTimeMs,
+                monotonic_ms = sample.MonotonicMs,
+                x = sample.X,
+                y = sample.Y,
+                buttons = sample.Buttons,
+                flags = sample.Flags,
+                pressure = sample.Pressure,
+            }).ToArray(),
+        };
+        File.WriteAllText(contractPath, JsonSerializer.Serialize(payload, JsonOptions));
+        return contractPath;
+    }
+
+    private static string ReplayPlayerName(AttemptDetails details) =>
+        !string.IsNullOrWhiteSpace(details.Summary.PlayerName)
+            ? details.Summary.PlayerName
+            : !string.IsNullOrWhiteSpace(details.SharedByPlayerName)
+                ? details.SharedByPlayerName
+                : "Kumori capture";
 
     private static IReadOnlyList<MovementSample> CompactComparisonSamples(IReadOnlyList<MovementSample> samples)
     {
@@ -467,14 +555,23 @@ public sealed class ReplayViewerContractService
         }
 
         var repoRoot = Path.GetFullPath(Path.Combine(baseDirectory, "..", "..", "..", "..", ".."));
-        var candidates = new[]
+        bool preferDebug = baseDirectory
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(segment => segment.Equals("Debug", StringComparison.OrdinalIgnoreCase));
+        string[] configurations = preferDebug ? ["Debug", "Release"] : ["Release", "Debug"];
+        var candidates = configurations
+            .SelectMany(configuration => new[]
+            {
+                Path.Combine(repoRoot, "replay_viewer", "bin", configuration, "net10.0", "win-x64", "Kumori.ReplayViewer.exe"),
+                Path.Combine(repoRoot, "replay_viewer", "bin", configuration, "net10.0", "Kumori.ReplayViewer.exe"),
+            })
+            .Concat(new[]
         {
-            Path.Combine(repoRoot, "replay_viewer", "bin", "Debug", "net10.0", "win-x64", "Kumori.ReplayViewer.exe"),
-            Path.Combine(repoRoot, "replay_viewer", "bin", "Debug", "net10.0", "Kumori.ReplayViewer.exe"),
             Path.Combine(baseDirectory, "Kumori.ReplayViewer", "Kumori.ReplayViewer.exe"),
             Path.Combine(repoRoot, "dist", "app", "Kumori.ReplayViewer", "Kumori.ReplayViewer.exe"),
             Path.Combine(repoRoot, "replay_viewer", "publish", "Kumori.ReplayViewer.exe"),
-        };
+        })
+            .ToArray();
         var resolved = candidates.FirstOrDefault(File.Exists);
         if (resolved is not null)
         {
@@ -500,10 +597,41 @@ public sealed class ReplayViewerContractService
         };
     }
 
-    private static double ClockRate(AttemptDetails details)
+    private static double ClockRate(AttemptDetails details, string? beatmapPath = null)
     {
         foreach (var mod in details.Mods)
         {
+            if (mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase))
+            {
+                BpmAdjustSettings settings = BpmAdjustSettings.Parse(mod.SettingsJson);
+                if (settings.TargetBpm is > 0)
+                {
+                    double sourceBpm = 0;
+                    if (!string.IsNullOrWhiteSpace(beatmapPath) && File.Exists(beatmapPath))
+                    {
+                        try
+                        {
+                            sourceBpm = BpmAdjustBeatmap.SourceBpm(beatmapPath);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+                        {
+                            Log.Debug(ex, "Could not derive BPM Adjust clock rate from {BeatmapPath}", beatmapPath);
+                        }
+                    }
+
+                    // tosu reports the map's most common BPM separately from
+                    // its unreliable mod rate. This is a safe fallback when the
+                    // local beatmap cannot be decoded, and keeps the calculation
+                    // entirely inside Kumori.
+                    if (sourceBpm <= 0 && details.Bpm is > 0)
+                        sourceBpm = details.Bpm.Value;
+
+                    return settings.ClockRate(sourceBpm);
+                }
+
+                return 1;
+            }
+
             if (mod.Acronym.Equals("DT", StringComparison.OrdinalIgnoreCase) ||
                 mod.Acronym.Equals("NC", StringComparison.OrdinalIgnoreCase) ||
                 mod.Acronym.Equals("HT", StringComparison.OrdinalIgnoreCase) ||

@@ -26,7 +26,8 @@ namespace Kumori.App.ViewModels;
 /// </summary>
 public partial class AttemptDetailsViewModel : ObservableObject
 {
-    private readonly AttemptDetailsRepository _repository;
+    private readonly Func<long, AttemptDetails?> _detailsLoader;
+    private readonly Func<long, IReadOnlyList<MovementSample>> _movementLoader;
     private readonly ReplayViewerContractService? _replayViewer;
     private readonly Dictionary<long, AttemptDetails> _cache = new();
     private readonly Dictionary<long, IReadOnlyList<PressurePoint>> _curveCache = new();
@@ -75,10 +76,22 @@ public partial class AttemptDetailsViewModel : ObservableObject
     }
 
     public AttemptDetailsViewModel(
-        AttemptDetailsRepository repository,
+        AttemptDetailsRepository? repository,
+        ReplayViewerContractService? replayViewer = null)
+        : this(
+            repository is null ? static _ => null : repository.GetDetails,
+            replayViewer is null ? _ => [] : replayViewer.GetMovementSamples,
+            replayViewer)
+    {
+    }
+
+    public AttemptDetailsViewModel(
+        Func<long, AttemptDetails?> detailsLoader,
+        Func<long, IReadOnlyList<MovementSample>> movementLoader,
         ReplayViewerContractService? replayViewer = null)
     {
-        _repository = repository;
+        _detailsLoader = detailsLoader;
+        _movementLoader = movementLoader;
         _replayViewer = replayViewer;
     }
 
@@ -88,6 +101,10 @@ public partial class AttemptDetailsViewModel : ObservableObject
     public string MapperLine => Details is { } d ? $"mapped by {(string.IsNullOrWhiteSpace(d.Mapper) ? "Unknown" : d.Mapper)}" : "";
     public string DifficultyName => Details is { } d && !string.IsNullOrWhiteSpace(d.Summary.Difficulty) ? d.Summary.Difficulty : "Unknown difficulty";
     public string PlayedLine => Details is { } d ? $"Played {LocalTimeDisplay.Relative(d.Summary.StartedAt, fallback: StartedLine)}" : "";
+    public string SharedByLine => Details is { SharedByPlayerName: { Length: > 0 } player }
+        ? $"Shared by {player}"
+        : "";
+    public bool IsImportedPlay => Details?.IsImported == true;
     public string SubtitleLine => Details is { } d
         ? $"[{(string.IsNullOrEmpty(d.Summary.Difficulty) ? "Unknown" : d.Summary.Difficulty)}]  ·  mapped by {(string.IsNullOrEmpty(d.Mapper) ? "Unknown" : d.Mapper)}"
         : "";
@@ -382,7 +399,9 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
     }
     public bool HasDisplayMods => DisplayMods.Count > 0;
-    public string? ArtworkSource => Details is { } d ? BeatmapArtworkResolver.Resolve(d.Summary) : null;
+    public string? ArtworkSource => Details is { } d
+        ? d.LocalBackgroundPath ?? BeatmapArtworkResolver.Resolve(d.Summary)
+        : null;
     public IReadOnlyList<double> TimingOffsets => Details?.Timing?.Offsets ?? Array.Empty<double>();
     public string TimingLine => Details?.Timing is { } t
         ? Invariant($"{t.HitCount:N0} hits  ·  mean {t.Mean:+0.0;-0.0;+0.0}ms  ·  early {t.EarlyCount:N0}  ·  late {t.LateCount:N0}")
@@ -391,7 +410,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         ? Invariant($"K1:{i.Key1Presses} - K2:{i.Key2Presses} - peak {i.PeakKps}kps - avg {i.AverageKps:0.0}kps")
         : "No input data";
     public string ModsLine => Details is { } d && d.Mods.Count > 0
-        ? string.Join(" ", d.Mods.Select(m => m.Acronym))
+        ? string.Join(" ", d.Mods.Select(ModLineLabel))
         : "NM";
     public string EventsLine => Details is { } d
         ? $"{d.Events.Count(e => e.EventType == "miss")} miss - {d.Events.Count(e => e.EventType == "slider_break")} breaks - {d.Events.Count} events"
@@ -419,7 +438,7 @@ public partial class AttemptDetailsViewModel : ObservableObject
         }
     }
     public IReadOnlyList<UrPoint> UrSamples => BuildUrSamples(Details);
-    public bool CanOpenReplayInspector => Details is not null && _replayViewer?.IsEnabled == true;
+    public bool CanOpenReplayInspector => Details is { Movement.Available: true } && _replayViewer?.IsEnabled == true;
     public bool CanValidateOsr => Details is not null;
 
     partial void OnDetailsChanged(AttemptDetails? value)
@@ -437,6 +456,8 @@ public partial class AttemptDetailsViewModel : ObservableObject
         OnPropertyChanged(nameof(MapperLine));
         OnPropertyChanged(nameof(DifficultyName));
         OnPropertyChanged(nameof(PlayedLine));
+        OnPropertyChanged(nameof(SharedByLine));
+        OnPropertyChanged(nameof(IsImportedPlay));
         OnPropertyChanged(nameof(SubtitleLine));
         OnPropertyChanged(nameof(StartedLine));
         OnPropertyChanged(nameof(Grade));
@@ -599,6 +620,9 @@ public partial class AttemptDetailsViewModel : ObservableObject
         ["cs"] = "CS",
         ["hp"] = "HP",
         ["speed_change"] = "Speed",
+        ["target_bpm"] = "BPM",
+        ["audio_mode"] = "Audio",
+        ["scale_map_stats_with_bpm"] = "Scale stats",
         ["adjust_pitch"] = "Pitch",
         ["pitch_adjust"] = "Pitch",
         ["minimum_accuracy"] = "Min acc",
@@ -688,6 +712,12 @@ public partial class AttemptDetailsViewModel : ObservableObject
                         result["bpm"] = new DifficultyPair(baseBpm, baseBpm * speed);
                     }
                 }
+                if (string.Equals(setting.Key, "target_bpm", StringComparison.OrdinalIgnoreCase)
+                    && number is > 0 and { } targetBpm)
+                {
+                    var original = result.TryGetValue("bpm", out var bpmPair) ? bpmPair.Original : null;
+                    result["bpm"] = new DifficultyPair(original, targetBpm);
+                }
             }
         }
         return result;
@@ -716,6 +746,15 @@ public partial class AttemptDetailsViewModel : ObservableObject
                 {
                     rendered = FormatG(element.GetDouble()) + "×";
                 }
+                else if (string.Equals(setting.Key, "target_bpm", StringComparison.OrdinalIgnoreCase)
+                         && TryNumber(element) is { } targetBpm)
+                {
+                    rendered = FormatG(targetBpm) + " BPM";
+                }
+                else if (string.Equals(setting.Key, "audio_mode", StringComparison.OrdinalIgnoreCase))
+                {
+                    rendered = AudioModeDisplay(element);
+                }
                 else if (element.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
                     rendered = element.GetBoolean() ? "On" : "Off";
@@ -740,6 +779,31 @@ public partial class AttemptDetailsViewModel : ObservableObject
             }
         }
         return string.Join("   |   ", groups);
+    }
+
+    private static string AudioModeDisplay(JsonElement element)
+    {
+        string normalized = element.ToString().Replace("_", "", StringComparison.Ordinal)
+            .Replace(" ", "", StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return normalized switch
+        {
+            "1" or "adjustpitch" => "Adjust pitch",
+            "2" or "nightcore" => "Nightcore",
+            _ => "Preserve pitch",
+        };
+    }
+
+    private static string ModLineLabel(ModEntry mod)
+    {
+        if (!mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase))
+            return mod.Acronym;
+
+        double? target = ParseSettings(mod.SettingsJson)
+            .Where(setting => setting.Key.Equals("target_bpm", StringComparison.OrdinalIgnoreCase))
+            .Select(setting => TryNumber(setting.Value))
+            .FirstOrDefault(value => value is > 0);
+        return target is { } bpm ? $"BPM {FormatG(bpm)} BPM" : "BPM";
     }
 
     private static IReadOnlyList<KeyValuePair<string, JsonElement>> ParseSettings(string? json)

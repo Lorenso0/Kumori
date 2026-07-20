@@ -24,6 +24,11 @@ public static class LazerBeatmapAnalyzer
         using (var reader = new LineBufferedReader(stream))
             decoded = Decoder.GetDecoder<Beatmap>(reader).Decode(reader);
 
+        return Decode(decoded, mods);
+    }
+
+    public static BeatmapAnalysis Decode(Beatmap decoded, IReadOnlyList<Mod>? mods = null)
+    {
         var ruleset = new OsuRuleset();
         var playable = new FlatWorkingBeatmap(decoded).GetPlayableBeatmap(
             ruleset.RulesetInfo, mods ?? Array.Empty<Mod>());

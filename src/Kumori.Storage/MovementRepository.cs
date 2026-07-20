@@ -271,6 +271,9 @@ public sealed class MovementRepository
         return output.ToArray();
     }
 
+    public static IReadOnlyList<MovementSample> DecodeSamples(byte[] zlibBlob, int expectedSampleCount) =>
+        DecodeSamples(zlibBlob, expectedSampleCount, CancellationToken.None);
+
     private static IReadOnlyList<MovementSample> DecodeSamples(
         byte[] zlibBlob,
         int expectedSampleCount,

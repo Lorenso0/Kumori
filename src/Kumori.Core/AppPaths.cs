@@ -18,6 +18,14 @@ public static class AppPaths
 
     public static string TrackingDataDir => Path.Combine(DataDir, "tracking");
 
+    public static string ImportsDataDir => Path.Combine(DataDir, "imports");
+
+    public static string ImportsDatabase => Path.Combine(ImportsDataDir, "imports.sqlite3");
+
+    public static string ImportedAssetsDir => Path.Combine(ImportsDataDir, "assets");
+
+    public static string ImportStagingDir => Path.Combine(RuntimeDir, "import-staging");
+
     public static string CacheDir => Path.Combine(AppDataDir, "cache");
 
     public static string BeatmapCacheDir => Path.Combine(CacheDir, "beatmaps");

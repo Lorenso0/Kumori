@@ -246,7 +246,6 @@ internal sealed partial class LazerReplayFrameMemoryReader
 
         return false;
     }
-
     private IReadOnlyList<LazerReplayFrame> ReadFramesAfter(
         nint player,
         long lastSequence,

@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.4.8",
+    "date": "2026-07-20",
+    "features": [
+      "Added portable .kumori play exports with replay, score, beatmap, audio, artwork, samples, and per-play player attribution",
+      "Added a dedicated Imports library for previewing, retaining, filtering, deleting, and opening shared plays in Replay Analyzer",
+      "Added Windows .kumori file handling with double-click import, running-instance activation, and association controls in Settings",
+      "Added BPM Adjust support across tracking, score details, map pressure, replay playback, and replay comparison"
+    ],
+    "improvements": [
+      "Kept imported plays isolated from local statistics while reusing matching local beatmap and media files without duplicating them",
+      "Added optional deletion of the source .kumori file after a successful import"
+    ],
+    "fixes": [
+      "Preserved player names per play and showed them correctly in Replay Analyzer, including after restarting Kumori",
+      "Accepted extensionless osu!lazer beatmap storage files when creating portable exports",
+      "Fixed the Imports page binding error that appeared after confirming an import"
+    ]
+  },
+  {
     "version": "0.4.7",
     "date": "2026-07-17",
     "features": [

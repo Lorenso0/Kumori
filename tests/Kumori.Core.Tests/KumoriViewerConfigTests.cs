@@ -99,6 +99,7 @@ public sealed class KumoriViewerConfigTests : IDisposable
     [Theory]
     [InlineData("HRHD", "HD", "HR")]
     [InlineData("10K2KEZNF", "EZ", "NF", "2K", "10K")]
+    [InlineData("BPM", "BPM")]
     [InlineData("[\"SO\",\"HR\",\"RX\",\"HD\"]", "HD", "HR", "RX", "SO")]
     public void ComparisonReplayModsUseOfficialDisplayOrder(string modsKey, params string[] expected)
     {

@@ -12,6 +12,7 @@ public partial class KumoriDialogWindow : Window
 
     public MessageBoxResult Result { get; private set; } = MessageBoxResult.None;
     public string InputValue => InputTextBox.Text;
+    public bool ToggleValue => ToggleCheckBox.IsChecked == true;
 
     public KumoriDialogWindow()
     {
@@ -24,7 +25,9 @@ public partial class KumoriDialogWindow : Window
         MessageBoxButton buttons,
         MessageBoxImage image,
         MessageBoxResult defaultResult,
-        string? inputValue = null)
+        string? inputValue = null,
+        string? toggleLabel = null,
+        bool toggleValue = false)
     {
         Title = title;
         TitleText.Text = title;
@@ -36,6 +39,12 @@ public partial class KumoriDialogWindow : Window
             InputTextBox.Visibility = Visibility.Visible;
             InputTextBox.Text = inputValue;
             InputTextBox.SelectAll();
+        }
+        if (!string.IsNullOrWhiteSpace(toggleLabel))
+        {
+            ToggleCheckBox.Content = toggleLabel;
+            ToggleCheckBox.IsChecked = toggleValue;
+            ToggleCheckBox.Visibility = Visibility.Visible;
         }
 
         ButtonHost.Children.Clear();

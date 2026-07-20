@@ -379,6 +379,114 @@
             </Style.Triggers>
         </Style>
 
+        <!-- Score/replay badges use the fork's native BPM Adjust treatment:
+             acronym logo, serialized target, and the configurable-mod cog. -->
+        <DataTemplate x:Key="CompactScoreModBadgeTemplate">
+            <Grid Width="{Binding Converter={x:Static vm:ModEntryToScoreBadgeWidthConverter.Instance}}"
+                  Height="25"
+                  Margin="0,0,3,0"
+                  VerticalAlignment="Center"
+                  ToolTip="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}"
+                  ToolTipService.InitialShowDelay="0"
+                  ToolTipService.BetweenShowDelay="0"
+                  ToolTipService.ShowDuration="60000"
+                  ToolTipService.Placement="Top"
+                  ToolTipService.VerticalOffset="-2"
+                  AutomationProperties.Name="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}">
+                <Grid x:Name="StandardModBadge"
+                      Height="21"
+                      VerticalAlignment="Bottom">
+                    <Polygon Stretch="Fill"
+                             Points="2,10.5 7,1 20,1 25,10.5 20,20 7,20"
+                             Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
+                    <Rectangle x:Name="StandardModIcon"
+                               Width="16"
+                               Height="16"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"
+                               RenderOptions.BitmapScalingMode="HighQuality">
+                        <Rectangle.OpacityMask>
+                            <ImageBrush Stretch="Uniform"
+                                        ImageSource="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}" />
+                        </Rectangle.OpacityMask>
+                    </Rectangle>
+                    <TextBlock x:Name="StandardModFallback"
+                               Text="{Binding Acronym}"
+                               Visibility="Collapsed"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontSize="8"
+                               FontWeight="Bold"
+                               Foreground="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}" />
+                </Grid>
+
+                <Grid x:Name="BpmModBadge"
+                      Visibility="Collapsed">
+                    <Grid Height="21"
+                          Margin="0,4,0,0"
+                          VerticalAlignment="Bottom">
+                        <Path Stretch="Fill"
+                              Data="M 2,10.5 L 7,1 L 20,1 L 25,10.5 L 20,20 L 7,20 Z"
+                              Fill="#55152F" />
+                        <Path Width="31"
+                              HorizontalAlignment="Left"
+                              Stretch="Fill"
+                              Data="M 2,10.5 L 7,1 L 20,1 L 25,10.5 L 20,20 L 7,20 Z"
+                              Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="29" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="BPM"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       FontFamily="Segoe UI"
+                                       FontSize="8"
+                                       FontWeight="Bold"
+                                       Foreground="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding Converter={x:Static vm:ModEntryToBpmTargetConverter.Instance}}"
+                                       Margin="2,0,7,0"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       FontFamily="Segoe UI"
+                                       FontSize="10"
+                                       FontWeight="Black"
+                                       Foreground="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
+                        </Grid>
+                    </Grid>
+                    <Grid Width="11"
+                          Height="11"
+                          Margin="26,-1,0,0"
+                          HorizontalAlignment="Left"
+                          VerticalAlignment="Top">
+                        <Path Stretch="Uniform"
+                              Data="M 4.5,0 L 6.5,0 L 7.1,1.7 L 8.8,1 L 10,2.3 L 9.3,4 L 11,4.6 L 11,6.5 L 9.3,7.1 L 10,8.8 L 8.8,10 L 7.1,9.3 L 6.5,11 L 4.5,11 L 3.9,9.3 L 2.2,10 L 1,8.8 L 1.7,7.1 L 0,6.5 L 0,4.6 L 1.7,4 L 1,2.3 L 2.2,1 L 3.9,1.7 Z"
+                              Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
+                        <Ellipse Width="3.5"
+                                 Height="3.5"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}" />
+                    </Grid>
+                </Grid>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}"
+                             Value="{x:Null}">
+                    <Setter TargetName="StandardModIcon" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="StandardModFallback" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Acronym}" Value="BPM">
+                    <Setter TargetName="StandardModBadge" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="BpmModBadge" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <DataTemplate x:Key="PlayCardTemplate">
             <Grid MinHeight="92" ClipToBounds="True" ToolTip="{Binding DifficultyLine}">
                 <Grid.ColumnDefinitions>
@@ -428,6 +536,7 @@
                                ToolTip="{Binding DifficultyLine}" />
                     <ItemsControl Grid.Row="2"
                                   ItemsSource="{Binding ModEntries}"
+                                  ItemTemplate="{StaticResource CompactScoreModBadgeTemplate}"
                                   Focusable="False"
                                   IsTabStop="False"
                                   MinHeight="25"
@@ -438,49 +547,6 @@
                                 <WrapPanel Orientation="Horizontal" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Width="27"
-                                      Height="21"
-                                      Margin="0,0,3,2"
-                                      ToolTip="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}"
-                                      ToolTipService.InitialShowDelay="0"
-                                      ToolTipService.BetweenShowDelay="0"
-                                      ToolTipService.ShowDuration="60000"
-                                      ToolTipService.Placement="Top"
-                                      ToolTipService.VerticalOffset="-2"
-                                      AutomationProperties.Name="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}">
-                                    <Polygon Points="2,10.5 7,1 20,1 25,10.5 20,20 7,20"
-                                             Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
-                                    <Rectangle x:Name="ModIcon"
-                                               Width="16"
-                                               Height="16"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"
-                                               Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"
-                                               RenderOptions.BitmapScalingMode="HighQuality">
-                                        <Rectangle.OpacityMask>
-                                            <ImageBrush Stretch="Uniform"
-                                                        ImageSource="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}" />
-                                        </Rectangle.OpacityMask>
-                                    </Rectangle>
-                                    <TextBlock x:Name="ModFallback"
-                                               Text="{Binding Acronym}"
-                                               Visibility="Collapsed"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"
-                                               FontSize="8"
-                                               FontWeight="Bold"
-                                               Foreground="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}" />
-                                </Grid>
-                                <DataTemplate.Triggers>
-                                    <DataTrigger Binding="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}" Value="{x:Null}">
-                                        <Setter TargetName="ModIcon" Property="Visibility" Value="Collapsed" />
-                                        <Setter TargetName="ModFallback" Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </DataTemplate.Triggers>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Grid>
                     <Border Grid.Column="1"
@@ -552,6 +618,22 @@
                                        TextAlignment="Right"
                                        TextWrapping="Wrap"
                                        Margin="0,1,0,0" />
+                            <TextBlock Text="{Binding SharedByLine}"
+                                       FontSize="9.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource Brush.AccentPurple}"
+                                       TextAlignment="Right"
+                                       TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <Trigger Property="Text" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -617,6 +699,7 @@
                                          DashboardRequested="DashboardNavigation_Click"
                                          PerformanceRequested="PerformanceNavigation_Click"
                                          MapsRequested="MapsNavigation_Click"
+                                         ImportsRequested="ImportsNavigation_Click"
                                          ChangelogRequested="ChangelogNavigation_Click"
                                          DiscordRequested="DiscordNavigation_Click"
                                          SettingsRequested="SettingsNavigation_Click"
@@ -698,8 +781,8 @@
                             Height="32"
                             Margin="0,0,6,0"
                             Visibility="{Binding HasActiveSession, Converter={x:Static vm:BoolToVisibleConverter.Instance}}" />
-                    <Button x:Name="TopSettingsButton" Content="Import"
-                            Command="{Binding Inspector.ValidateOsrCommand}"
+                    <Button x:Name="TopSettingsButton" Content="Import .kumori"
+                            Click="ImportSharedPlay_Click"
                             Style="{StaticResource TopActionButton}"
                             Margin="0,0,6,0" Visibility="Collapsed" />
                     <Button x:Name="ActionsButton" Visibility="Collapsed" Click="ActionsButton_Click" Style="{StaticResource TopActionButton}" Margin="0,0,6,0">
@@ -874,6 +957,7 @@
                                 </RadioButton>
                                 <ToggleButton Content="Group sessions"
                                               IsChecked="{Binding IsGroupSessions}"
+                                              Visibility="{Binding ShowSessionGrouping, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"
                                               AutomationProperties.Name="Group plays into sessions"
                                               Style="{StaticResource FilterToggleButton}" />
                                 <ToggleButton x:Name="ModsFilterButton"
@@ -1035,7 +1119,8 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0"
+                        <TextBlock x:Name="HistoryHeaderTitle"
+                                   Grid.Column="0"
                                    Text="Play History"
                                    FontSize="14"
                                    FontWeight="SemiBold"
@@ -1302,41 +1387,16 @@
                                                     ClipToBounds="True"
                                                     HorizontalAlignment="Stretch"
                                                     VerticalAlignment="Top">
-                                                <ItemsControl ItemsSource="{Binding ModEntries}" VerticalAlignment="Center" Focusable="False" IsTabStop="False">
+                                                <ItemsControl ItemsSource="{Binding ModEntries}"
+                                                              ItemTemplate="{StaticResource CompactScoreModBadgeTemplate}"
+                                                              VerticalAlignment="Center"
+                                                              Focusable="False"
+                                                              IsTabStop="False">
                                                     <ItemsControl.ItemsPanel>
                                                         <ItemsPanelTemplate>
                                                             <StackPanel Orientation="Horizontal" />
                                                         </ItemsPanelTemplate>
                                                     </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Grid Width="27"
-                                                                  Height="21"
-                                                                  Margin="0,0,3,0"
-                                                                  VerticalAlignment="Center"
-                                                                  ToolTip="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}"
-                                                                  ToolTipService.InitialShowDelay="0"
-                                                                  ToolTipService.BetweenShowDelay="0"
-                                                                  ToolTipService.ShowDuration="60000"
-                                                                  ToolTipService.Placement="Top"
-                                                                  ToolTipService.VerticalOffset="-2"
-                                                                  AutomationProperties.Name="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}">
-                                                                <Polygon Points="2,10.5 7,1 20,1 25,10.5 20,20 7,20"
-                                                                         Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
-                                                                <Rectangle Width="16"
-                                                                           Height="16"
-                                                                           HorizontalAlignment="Center"
-                                                                           VerticalAlignment="Center"
-                                                                           Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"
-                                                                           RenderOptions.BitmapScalingMode="HighQuality">
-                                                                    <Rectangle.OpacityMask>
-                                                                        <ImageBrush Stretch="Uniform"
-                                                                                    ImageSource="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}" />
-                                                                    </Rectangle.OpacityMask>
-                                                                </Rectangle>
-                                                            </Grid>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
                                             </Border>
                                             <TextBlock Grid.Column="1"
@@ -1611,6 +1671,21 @@
                                                 <TextBlock Text="{Binding StarsNumberDisplay}" FontSize="11" Foreground="{DynamicResource Brush.TextPrimary}" FontWeight="SemiBold" VerticalAlignment="Center" />
                                             </StackPanel>
                                         </Border>
+                                        <Border Grid.Column="2"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Top"
+                                                Margin="12,8,10,0"
+                                                Padding="9,4"
+                                                Background="{DynamicResource Brush.OverlayBackground}"
+                                                BorderBrush="{DynamicResource Brush.AccentPink}"
+                                                BorderThickness="1"
+                                                CornerRadius="12"
+                                                Visibility="{Binding IsImportedPlay, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
+                                            <TextBlock Text="{Binding SharedByLine}"
+                                                       FontSize="10.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource Brush.TextPrimary}" />
+                                        </Border>
                                     </Grid>
 
                                     <!-- CS/AR/OD/HP/BPM pinned to the bottom-right of the banner frame -->
@@ -1667,35 +1742,19 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <ItemsControl Grid.Column="0" Visibility="Collapsed" ItemsSource="{Binding Details.Mods}" Margin="12,0,9,0" VerticalAlignment="Center" Focusable="False" IsTabStop="False">
+                                    <ItemsControl Grid.Column="0"
+                                                  Visibility="Collapsed"
+                                                  ItemsSource="{Binding Details.Mods}"
+                                                  ItemTemplate="{StaticResource CompactScoreModBadgeTemplate}"
+                                                  Margin="12,0,9,0"
+                                                  VerticalAlignment="Center"
+                                                  Focusable="False"
+                                                  IsTabStop="False">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <StackPanel Orientation="Horizontal" />
                                             </ItemsPanelTemplate>
                                         </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Grid Width="27"
-                                                      Height="21"
-                                                      Margin="0,0,4,0"
-                                                      VerticalAlignment="Center"
-                                                      ToolTip="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}">
-                                                    <Polygon Points="2,10.5 7,1 20,1 25,10.5 20,20 7,20"
-                                                             Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
-                                                    <Rectangle Width="16"
-                                                               Height="16"
-                                                               HorizontalAlignment="Center"
-                                                               VerticalAlignment="Center"
-                                                               Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"
-                                                               RenderOptions.BitmapScalingMode="HighQuality">
-                                                        <Rectangle.OpacityMask>
-                                                            <ImageBrush Stretch="Uniform"
-                                                                        ImageSource="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}" />
-                                                        </Rectangle.OpacityMask>
-                                                    </Rectangle>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
                                     </ItemsControl>
                                     <TextBlock Grid.Column="1" Text="{Binding OutcomeUpper}" FontSize="10" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,9,0">
                                         <TextBlock.Style>
@@ -1819,7 +1878,9 @@
                                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid Width="34" Height="36" Margin="0,0,4,0"
+                                                        <Grid Width="{Binding Converter={x:Static vm:ModEntryToScoreBadgeWidthConverter.Instance}, ConverterParameter=Details}"
+                                                              Height="36"
+                                                              Margin="0,0,4,0"
                                                               ToolTip="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}"
                                                               ToolTipService.InitialShowDelay="0"
                                                               ToolTipService.BetweenShowDelay="0"
@@ -1827,22 +1888,22 @@
                                                               ToolTipService.Placement="Top"
                                                               ToolTipService.VerticalOffset="-2"
                                                               AutomationProperties.Name="{Binding Converter={x:Static vm:ModEntryToToolTipConverter.Instance}}">
-                                                            <Polygon Points="2,10.5 7,1 20,1 25,10.5 20,20 7,20" Width="27" Height="21" HorizontalAlignment="Center" VerticalAlignment="Top"
-                                                                     Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}" />
-                                                            <Rectangle Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"
-                                                                       Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"
-                                                                       RenderOptions.BitmapScalingMode="HighQuality">
-                                                                <Rectangle.OpacityMask>
-                                                                    <ImageBrush Stretch="Uniform" ImageSource="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}" />
-                                                                </Rectangle.OpacityMask>
-                                                            </Rectangle>
-                                                            <TextBlock Text="{Binding Acronym}"
+                                                            <ContentControl Content="{Binding}"
+                                                                            ContentTemplate="{StaticResource CompactScoreModBadgeTemplate}"
+                                                                            VerticalAlignment="Top" />
+                                                            <TextBlock x:Name="SelectedModCaption"
+                                                                       Text="{Binding Acronym}"
                                                                        VerticalAlignment="Bottom"
                                                                        HorizontalAlignment="Center"
                                                                        FontSize="10"
                                                                        FontWeight="SemiBold"
                                                                        Foreground="{DynamicResource Brush.TextSecondary}" />
                                                         </Grid>
+                                                        <DataTemplate.Triggers>
+                                                            <DataTrigger Binding="{Binding Acronym}" Value="BPM">
+                                                                <Setter TargetName="SelectedModCaption" Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </DataTemplate.Triggers>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>

@@ -51,6 +51,12 @@ public sealed record AttemptDetails
     public MovementSummary? Movement { get; init; }
     public string? LocalBeatmapPath { get; init; }
     public string? LocalMediaDirectory { get; init; }
+    public IReadOnlyDictionary<string, string> LocalMediaPaths { get; init; }
+        = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public string? LocalBackgroundPath { get; init; }
+    public string? SharedByPlayerName { get; init; }
+    public string? ImportedAt { get; init; }
+    public bool IsImported => !string.IsNullOrWhiteSpace(SharedByPlayerName);
     public string ClientKind { get; init; } = "unknown";
     public bool ResultRecoveredFromReplay { get; init; }
     public string? ResultRecoverySource { get; init; }

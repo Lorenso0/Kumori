@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using Kumori.Gameplay;
 using osu.Game.Beatmaps;
 using osu.Game.Replays;
 using osu.Game.Rulesets;
@@ -24,7 +25,7 @@ internal static class OsrComparisonImporter
 
     private static readonly HashSet<string> replayAlignmentMods = new(StringComparer.OrdinalIgnoreCase)
     {
-        "DT", "NC", "HT", "DC", "WU", "WD", "AS",
+        "DT", "NC", "HT", "DC", "WU", "WD", "AS", "BPM",
         "EZ", "HR", "DA", "MR", "RD", "TP",
         "DP", "MG", "RP", "TR", "WG",
     };
@@ -50,7 +51,7 @@ internal static class OsrComparisonImporter
             throw new InvalidDataException("That replay belongs to a different map or difficulty.");
         }
 
-        validateMods(primary, decoded.ScoreInfo.Mods);
+        validateMods(primary, decoded.ScoreInfo.Mods, beatmapPath);
 
         OsuReplayFrame[] frames = decoded.Replay.Frames
             .OfType<OsuReplayFrame>()
@@ -93,9 +94,14 @@ internal static class OsrComparisonImporter
         };
     }
 
-    private static void validateMods(AttemptContract primary, IReadOnlyList<Mod> imported)
+    private static void validateMods(
+        AttemptContract primary,
+        IReadOnlyList<Mod> imported,
+        string beatmapPath)
     {
-        Mod[] primaryResolved = LazerReplayAdapter.CreateCapturedMods(primary);
+        Mod[] primaryResolved = LazerReplayAdapter.CreateCapturedMods(
+            primary,
+            BpmAdjustBeatmap.Decode(beatmapPath));
         HashSet<string> primaryMods = primaryResolved
             .Select(mod => mod.Acronym)
             .Where(replayAlignmentMods.Contains)

@@ -40,7 +40,9 @@ public partial class AttemptDetailsViewModel
             return;
         }
 
-        var path = BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
+        var path = !string.IsNullOrWhiteSpace(details.LocalBeatmapPath) && File.Exists(details.LocalBeatmapPath)
+            ? details.LocalBeatmapPath
+            : BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
@@ -83,7 +85,9 @@ public partial class AttemptDetailsViewModel
             }
             return;
         }
-        var path = BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
+        var path = !string.IsNullOrWhiteSpace(details.LocalBeatmapPath) && File.Exists(details.LocalBeatmapPath)
+            ? details.LocalBeatmapPath
+            : BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
         if (string.IsNullOrWhiteSpace(path))
         {
             return;
@@ -163,11 +167,21 @@ public partial class AttemptDetailsViewModel
             var mediaDirectory = stableBeatmap is not null && Directory.Exists(details.LocalMediaDirectory)
                 ? details.LocalMediaDirectory
                 : BeatmapArtworkResolver.ResolveMediaDirectory(details.Summary);
-            var contract = await Task.Run(() => _replayViewer.WriteContract(
-                details.Summary.Id,
-                beatmapPath,
-                mediaDirectory,
-                lazer?.Files));
+            var mediaPaths = details.LocalMediaPaths.Count > 0
+                ? details.LocalMediaPaths
+                : lazer?.Files;
+            var contract = await Task.Run(() => details.IsImported
+                ? _replayViewer.WriteExternalContract(
+                    details,
+                    _movementLoader(details.Summary.Id),
+                    beatmapPath,
+                    mediaDirectory,
+                    mediaPaths)
+                : _replayViewer.WriteContract(
+                    details.Summary.Id,
+                    beatmapPath,
+                    mediaDirectory,
+                    mediaPaths));
             try
             {
                 await _replayViewer.PrepareAnalysisAsync(contract);
@@ -210,13 +224,15 @@ public partial class AttemptDetailsViewModel
 
         try
         {
-            var beatmapPath = BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
+            var beatmapPath = !string.IsNullOrWhiteSpace(details.LocalBeatmapPath) && File.Exists(details.LocalBeatmapPath)
+                ? details.LocalBeatmapPath
+                : BeatmapArtworkResolver.ResolveBeatmapFile(details.Summary);
             if (string.IsNullOrWhiteSpace(beatmapPath))
             {
                 LoadError = "Replay validation needs the cached .osu beatmap file for this play.";
                 return;
             }
-            var capturedSamples = _replayViewer?.GetMovementSamples(details.Summary.Id) ?? Array.Empty<MovementSample>();
+            var capturedSamples = _movementLoader(details.Summary.Id);
             var result = await Task.Run(() => OsrValidationService.Validate(picker.FileName, details, beatmapPath, capturedSamples));
             MainWindow.TryOpenWorkspace(new OsrValidationWindow(result), "Replay validation");
         }
@@ -269,7 +285,7 @@ public partial class AttemptDetailsViewModel
             var loaded = await Task.Run(() =>
             {
                 cts.Token.ThrowIfCancellationRequested();
-                var result = _repository.GetDetails(attemptId.Value);
+                var result = _detailsLoader(attemptId.Value);
                 cts.Token.ThrowIfCancellationRequested();
                 return result;
             }, cts.Token);

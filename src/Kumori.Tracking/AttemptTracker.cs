@@ -17,6 +17,7 @@ public sealed record AttemptStart
     public double WallTime { get; init; }
     public long LiveTimeMs { get; init; }
     public int Ordinal { get; init; }
+    public string? PlayerName { get; init; }
     public string? Artist { get; init; }
     public string? Title { get; init; }
     public string? Mapper { get; init; }
@@ -58,6 +59,7 @@ public sealed record AttemptSnapshot
     public double MonoTime { get; init; }
     public double WallTime { get; init; }
     public long LiveTimeMs { get; init; }
+    public string? PlayerName { get; init; }
     public double DurationSeconds { get; init; }
     public int Score { get; init; }
     public double Accuracy { get; init; }
@@ -151,6 +153,7 @@ public sealed class AttemptTracker
         public long? BeatmapId { get; init; }
         public long? BeatmapSetId { get; init; }
         public string? Checksum { get; init; }
+        public string? PlayerName { get; init; }
         public BeatmapStats BeatmapStats { get; init; } = new();
         public string ModsKey { get; init; } = "NM";
         public IReadOnlyList<AttemptMod> Mods { get; init; } = Array.Empty<AttemptMod>();
@@ -349,6 +352,7 @@ public sealed class AttemptTracker
             WallTime = frame.WallTime,
             LiveTimeMs = frame.Packet.LiveTimeMs,
             Ordinal = _attemptOrdinal,
+            PlayerName = frame.PlayerName,
             Artist = frame.Artist,
             Title = frame.Title,
             Mapper = frame.Mapper,
@@ -483,6 +487,7 @@ public sealed class AttemptTracker
             MonoTime = frame.Packet.MonoTime,
             WallTime = frame.WallTime,
             LiveTimeMs = frame.Packet.LiveTimeMs,
+            PlayerName = frame.PlayerName,
             DurationSeconds = duration,
             Score = frame.Score,
             Accuracy = TrustedAccuracy(frame),
@@ -568,6 +573,17 @@ public sealed class AttemptTracker
             !mod.Acronym.Equals("CL", StringComparison.OrdinalIgnoreCase));
         var rememberedHasGameplayMod = _attemptMods.Any(mod =>
             !mod.Acronym.Equals("CL", StringComparison.OrdinalIgnoreCase));
+
+        // lazer ScoreInfo.ModsJson preserves custom mods, while tosu's
+        // positional menu mapping does not. Once BPM has been observed during
+        // this attempt, a later FR/empty transition packet cannot represent a
+        // real mod change and must not replace the authoritative settings.
+        if (frame.ClientKind == OsuClientKind.Lazer
+            && _attemptMods.Any(mod => mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase))
+            && !frame.Mods.Any(mod => mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
 
         // osu!stable resets play.mods on the result transition. Once a real
         // gameplay mod has been observed, never downgrade that attempt to CL-only.

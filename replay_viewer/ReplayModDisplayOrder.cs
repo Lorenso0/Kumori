@@ -10,7 +10,7 @@ internal static class ReplayModDisplayOrder
 {
     private static readonly string[] knownAcronyms =
     [
-        "SV2", "10K",
+        "SV2", "10K", "BPM",
         "NM", "AC", "AS", "AL", "AD", "AP", "AT", "BR", "BL", "BM", "BU", "CN", "CL", "CS", "CO",
         "DC", "DF", "DP", "DA", "DT", "DS", "EZ", "8K", "FI", "5K", "FL", "FF", "4K", "FR",
         "GR", "HT", "HR", "HD", "HO", "IN", "MG", "MR", "MF", "MU", "NC", "9K", "NF", "NR",
@@ -38,7 +38,7 @@ internal static class ReplayModDisplayOrder
         new(StringComparer.OrdinalIgnoreCase)
         {
             "AD", "AS", "BM", "BR", "BU", "DF", "DP", "FF", "FR", "GR", "MF", "MG",
-            "MU", "NS", "RP", "SI", "SY", "TR", "WD", "WG", "WU",
+            "MU", "NS", "RP", "SI", "SY", "TR", "WD", "WG", "WU", "BPM",
         };
 
     private static readonly HashSet<string> system =

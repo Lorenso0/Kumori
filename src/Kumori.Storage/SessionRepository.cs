@@ -14,6 +14,46 @@ public sealed class SessionRepository
     public List<SessionSummary> GetRecentSessions(int limit = 50)
         => GetSessionsCore(limit, sessionIds: null);
 
+    public string? GetPlayerNameForAttempt(long attemptId)
+    {
+        if (!_factory.DatabaseExists)
+            return null;
+        using var con = _factory.Open();
+        bool hasAttemptPlayer = HasColumn(con, "attempts", "player_name");
+        bool hasSessionPlayer = HasColumn(con, "sessions", "player_name");
+        if (!hasAttemptPlayer && !hasSessionPlayer)
+            return null;
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT {(hasAttemptPlayer && hasSessionPlayer
+                ? "COALESCE(NULLIF(a.player_name, ''), s.player_name)"
+                : hasAttemptPlayer ? "a.player_name" : "s.player_name")}
+            FROM attempts a
+            JOIN sessions s ON s.id = a.session_id
+            WHERE a.id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", attemptId);
+        return cmd.ExecuteScalar() as string;
+    }
+
+    public void SetPlayerNameForAttempt(long attemptId, string playerName)
+    {
+        if (!_factory.DatabaseExists || string.IsNullOrWhiteSpace(playerName))
+            return;
+        using var con = _factory.Open();
+        if (!HasColumn(con, "attempts", "player_name"))
+            return;
+        using var cmd = con.CreateCommand();
+        cmd.CommandText = """
+            UPDATE attempts
+            SET player_name = @player
+            WHERE id = @attempt_id
+            """;
+        cmd.Parameters.AddWithValue("@player", playerName.Trim());
+        cmd.Parameters.AddWithValue("@attempt_id", attemptId);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>
     /// Loads only the sessions represented by the visible attempt page. This
     /// avoids aggregating the complete session history whenever the dashboard

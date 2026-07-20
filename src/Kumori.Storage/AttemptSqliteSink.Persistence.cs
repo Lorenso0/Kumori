@@ -21,9 +21,9 @@ public sealed partial class AttemptSqliteSink
             insert.CommandText = """
             INSERT INTO attempts(id, session_id, beatmap_id, started_at, started_at_utc_ms, outcome,
                                            progress, duration_seconds, mods_key,
-                                           key1_binding, key2_binding, base_stars, adjusted_stars)
+                                           key1_binding, key2_binding, base_stars, adjusted_stars, player_name)
             VALUES(@id, @session_id, @beatmap_id, @started_at, @started_at_utc_ms, 'active',
-                   0, 0, @mods_key, 'Z', 'X', @base_stars, @adjusted_stars)
+                   0, 0, @mods_key, 'Z', 'X', @base_stars, @adjusted_stars, @player_name)
             """;
             insert.Parameters.AddWithValue("@id", attemptId);
             insert.Parameters.AddWithValue("@session_id", sessionId);
@@ -33,6 +33,7 @@ public sealed partial class AttemptSqliteSink
             insert.Parameters.AddWithValue("@mods_key", start.ModsKey);
             insert.Parameters.AddWithValue("@base_stars", (object?)start.BeatmapStats.BaseStars ?? DBNull.Value);
             insert.Parameters.AddWithValue("@adjusted_stars", (object?)start.BeatmapStats.Stars ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@player_name", (object?)start.PlayerName ?? DBNull.Value);
             insert.ExecuteNonQuery();
         }
 
@@ -128,6 +129,7 @@ public sealed partial class AttemptSqliteSink
                 unstable_rate = CASE WHEN @preserve_existing_result = 1 THEN unstable_rate ELSE @unstable_rate END,
                 base_stars = COALESCE(@base_stars, base_stars),
                 adjusted_stars = COALESCE(@adjusted_stars, adjusted_stars),
+                player_name = COALESCE(NULLIF(@player_name, ''), player_name),
                 raw_json = @raw_json
             WHERE id = @id
             """;
@@ -157,6 +159,7 @@ public sealed partial class AttemptSqliteSink
         cmd.Parameters.AddWithValue("@unstable_rate", snapshot.UnstableRate);
         cmd.Parameters.AddWithValue("@base_stars", (object?)snapshot.BeatmapStats.BaseStars ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@adjusted_stars", (object?)snapshot.BeatmapStats.Stars ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@player_name", (object?)snapshot.PlayerName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@raw_json", "{}");
         cmd.Parameters.AddWithValue("@id", attemptId);
         cmd.ExecuteNonQuery();

@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\src\Kumori.Core\Kumori.Core.csproj" />
+    <ProjectReference Include="..\src\Kumori.Gameplay\Kumori.Gameplay.csproj" />
     <ProjectReference Include="..\tools\Kumori.AutoMapperCompatPatcher\Kumori.AutoMapperCompatPatcher.csproj"
                       ReferenceOutputAssembly="false"
                       GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PlatformTarget"

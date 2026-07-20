@@ -29,9 +29,6 @@ public sealed partial class TosuClient
         };
     }
 
-    private static bool HasExplicitMods(JsonElement play)
-        => play.ValueKind == JsonValueKind.Object && play.TryGetProperty("mods", out _);
-
     internal static OsuClientKind ParseClientKind(JsonElement root)
     {
         var client = GetString(root, "client");
@@ -275,6 +272,7 @@ public sealed partial class TosuClient
     }
 
     private readonly record struct PerformanceValues(double? Current, double? Fc, double? Max);
+    private readonly record struct ParsedModPayload(IReadOnlyList<AttemptMod> Mods, bool IsExplicit);
 
     private static bool TryGetObject(JsonElement root, string name, out JsonElement obj)
     {
@@ -341,6 +339,121 @@ public sealed partial class TosuClient
         }
 
         return ParseModArray(mods);
+    }
+
+    /// <summary>
+    /// Reads lazer mods from the completed ScoreInfo containers before falling
+    /// back to the live play object. Unlike tosu's positional menu mod mapping,
+    /// these objects originate from ScoreInfo.ModsJson and retain custom mods
+    /// and their serialized settings.
+    /// </summary>
+    private static ParsedModPayload ParseModsPayload(JsonElement root, JsonElement play, bool isResults)
+    {
+        var explicitPayloadSeen = false;
+
+        if (isResults)
+        {
+            foreach (JsonElement candidate in ResultModSources(root))
+            {
+                if (!candidate.TryGetProperty("mods", out _))
+                    continue;
+
+                explicitPayloadSeen = true;
+                IReadOnlyList<AttemptMod> parsed = ParseMods(candidate);
+                if (parsed.Count > 0)
+                    return new ParsedModPayload(parsed, true);
+            }
+        }
+
+        if (play.ValueKind == JsonValueKind.Object && play.TryGetProperty("mods", out _))
+        {
+            explicitPayloadSeen = true;
+            IReadOnlyList<AttemptMod> parsed = ParseMods(play);
+            if (parsed.Count > 0)
+                return new ParsedModPayload(parsed, true);
+        }
+
+        return new ParsedModPayload([], explicitPayloadSeen);
+    }
+
+    private static IEnumerable<JsonElement> ResultModSources(JsonElement root)
+    {
+        foreach (string containerName in new[] { "resultsScreen", "result" })
+        {
+            if (!TryGetObject(root, containerName, out JsonElement container))
+                continue;
+
+            if (TryGetObject(container, "score", out JsonElement nestedScore))
+                yield return nestedScore;
+
+            yield return container;
+        }
+
+        if (TryGetObject(root, "score", out JsonElement score))
+            yield return score;
+    }
+
+    private static IReadOnlyList<AttemptMod> PreserveLazerBpmMods(
+        IReadOnlyList<AttemptMod> parsedMods,
+        IReadOnlyList<AttemptMod> previousMods,
+        OsuClientKind clientKind,
+        bool continuousAttemptTelemetry)
+    {
+        if (clientKind != OsuClientKind.Lazer || !continuousAttemptTelemetry)
+            return parsedMods;
+
+        AttemptMod? previousBpm = previousMods.FirstOrDefault(IsBpmAdjust);
+        if (previousBpm is null)
+            return parsedMods;
+
+        int incomingBpmIndex = -1;
+        for (int i = 0; i < parsedMods.Count; i++)
+        {
+            if (IsBpmAdjust(parsedMods[i]))
+            {
+                incomingBpmIndex = i;
+                break;
+            }
+        }
+
+        // Mods cannot change during an active play. If a transition packet
+        // substitutes tosu's hardcoded menu interpretation (FR/empty on custom
+        // builds), retain the ScoreInfo-derived set captured during gameplay.
+        if (incomingBpmIndex < 0)
+            return previousMods;
+
+        // Some transition payloads retain the acronym but omit default or
+        // lazily-populated settings. Keep the richer gameplay settings so the
+        // target BPM and stat-scaling choice survive finalization.
+        if (HasSettings(parsedMods[incomingBpmIndex].SettingsJson)
+            || !HasSettings(previousBpm.SettingsJson))
+        {
+            return parsedMods;
+        }
+
+        var merged = parsedMods.ToArray();
+        merged[incomingBpmIndex] = previousBpm;
+        return merged;
+    }
+
+    private static bool IsBpmAdjust(AttemptMod mod)
+        => mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasSettings(string? settingsJson)
+    {
+        if (string.IsNullOrWhiteSpace(settingsJson))
+            return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(settingsJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.EnumerateObject().Any();
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static IReadOnlyList<AttemptMod> ParseModArray(JsonElement mods)

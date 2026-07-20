@@ -27,6 +27,7 @@ internal static class TrackingFrameMapper
         BeatmapId = snapshot.BeatmapId,
         BeatmapSetId = snapshot.BeatmapSetId,
         Checksum = snapshot.Checksum,
+        PlayerName = snapshot.PlayerName,
         BeatmapStats = snapshot.BeatmapStats,
         ModsKey = snapshot.ModsKey,
         Mods = snapshot.Mods,

@@ -640,7 +640,7 @@ internal static class ReplayScoreFactory
         if (LazerReplayAdapter.DecodedScore is Score decoded)
         {
             Mod[] decodedPlaybackMods = filterMods(
-                LazerReplayAdapter.ResolveMods(contract.Attempt, decoded.ScoreInfo.Mods),
+                LazerReplayAdapter.ResolveMods(contract.Attempt, decoded.ScoreInfo.Mods, workingBeatmap.Beatmap),
                 disableHidden);
             return new Score
             {
@@ -652,7 +652,9 @@ internal static class ReplayScoreFactory
         (double firstHitTime, double lastHitTime) = workingBeatmap.Beatmap.CalculatePlayableBounds();
         LazerReplayAdapter.FitCapturedReplay(replay, firstHitTime, lastHitTime, contract.Attempt.ClockRate);
 
-        Mod[] mods = filterMods(LazerReplayAdapter.ResolveMods(contract.Attempt), disableHidden);
+        Mod[] mods = filterMods(
+            LazerReplayAdapter.ResolveMods(contract.Attempt, beatmap: workingBeatmap.Beatmap),
+            disableHidden);
         return new Score
         {
             Replay = replay,
@@ -660,7 +662,12 @@ internal static class ReplayScoreFactory
             {
                 Ruleset = ruleset.RulesetInfo,
                 BeatmapInfo = workingBeatmap.BeatmapInfo,
-                User = new APIUser { Username = "Kumori capture" },
+                User = new APIUser
+                {
+                    Username = string.IsNullOrWhiteSpace(contract.Attempt.PlayerName)
+                        ? "Kumori capture"
+                        : contract.Attempt.PlayerName,
+                },
                 Date = DateTimeOffset.Now,
                 Mods = mods,
             },

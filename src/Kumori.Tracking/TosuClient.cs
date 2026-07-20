@@ -265,13 +265,19 @@ public sealed partial class TosuClient
 
         var beatmapIdentity = BeatmapIdentity(checksum, beatmapId, artist, title, difficulty, mapper);
         TosuSnapshot? previousSnapshot = LastSnapshot;
+        var sameBeatmap = previousSnapshot != null
+            && previousSnapshot.ClientKind == clientKind
+            && string.Equals(previousSnapshot.BeatmapIdentity, beatmapIdentity, StringComparison.Ordinal);
+        var nonRewindingClock = liveTimeMs is not { } currentLiveTime
+            || previousSnapshot?.LiveTimeMs is not { } priorLiveTime
+            || currentLiveTime >= priorLiveTime;
         var continuousGameplay = isPlaying
             && previousSnapshot?.IsPlaying == true
-            && previousSnapshot.ClientKind == clientKind
-            && string.Equals(previousSnapshot.BeatmapIdentity, beatmapIdentity, StringComparison.Ordinal)
-            && (liveTimeMs is not { } currentLiveTime
-                || previousSnapshot.LiveTimeMs is not { } priorLiveTime
-                || currentLiveTime >= priorLiveTime);
+            && sameBeatmap
+            && nonRewindingClock;
+        var continuousAttemptTelemetry = sameBeatmap
+            && (previousSnapshot!.IsPlaying && (isResults || isPlaying && nonRewindingClock)
+                || previousSnapshot.IsResults && isResults);
         var stats = continuousGameplay && previousSnapshot!.BeatmapStats.RawJson != "{}"
             ? previousSnapshot.BeatmapStats
             : beatmap.ValueKind == JsonValueKind.Object
@@ -321,9 +327,11 @@ public sealed partial class TosuClient
         {
             progress = 1;
         }
-        var parsedMods = ParseMods(play);
-        if (parsedMods.Count == 0 && !HasExplicitMods(play) && fallbackMods.Count > 0)
+        ParsedModPayload modPayload = ParseModsPayload(root, play, isResults);
+        var parsedMods = modPayload.Mods;
+        if (parsedMods.Count == 0 && !modPayload.IsExplicit && fallbackMods.Count > 0)
             parsedMods = fallbackMods;
+        parsedMods = PreserveLazerBpmMods(parsedMods, fallbackMods, clientKind, continuousAttemptTelemetry);
         var mods = NormalizeMods(parsedMods, clientKind);
         var modsKey = mods.Count == 0 ? "NM" : string.Concat(mods.Select(mod => mod.Acronym));
         var hitErrors = ParseHitErrors(play, beatmapIdentity, liveTimeMs, isPlaying, isResults);

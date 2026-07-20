@@ -1,3 +1,4 @@
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Kumori.Core;
 using Kumori.Core.Models;
@@ -44,6 +45,9 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
             : $"{Model.Combo}x"
         : "";
     public string PerformanceLine => string.Join("  ·  ", new[] { ComboText, PpText }.Where(value => !string.IsNullOrWhiteSpace(value)));
+    public string SharedByLine => string.IsNullOrWhiteSpace(Model.SharedByPlayerName)
+        ? ""
+        : $"Shared by {Model.SharedByPlayerName}";
     public string ModsText => ModDisplayText.FromKey(Model.ModsKey);
     public IReadOnlyList<string> ModAcronyms => ModDisplayOrder.Sort(ModDisplayText.AcronymsFromKey(Model.ModsKey));
     public IReadOnlyList<ModEntry> ModEntries => ModDisplayOrder.Sort(Model.Mods.Count > 0
@@ -61,11 +65,14 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
             return stars is { } s ? Invariant($"{s:0.00}★") : "—★";
         }
     }
-    public string WhenShort => LocalTimeDisplay.Time(Model.StartedAt);
-    public string WhenLong => LocalTimeDisplay.TimeWithSeconds(Model.StartedAt, WhenShort);
-    public string WhenText => LocalTimeDisplay.DateTime(Model.StartedAt, DisplayDateTime.UnknownDate);
-    public string WhenRelative => LocalTimeDisplay.Relative(Model.StartedAt, fallback: WhenText);
-    public string WhenExact => LocalTimeDisplay.DateTimeWithSeconds(Model.StartedAt, DisplayDateTime.UnknownDate);
+    private string RowTimestamp => Model.IsImported && !string.IsNullOrWhiteSpace(Model.ImportedAt)
+        ? Model.ImportedAt
+        : Model.StartedAt;
+    public string WhenShort => LocalTimeDisplay.Time(RowTimestamp);
+    public string WhenLong => LocalTimeDisplay.TimeWithSeconds(RowTimestamp, WhenShort);
+    public string WhenText => LocalTimeDisplay.DateTime(RowTimestamp, DisplayDateTime.UnknownDate);
+    public string WhenRelative => LocalTimeDisplay.Relative(RowTimestamp, fallback: WhenText);
+    public string WhenExact => LocalTimeDisplay.DateTimeWithSeconds(RowTimestamp, DisplayDateTime.UnknownDate);
     public string ImprovementLine => Model.IsPersonalBest ? "NEW BEST" : "";
     public string RowStatusLine
     {
@@ -88,7 +95,9 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
             return $"{outcome}{progress}{misses}".Trim();
         }
     }
-    public bool CanOpenReplayInspector => Model.HasMovement && BeatmapArtworkResolver.ResolveBeatmapFile(Model) is not null;
+    public bool CanOpenReplayInspector => Model.HasMovement
+        && ((!string.IsNullOrWhiteSpace(Model.LocalBeatmapPath) && File.Exists(Model.LocalBeatmapPath))
+            || BeatmapArtworkResolver.ResolveBeatmapFile(Model) is not null);
     public string QualityBadges
     {
         get
@@ -98,7 +107,8 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
             {
                 badges.Add("movement");
             }
-            if (BeatmapArtworkResolver.ResolveBeatmapFile(Model) is not null)
+            if ((!string.IsNullOrWhiteSpace(Model.LocalBeatmapPath) && File.Exists(Model.LocalBeatmapPath))
+                || BeatmapArtworkResolver.ResolveBeatmapFile(Model) is not null)
             {
                 badges.Add("media");
             }
@@ -109,7 +119,9 @@ public partial class AttemptRowViewModel : HistoryRowViewModel
             return badges.Count == 0 ? "" : string.Join("  ", badges);
         }
     }
-    public string? ArtworkSource => BeatmapArtworkResolver.Resolve(Model);
+    public string? ArtworkSource => !string.IsNullOrWhiteSpace(Model.LocalBackgroundPath) && File.Exists(Model.LocalBackgroundPath)
+        ? Model.LocalBackgroundPath
+        : BeatmapArtworkResolver.Resolve(Model);
     public string ArtworkBrush => (Id % 6) switch
     {
         0 => "#5B193F",

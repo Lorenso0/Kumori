@@ -112,6 +112,54 @@ public sealed class AttemptDetailsViewModelTests
     }
 
     [Fact]
+    public void Bpm_adjust_tooltip_displays_decimal_targetAndAudioMode()
+    {
+        var tooltip = Assert.IsType<string>(ModEntryToToolTipConverter.Instance.Convert(
+            new ModEntry(
+                "BPM",
+                """{"target_bpm":174.5,"audio_mode":2,"scale_map_stats_with_bpm":false,"target_initialised":true}"""),
+            typeof(string),
+            null,
+            System.Globalization.CultureInfo.InvariantCulture));
+
+        Assert.Contains("BPM Adjust (BPM)", tooltip);
+        Assert.Contains("Target BPM: 174.5 BPM", tooltip);
+        Assert.Contains("Audio mode: Nightcore", tooltip);
+        Assert.Contains("Scale map stats: Off", tooltip);
+        Assert.DoesNotContain("Target initialised", tooltip);
+
+        var viewModel = new AttemptDetailsViewModel(null!)
+        {
+            Details = new AttemptDetails
+            {
+                Mods = [new ModEntry("BPM", """{"target_bpm":174.5}""")],
+            },
+        };
+        Assert.Equal("BPM 174.5 BPM", viewModel.ModsLine);
+    }
+
+    [Fact]
+    public void Bpm_adjust_score_badge_uses_acronym_logo_and_serialized_target()
+    {
+        var wholeTarget = new ModEntry("BPM", """{"target_bpm":200}""");
+        var decimalTarget = new ModEntry("bpm", """{"target_bpm":"174.5"}""");
+        var missingTarget = new ModEntry("BPM", "{}");
+
+        Assert.Null(ModBadgeInfo.IconFileName("BPM"));
+        Assert.Equal("mod-double-time.png", ModBadgeInfo.IconFileName("DT"));
+        Assert.Equal("200", ModEntryToBpmTargetConverter.TargetText(wholeTarget));
+        Assert.Equal("174.5", ModEntryToBpmTargetConverter.TargetText(decimalTarget));
+        Assert.Equal("", ModEntryToBpmTargetConverter.TargetText(missingTarget));
+
+        Assert.Equal(62d, ModEntryToScoreBadgeWidthConverter.Instance.Convert(
+            wholeTarget, typeof(double), null, System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(72d, ModEntryToScoreBadgeWidthConverter.Instance.Convert(
+            decimalTarget, typeof(double), null, System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(34d, ModEntryToScoreBadgeWidthConverter.Instance.Convert(
+            missingTarget, typeof(double), null, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public void Mod_display_order_matches_osu_web_without_mutating_storage_order()
     {
         ModEntry[] captured =

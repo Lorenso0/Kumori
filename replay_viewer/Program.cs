@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
+using Kumori.Gameplay;
 using osu.Framework;
 using osu.Framework.Platform;
 using osu.Game.Rulesets.Osu.Replays;
@@ -63,10 +64,12 @@ public static class Program
                 replay_last_ms = replay.Frames.Count > 0 ? replay.Frames[^1].Time : (double?)null,
                 replay_action_frames = replay.Frames.OfType<OsuReplayFrame>().Count(f => f.Actions.Count > 0),
             }));
+            var decodedBeatmap = BpmAdjustBeatmap.Decode(contract.BeatmapPath);
             var mods = LazerReplayAdapter.ResolveMods(
                 contract.Attempt,
-                LazerReplayAdapter.DecodedScore?.ScoreInfo.Mods);
-            BeatmapAnalysis analysis = LazerBeatmapAnalyzer.Decode(contract.BeatmapPath, mods);
+                LazerReplayAdapter.DecodedScore?.ScoreInfo.Mods,
+                decodedBeatmap);
+            BeatmapAnalysis analysis = LazerBeatmapAnalyzer.Decode(decodedBeatmap, mods);
             NativeViewerLog.Write($"Decoded beatmap \"{analysis.Artist} - {analysis.Title} [{analysis.Difficulty}]\" objects={analysis.Objects.Count}");
 
             if (options.PrepareAnalysis)

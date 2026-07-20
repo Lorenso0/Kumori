@@ -11,6 +11,21 @@ namespace Kumori.App.Tests;
 
 public sealed class NativeProcessSafetyTests
 {
+    [Theory]
+    [InlineData("Kumori", "Kumori", true)]
+    [InlineData("KUMORI", null, true)]
+    [InlineData("osu!(lazer)", "osu!(lazer)", false)]
+    [InlineData(null, null, false)]
+    public void CustomLazerReplaySafeguardIsScopedToKumoriProduct(
+        string? productName,
+        string? fileDescription,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            LazerMemoryReplayFrameSource.IsKumoriCustomProduct(productName, fileDescription));
+    }
+
     [Fact]
     public void ReadProcessMemoryUsesPointerSizedSizeTParametersAndSafeHandle()
     {

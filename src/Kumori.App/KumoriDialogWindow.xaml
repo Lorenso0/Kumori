@@ -80,6 +80,9 @@
                              Margin="0,14,0,0"
                              MinWidth="300"
                              Visibility="Collapsed" />
+                    <CheckBox x:Name="ToggleCheckBox"
+                              Margin="0,16,0,0"
+                              Visibility="Collapsed" />
                 </StackPanel>
             </Grid>
 

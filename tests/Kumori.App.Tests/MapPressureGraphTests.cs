@@ -30,6 +30,30 @@ public sealed class MapPressureGraphTests
     }
 
     [Fact]
+    public void BuildDifficultyCurveUsesBeatmapDerivedBpmAdjustRate()
+    {
+        string beatmapPath = Path.Combine(
+            FindRepositoryRoot(),
+            "tests",
+            "Kumori.App.Tests",
+            "Fixtures",
+            "difficulty-curve.osu");
+        int firstObjectTime = ReadFirstHitObjectTime(beatmapPath);
+        var mods = new[]
+        {
+            new ModEntry(
+                "BPM",
+                """{"target_bpm":180,"audio_mode":0,"scale_map_stats_with_bpm":false}"""),
+        };
+
+        IReadOnlyList<PressurePoint> curve = MapPressureGraph.BuildDifficultyCurve(beatmapPath, mods);
+
+        Assert.True(curve.Count > 2);
+        Assert.Equal(firstObjectTime, curve[0].TimeMs);
+        Assert.Equal(600, curve[1].TimeMs - curve[0].TimeMs);
+    }
+
+    [Fact]
     public void SelectGraphEventsDropsAbandonedRetryPrefixBeyondFinalMissCount()
     {
         var details = new AttemptDetails

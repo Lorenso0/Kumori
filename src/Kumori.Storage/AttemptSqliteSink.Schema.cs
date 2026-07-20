@@ -97,6 +97,7 @@ public sealed partial class AttemptSqliteSink
                 x_count INTEGER NOT NULL DEFAULT 0,
                 key1_binding TEXT NOT NULL DEFAULT 'Z',
                 key2_binding TEXT NOT NULL DEFAULT 'X',
+                player_name TEXT,
                 mods_key TEXT NOT NULL DEFAULT 'NM',
                 raw_json TEXT
             );
@@ -204,6 +205,7 @@ public sealed partial class AttemptSqliteSink
         EnsureColumn(con, tx, "attempts", "small_tick_misses", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(con, tx, "attempts", "slider_tail_hits", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(con, tx, "attempts", "slider_tail_misses", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(con, tx, "attempts", "player_name", "TEXT");
         EnsureColumn(con, tx, "attempts", "base_stars", "REAL");
         EnsureColumn(con, tx, "attempts", "adjusted_stars", "REAL");
         BackfillAttemptStars(con, tx);
