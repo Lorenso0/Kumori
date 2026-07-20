@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.4.11",
+    "date": "2026-07-20",
+    "fixes": [
+      "Kept attempt and session database entries durable across rapid retries and switches between osu! client builds"
+    ]
+  },
+  {
     "version": "0.4.10",
     "date": "2026-07-20",
     "fixes": [

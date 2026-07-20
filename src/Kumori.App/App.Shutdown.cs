@@ -16,6 +16,9 @@ namespace Kumori.App;
 
 public partial class App
 {
+    internal static AttemptSqliteSink CreateAttemptPersistence(SqliteConnectionFactory factory) =>
+        new(factory);
+
     protected override void OnExit(ExitEventArgs e)
     {
         if (!_shutdownCleanupCompleted)

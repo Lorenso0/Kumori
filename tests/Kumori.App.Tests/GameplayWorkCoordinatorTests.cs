@@ -1,10 +1,82 @@
 using System.Diagnostics;
+using Kumori.Storage;
+using Kumori.Tracking;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Kumori.App.Tests;
 
 public sealed class GameplayWorkCoordinatorTests
 {
+    [Fact]
+    public async Task AuthoritativeAttemptPersistenceContinuesDuringGameplay()
+    {
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"kumori-gameplay-persistence-{Guid.NewGuid():N}.sqlite3");
+        try
+        {
+            using var coordinator = new GameplayWorkCoordinator(idleSettleDelay: TimeSpan.Zero);
+            coordinator.BeginGameplay();
+            var sink = Kumori.App.App.CreateAttemptPersistence(
+                new SqliteConnectionFactory(databasePath, readOnly: false));
+
+            sink.StartAttempt(new AttemptStart
+            {
+                Identity = "client-switch-map",
+                WallTime = 1_788_000_000,
+            });
+            long attemptId = Assert.IsType<long>(sink.CurrentAttemptId);
+            sink.Finalize(new AttemptFinalization(
+                "completed",
+                "results_screen",
+                new AttemptSnapshot
+                {
+                    Identity = "client-switch-map",
+                    WallTime = 1_788_000_004,
+                    DurationSeconds = 4,
+                    Progress = 1,
+                    Score = 75_000,
+                },
+                Ordinal: 1));
+
+            await WaitForPersistedAttemptAsync(databasePath, attemptId);
+
+            Assert.True(coordinator.IsGameplayActive);
+            using var connection = new SqliteConnection($"Data Source={databasePath}");
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT score FROM attempts WHERE id = $attempt_id";
+            command.Parameters.AddWithValue("$attempt_id", attemptId);
+            Assert.Equal(75_000L, Convert.ToInt64(command.ExecuteScalar()));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { File.Delete(databasePath); } catch { }
+            try { File.Delete(databasePath + "-wal"); } catch { }
+            try { File.Delete(databasePath + "-shm"); } catch { }
+        }
+    }
+
+    private static async Task WaitForPersistedAttemptAsync(string databasePath, long attemptId)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            using var connection = new SqliteConnection($"Data Source={databasePath}");
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM attempts WHERE id = $attempt_id AND outcome = 'completed'";
+            command.Parameters.AddWithValue("$attempt_id", attemptId);
+            if (Convert.ToInt64(command.ExecuteScalar()) == 1)
+                return;
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException("The authoritative attempt row was not persisted during gameplay.");
+    }
+
     [Fact]
     public async Task ColdIdleWorkStartsWithoutSettleDelay()
     {

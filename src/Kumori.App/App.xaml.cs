@@ -289,16 +289,18 @@ public partial class App : Application
         // Establish and migrate the application-owned schema after first paint,
         // even when live tracking is disabled, so application-owned schema
         // migrations are always applied consistently.
-        Task DeferAttemptPersistence(string key, Func<CancellationToken, Task> work) =>
-            gameplayWork.EnqueuePriority(key, work);
         AttemptSqliteSink trackingSink;
         (int Attempts, int Sessions) recoveredTracking;
         int repairedMissingResults;
         int repairedPartialSimulationResults;
         try
         {
+            // Attempt/session rows are authoritative recovery state, not optional
+            // analysis work. Let the sink's ordered background worker persist
+            // them independently of gameplay so a rapid retry or client switch
+            // cannot strand every pending write in the volatile idle-work queue.
             trackingSink = await Task.Run(
-                () => new AttemptSqliteSink(factory, DeferAttemptPersistence),
+                () => CreateAttemptPersistence(factory),
                 _backgroundCts.Token);
             recoveredTracking = await Task.Run(
                 () => new TrackingMaintenanceRepository(factory).RecoverInterruptedTracking(),
