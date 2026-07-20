@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.4.10",
+    "date": "2026-07-20",
+    "fixes": [
+      "Made automatic startup update checks work while osu! is open or tosu is unavailable, while still postponing update dialogs during gameplay"
+    ]
+  },
+  {
     "version": "0.4.9",
     "date": "2026-07-20",
     "improvements": [

@@ -478,15 +478,10 @@ public partial class App : Application
                 coalesce: true),
             "tosu startup update check");
         TrackBackground(
-            EnqueueAfterSafeStartupAsync(
-                store,
-                settings.Current.Tracking.Enabled,
-                gameplayWork,
-                "kumori-startup-update-check",
-                token => CheckForKumoriUpdatesOnLaunchAsync(store, token),
+            RunKumoriStartupUpdateCheckAsync(
                 dashboardHydration,
-                _backgroundCts.Token,
-                coalesce: true),
+                token => CheckForKumoriUpdatesOnLaunchAsync(store, token),
+                _backgroundCts.Token),
             "Kumori update check");
 
         // Background services start only after the shell is visible

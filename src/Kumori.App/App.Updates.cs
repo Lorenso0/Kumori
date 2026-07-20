@@ -91,6 +91,12 @@ public partial class App
                 Log.Information("Kumori update {Version} is available at {Url}", result.LatestTag, result.ReleaseUrl);
                 QueueAvailableUpdatePrompt(result);
             }
+            else
+            {
+                Log.Debug(
+                    "Kumori startup update check completed; {Version} is current",
+                    result.CurrentVersion.ToString(3));
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -100,6 +106,23 @@ public partial class App
             // Startup update failures stay quiet; the manual update window shows errors on demand.
             Log.Debug(ex, "Kumori startup update check failed");
         }
+    }
+
+    internal static async Task RunKumoriStartupUpdateCheckAsync(
+        Task startupPrerequisite,
+        Func<CancellationToken, Task> check,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(startupPrerequisite);
+        ArgumentNullException.ThrowIfNull(check);
+
+        // The release lookup is a lightweight network request and must not wait
+        // for tosu to report a fresh idle state. In particular, an already
+        // running osu! client with unavailable telemetry would otherwise block
+        // the automatic check forever. Only wait for the visible dashboard to
+        // finish its initial hydration.
+        await startupPrerequisite.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await check(cancellationToken).ConfigureAwait(false);
     }
 
     internal async Task CheckForKumoriUpdatesManuallyAsync()
@@ -209,6 +232,24 @@ public partial class App
         {
             return;
         }
+
+        if (_gameplayWork is { IsGameplayActive: true } coordinator)
+        {
+            TrackBackground(
+                coordinator.Enqueue(
+                    "kumori-update-prompt",
+                    token => Dispatcher.InvokeAsync(
+                        () =>
+                        {
+                            token.ThrowIfCancellationRequested();
+                            TryShowAvailableUpdatePrompt();
+                        },
+                        DispatcherPriority.ContextIdle).Task,
+                    coalesce: true),
+                "Kumori update prompt");
+            return;
+        }
+
         _ = Dispatcher.InvokeAsync(TryShowAvailableUpdatePrompt, DispatcherPriority.ContextIdle);
     }
 
@@ -220,6 +261,12 @@ public partial class App
             _mainWindow is not { IsVisible: true } owner ||
             owner.WindowState == WindowState.Minimized)
         {
+            return;
+        }
+
+        if (_gameplayWork?.IsGameplayActive == true)
+        {
+            ScheduleAvailableUpdatePrompt();
             return;
         }
 
