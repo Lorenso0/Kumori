@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.4.13",
+    "date": "2026-07-21",
+    "improvements": [
+      "Added daily PP gains or losses to each day separator in the main play history"
+    ],
+    "fixes": [
+      "Restored collapsible calendar-day separators while preserving optional session grouping"
+    ]
+  },
+  {
     "version": "0.4.12",
     "date": "2026-07-21",
     "improvements": [

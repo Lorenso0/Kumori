@@ -17,12 +17,32 @@ public sealed class DateDisplayViewModelTests
 
         var attempt = new AttemptRowViewModel(new AttemptSummary { StartedAt = startedAt });
         var session = new SessionRowViewModel(new SessionSummary { StartedAt = startedAt });
+        var separator = new DayRowViewModel("2026-07-04", [attempt], isCollapsed: false);
         var day = new PerformanceDayViewModel(new DailyAttemptTrend { Day = "2026-07-04" });
 
         Assert.Equal("04/07/2026 13:05", attempt.WhenText);
         Assert.Equal("04/07/2026 13:05:06", attempt.WhenExact);
         Assert.Equal("04/07/2026", session.DateText);
+        Assert.Equal("04/07/2026", separator.HeaderLine);
         Assert.Equal("04/07/2026", day.DateText);
+    }
+
+    [Fact]
+    public void DaySeparatorSummarizesItsPlays()
+    {
+        var separator = new DayRowViewModel("2026-07-04",
+        [
+            new AttemptRowViewModel(new AttemptSummary { Outcome = "completed", Pp = 123.45 }),
+            new AttemptRowViewModel(new AttemptSummary { Outcome = "failed", Pp = 50 }),
+        ], isCollapsed: false, ppChange: 6.25);
+
+        Assert.True(separator.IsDayHeader);
+        Assert.Equal("PP gained +6.3pp  ·  2 plays  ·  1 completed  ·  123.5pp best", separator.StatsLine);
+        Assert.Equal("+6.3pp", separator.PpChangeText);
+        Assert.Equal("Collapse day", separator.ToggleLabel);
+
+        separator.UpdatePpChange(-1.25);
+        Assert.Equal("-1.3pp", separator.PpChangeText);
     }
 
     [Fact]

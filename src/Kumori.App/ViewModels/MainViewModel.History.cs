@@ -88,29 +88,45 @@ public partial class MainViewModel
             attemptRows[model.Id] = row;
         }
 
-        if (IsGroupSessions)
+        foreach (var dayGroup in ordered.GroupBy(attempt => LocalTimeDisplay.DayKey(attempt.StartedAt)))
         {
-            foreach (var group in ordered.GroupBy(attempt => attempt.SessionId))
+            var dayModels = dayGroup.ToArray();
+            var dayRows = dayModels.Select(model => attemptRows[model.Id]).ToArray();
+            var dayCollapsed = _collapsedDays.Contains(dayGroup.Key);
+            Rows.Add(new DayRowViewModel(
+                dayGroup.Key,
+                dayRows,
+                dayCollapsed,
+                DailyPpChange(dayGroup.Key)));
+            if (dayCollapsed)
             {
-                var collapsed = _collapsedSessions.Contains(group.Key);
-                if (_sessions.TryGetValue(group.Key, out var session))
+                continue;
+            }
+
+            if (IsGroupSessions)
+            {
+                foreach (var sessionGroup in dayModels.GroupBy(attempt => attempt.SessionId))
                 {
-                    Rows.Add(new SessionRowViewModel(session, collapsed, _activeSessionId));
-                }
-                if (!collapsed)
-                {
-                    foreach (var model in group)
+                    var sessionCollapsed = _collapsedSessions.Contains(sessionGroup.Key);
+                    if (_sessions.TryGetValue(sessionGroup.Key, out var session))
                     {
-                        Rows.Add(attemptRows[model.Id]);
+                        Rows.Add(new SessionRowViewModel(session, sessionCollapsed, _activeSessionId));
+                    }
+                    if (!sessionCollapsed)
+                    {
+                        foreach (var model in sessionGroup)
+                        {
+                            Rows.Add(attemptRows[model.Id]);
+                        }
                     }
                 }
             }
-        }
-        else
-        {
-            foreach (var model in ordered)
+            else
             {
-                Rows.Add(attemptRows[model.Id]);
+                foreach (var model in dayModels)
+                {
+                    Rows.Add(attemptRows[model.Id]);
+                }
             }
         }
 
@@ -122,6 +138,32 @@ public partial class MainViewModel
         HistoryStatus = filtered.Length == 0
             ? "No results match the current filters"
             : $"{filtered.Length} visible attempt(s)";
+    }
+
+    public void ToggleDay(DayRowViewModel row)
+    {
+        if (!_collapsedDays.Add(row.DayKey))
+        {
+            _collapsedDays.Remove(row.DayKey);
+        }
+        ApplyVisibleAttempts(selectFirst: false);
+    }
+
+    private double? DailyPpChange(string dayKey) => _currentAnalytics.Daily
+        .FirstOrDefault(day => string.Equals(day.Day, dayKey, StringComparison.Ordinal))
+        ?.PpChange;
+
+    private void UpdateDaySeparatorPpChanges(AnalyticsSummary analytics)
+    {
+        var ppChanges = analytics.Daily.ToDictionary(
+            day => day.Day,
+            day => day.PpChange,
+            StringComparer.Ordinal);
+        foreach (var separator in Rows.OfType<DayRowViewModel>())
+        {
+            separator.UpdatePpChange(
+                ppChanges.TryGetValue(separator.DayKey, out var ppChange) ? ppChange : null);
+        }
     }
 
     public void ToggleSession(SessionRowViewModel row)

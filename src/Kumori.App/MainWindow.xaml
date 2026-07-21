@@ -1155,6 +1155,72 @@
                              VirtualizingPanel.VirtualizationMode="Recycling"
                              VirtualizingPanel.ScrollUnit="Pixel">
                         <ListBox.Resources>
+                            <DataTemplate DataType="{x:Type vm:DayRowViewModel}">
+                                <Border Height="34"
+                                        Padding="6,0,10,0"
+                                        Background="{DynamicResource Brush.PanelBackground}"
+                                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        ToolTip="{Binding StatsLine}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="30" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0"
+                                                Click="DayToggle_Click"
+                                                Style="{StaticResource HeaderChevronButton}"
+                                                ToolTip="{Binding ToggleLabel}"
+                                                AutomationProperties.Name="{Binding ToggleLabel}">
+                                            <Path Width="8"
+                                                  Height="8"
+                                                  Stretch="Uniform"
+                                                  Data="M 0 0 L 5 4.5 L 0 9"
+                                                  Stroke="{DynamicResource Brush.AccentPink}"
+                                                  StrokeThickness="1.9"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  StrokeLineJoin="Round">
+                                                <Path.Style>
+                                                    <Style TargetType="Path">
+                                                        <Setter Property="RenderTransform">
+                                                            <Setter.Value>
+                                                                <RotateTransform Angle="0" CenterX="4" CenterY="4" />
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsCollapsed}" Value="False">
+                                                                <Setter Property="RenderTransform">
+                                                                    <Setter.Value>
+                                                                        <RotateTransform Angle="90" CenterX="4" CenterY="4" />
+                                                                    </Setter.Value>
+                                                                </Setter>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Path.Style>
+                                            </Path>
+                                        </Button>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding HeaderLine}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding StatsLine}"
+                                                   Foreground="{DynamicResource Brush.TextMuted}"
+                                                   FontSize="10"
+                                                   VerticalAlignment="Center"
+                                                   MaxWidth="430"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="10,0,0,0" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+
                             <DataTemplate DataType="{x:Type vm:SessionRowViewModel}">
                                 <Border Margin="0"
                                         Height="44"

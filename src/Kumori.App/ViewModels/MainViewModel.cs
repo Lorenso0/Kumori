@@ -115,6 +115,7 @@ public partial class MainViewModel : ObservableObject
     private readonly List<AttemptSummary> _loadedAttempts = new();
     private readonly List<AttemptSummary> _mapAttempts = new();
     private readonly Dictionary<long, SessionSummary> _sessions = new();
+    private readonly HashSet<string> _collapsedDays = new(StringComparer.Ordinal);
     private readonly HashSet<long> _collapsedSessions = new();
     private long _dbBytes;
     private long _cacheBytes;
@@ -203,7 +204,7 @@ public partial class MainViewModel : ObservableObject
     public bool HasActiveSession => _activeSessionId is not null;
     public bool ShowSessionGrouping => true;
     private bool CanMaintainTrackingData() => !HasActiveSession;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.12"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.13"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -423,6 +424,7 @@ public partial class MainViewModel : ObservableObject
             _cacheBytes = secondary.CacheBytes;
             _currentAnalytics = secondary.Analytics;
             _usingLazerRealm = secondary.UsingLazerRealm;
+            UpdateDaySeparatorPpChanges(secondary.Analytics);
             ApplyDashboard(secondary.Analytics, page, secondary.DbBytes, secondary.CacheBytes);
         }
         catch (OperationCanceledException)

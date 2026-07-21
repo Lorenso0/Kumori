@@ -84,7 +84,7 @@ public partial class MainWindow : Window
 
     private void HistoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        // Session separators are not selectable — revert any non-attempt selection
+        // History separators are not selectable — revert any non-attempt selection
         // back to the previously selected attempt (or clear it).
         if (sender is ListBox lb && lb.SelectedItem is not null and not AttemptRowViewModel)
         {
@@ -100,6 +100,15 @@ public partial class MainWindow : Window
         }
 
         ScheduleTechnicalDetailsSelectionCheck();
+    }
+
+    private void DayToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: DayRowViewModel row }
+            && DataContext is MainViewModel vm)
+        {
+            vm.ToggleDay(row);
+        }
     }
 
     private void TechnicalDetailsExpander_Expanded(object sender, RoutedEventArgs e)
