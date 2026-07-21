@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.4.12",
+    "date": "2026-07-21",
+    "improvements": [
+      "Refreshed the Windows release package and application version metadata"
+    ]
+  },
+  {
     "version": "0.4.11",
     "date": "2026-07-20",
     "fixes": [
