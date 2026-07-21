@@ -643,6 +643,7 @@ public sealed partial class AttemptSqliteSink : IAttemptSink, ISessionSink
                 // the checksum-matched replay supplies the authoritative result.
                 snapshot = snapshot with { Accuracy = 0, Grade = null };
             }
+            snapshot = RestoreCalculatedBpmStars(con, tx, attempt.Id, snapshot);
             UpdateAttempt(con, tx, attempt.Id, snapshot, preserveExistingResult);
             if (snapshot.Mods.Count > 0 || !snapshot.ModsKey.Equals("NM", StringComparison.OrdinalIgnoreCase))
                 ReplaceMods(con, tx, attempt.Id, snapshot.ModsKey, snapshot.Mods);

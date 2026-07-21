@@ -193,8 +193,8 @@ internal static class DifficultyStrainCurveBuilder
     {
         public double LastObjectDifficulty { get; private set; }
 
-        protected override double StrainValueAt(DifficultyHitObject current)
-            => LastObjectDifficulty = base.StrainValueAt(current);
+        protected override double ObjectDifficultyOf(DifficultyHitObject current)
+            => LastObjectDifficulty = base.ObjectDifficultyOf(current);
     }
 
     private static double? FindSetting(

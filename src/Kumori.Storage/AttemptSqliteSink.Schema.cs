@@ -217,6 +217,7 @@ public sealed partial class AttemptSqliteSink
         }
         tx.Commit();
         DatabaseMigrator.Apply(con);
+        BackfillBpmAttemptStars(con);
     }
 
     /// <summary>

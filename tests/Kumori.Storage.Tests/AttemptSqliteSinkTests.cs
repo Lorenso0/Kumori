@@ -1,6 +1,7 @@
 using Kumori.Storage;
 using Kumori.Tracking;
 using Kumori.Core.Models;
+using Kumori.Gameplay;
 using Microsoft.Data.Sqlite;
 using Xunit;
 using static Kumori.Tracking.AttemptStateMachine;
@@ -320,6 +321,105 @@ public class AttemptSqliteSinkTests : IDisposable
 
         using var con = Open();
         Assert.Equal(6.16, Scalar<double>(con, "SELECT stars FROM beatmaps WHERE identity = 'mapA'"), precision: 2);
+    }
+
+    [Fact]
+    public void BpmAttempt_CalculatesAndPreservesOfficialAdjustedStars()
+    {
+        string beatmap = Path.Combine(Path.GetTempPath(), $"kumori-bpm-stars-{Guid.NewGuid():N}.osu");
+        File.Copy(BpmFixturePath(), beatmap);
+        try
+        {
+            AttemptMod[] mods =
+            [
+                new("HD"),
+                new("DA", """{"approach_rate":10,"drain_rate":0}"""),
+                new("BPM", """{"target_bpm":240,"scale_map_stats_with_bpm":true}"""),
+            ];
+            BeatmapDifficultyResult expected = BeatmapDifficultyCalculator.Calculate(
+                beatmap,
+                mods.Select(mod => new CapturedMod(mod.Acronym, mod.SettingsJson)).ToArray());
+            var reported = new BeatmapStats { BaseStars = 1.23, Stars = 1.23, RawJson = """{"stars":{"total":1.23}}""" };
+            var sink = CreateSink();
+            sink.StartAttempt(new AttemptStart
+            {
+                Identity = "bpm-star-map",
+                WallTime = 1_788_000_000,
+                ClientKind = OsuClientKind.Stable,
+                BeatmapFile = beatmap,
+                ModsKey = "HDDABPM",
+                Mods = mods,
+                BeatmapStats = reported,
+            });
+            sink.Finalize(new AttemptFinalization(
+                "completed",
+                "test_boundary",
+                new AttemptSnapshot
+                {
+                    Identity = "bpm-star-map",
+                    WallTime = 1_788_000_003,
+                    DurationSeconds = 3,
+                    Progress = 1,
+                    ModsKey = "HDDABPM",
+                    Mods = mods,
+                    BeatmapStats = reported,
+                },
+                Ordinal: 1));
+
+            using var con = Open();
+            Assert.Equal(expected.BaseStars, Scalar<double>(con, "SELECT base_stars FROM attempts"), 8);
+            Assert.Equal(expected.AdjustedStars, Scalar<double>(con, "SELECT adjusted_stars FROM attempts"), 8);
+            Assert.Equal(1L, Scalar<long>(con,
+                "SELECT json_extract(beatmap_json, '$.stats.stars.kumori_calculated') FROM attempt_context"));
+        }
+        finally
+        {
+            File.Delete(beatmap);
+        }
+    }
+
+    [Fact]
+    public void ExistingBpmAttempt_BackfillsAdjustedStarsWhenBeatmapBecomesAvailable()
+    {
+        string beatmap = Path.Combine(Path.GetTempPath(), $"kumori-bpm-backfill-{Guid.NewGuid():N}.osu");
+        File.Copy(BpmFixturePath(), beatmap);
+        try
+        {
+            AttemptMod[] mods = [new("BPM", """{"target_bpm":240,"scale_map_stats_with_bpm":true}""")];
+            BeatmapDifficultyResult expected = BeatmapDifficultyCalculator.Calculate(
+                beatmap,
+                [new CapturedMod(mods[0].Acronym, mods[0].SettingsJson)]);
+            var reported = new BeatmapStats { BaseStars = 1.23, Stars = 1.23, RawJson = """{"stars":{"total":1.23}}""" };
+            var sink = CreateSink();
+            sink.StartAttempt(new AttemptStart
+            {
+                Identity = "historical-bpm-star-map",
+                WallTime = 1_788_000_000,
+                ModsKey = "BPM",
+                Mods = mods,
+                BeatmapStats = reported,
+            });
+            PersistStartedAttempt(sink, 1_788_000_003, identity: "historical-bpm-star-map", beatmapStats: reported);
+
+            using (var con = Open())
+            using (var update = con.CreateCommand())
+            {
+                update.CommandText = "UPDATE attempt_context SET source_json = @source";
+                update.Parameters.AddWithValue("@source", System.Text.Json.JsonSerializer.Serialize(new { beatmap_path = beatmap }));
+                update.ExecuteNonQuery();
+            }
+
+            _ = new AttemptSqliteSink(new SqliteConnectionFactory(_dbPath, readOnly: false));
+
+            using var verified = Open();
+            Assert.Equal(expected.AdjustedStars, Scalar<double>(verified, "SELECT adjusted_stars FROM attempts"), 8);
+            Assert.Equal(1L, Scalar<long>(verified,
+                "SELECT json_extract(beatmap_json, '$.stats.stars.kumori_calculated') FROM attempt_context"));
+        }
+        finally
+        {
+            File.Delete(beatmap);
+        }
     }
 
     [Fact]
@@ -977,6 +1077,16 @@ public class AttemptSqliteSinkTests : IDisposable
         using var cmd = con.CreateCommand();
         cmd.CommandText = sql;
         return (T)Convert.ChangeType(cmd.ExecuteScalar()!, typeof(T));
+    }
+
+    private static string BpmFixturePath()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Kumori.sln")))
+            directory = directory.Parent;
+        return Path.Combine(
+            directory?.FullName ?? throw new DirectoryNotFoundException("Repository root was not found."),
+            "tests", "Kumori.Core.Tests", "Fixtures", "bpm-adjust-variable.osu");
     }
 
     private static void PersistStartedAttempt(

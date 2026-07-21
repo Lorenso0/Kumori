@@ -95,6 +95,18 @@ public sealed class BpmAdjustSupportTests
     }
 
     [Fact]
+    public void DifficultyCalculatorAppliesCapturedBpmSettings()
+    {
+        string path = fixturePath();
+        BeatmapDifficultyResult result = BeatmapDifficultyCalculator.Calculate(
+            path,
+            [new CapturedMod("BPM", """{"target_bpm":240,"scale_map_stats_with_bpm":true}""")]);
+
+        Assert.True(result.BaseStars > 0);
+        Assert.NotEqual(result.BaseStars, result.AdjustedStars, precision: 8);
+    }
+
+    [Fact]
     public void StatScalingEnabledLeavesMapStatsForNormalRateAdjustment()
     {
         var difficulty = new BeatmapDifficulty { ApproachRate = 9, OverallDifficulty = 8 };

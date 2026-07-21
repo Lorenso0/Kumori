@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.4.14",
+    "date": "2026-07-21",
+    "fixes": [
+      "Calculated BPM Adjust star ratings from the local beatmap and captured mod settings instead of showing the unadjusted telemetry value",
+      "Corrected historical BPM Adjust play ratings automatically and kept later telemetry from overwriting them"
+    ]
+  },
+  {
     "version": "0.4.13",
     "date": "2026-07-21",
     "improvements": [

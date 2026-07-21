@@ -14,6 +14,7 @@ public sealed partial class AttemptSqliteSink
         long sessionId,
         AttemptStart start)
     {
+        start = EnrichBpmStarRatings(start);
         var beatmapId = EnsureBeatmap(con, tx, start);
         using (var insert = con.CreateCommand())
         {
@@ -325,8 +326,10 @@ public sealed partial class AttemptSqliteSink
         cmd.CommandText = """
             INSERT INTO attempt_context(attempt_id, source_json, pp_json, beatmap_json,
                                         score_json, session_json, multiplayer_json)
-            VALUES(@attempt_id, @source_json, '{}', '{}', '{}', '{}', '{}')
-            ON CONFLICT(attempt_id) DO UPDATE SET source_json = excluded.source_json
+            VALUES(@attempt_id, @source_json, '{}', @beatmap_json, '{}', '{}', '{}')
+            ON CONFLICT(attempt_id) DO UPDATE SET
+                source_json = excluded.source_json,
+                beatmap_json = excluded.beatmap_json
             """;
         cmd.Parameters.AddWithValue("@attempt_id", attemptId);
         cmd.Parameters.AddWithValue("@source_json", JsonSerializer.Serialize(new
@@ -337,6 +340,11 @@ public sealed partial class AttemptSqliteSink
             game_folder = start.GameFolder,
             songs_folder = start.SongsFolder,
         }));
+        cmd.Parameters.AddWithValue(
+            "@beatmap_json",
+            HasCalculatedStarMarker(start.BeatmapStats.RawJson)
+                ? BeatmapContextJson(start.BeatmapStats)
+                : "{}");
         cmd.ExecuteNonQuery();
     }
 

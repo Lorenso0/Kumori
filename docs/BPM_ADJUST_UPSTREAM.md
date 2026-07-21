@@ -8,6 +8,12 @@ Kumori's canonical BPM Adjust implementation is:
 - osu!lazer base: `2026.711.0-lazer`
 - Last verified: 2026-07-20
 
+Kumori's difficulty and replay-analysis projects use the closest published
+official ruleset packages, `ppy.osu.Game` and
+`ppy.osu.Game.Rulesets.Osu` `2026.702.0`. Keep these aligned: older packages
+produce pre-July star ratings even when the BPM clock rate is reconstructed
+correctly.
+
 Do not use an unrelated local osu! checkout as the behavioural specification.
 Update this pin whenever Kumori is adapted to a newer BPM implementation.
 
