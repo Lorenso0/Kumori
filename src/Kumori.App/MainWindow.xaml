@@ -700,6 +700,7 @@
                                          PerformanceRequested="PerformanceNavigation_Click"
                                          MapsRequested="MapsNavigation_Click"
                                          ImportsRequested="ImportsNavigation_Click"
+                                         SkinEditorRequested="SkinEditorNavigation_Click"
                                          ChangelogRequested="ChangelogNavigation_Click"
                                          DiscordRequested="DiscordNavigation_Click"
                                          SettingsRequested="SettingsNavigation_Click"
@@ -796,7 +797,7 @@
                                 <Separator />
                                 <MenuItem Header="Setup &amp; integrations" IsEnabled="False" />
                                 <MenuItem Header="Setup wizard" Command="{Binding OpenSetupWizardCommand}" />
-                                <MenuItem Header="Skin library" Command="{Binding OpenSkinLibraryCommand}" />
+                                <MenuItem Header="Replay viewer skin library" Command="{Binding OpenSkinLibraryCommand}" />
                                 <MenuItem Header="tosu setup" Command="{Binding OpenTosuSetupCommand}" />
                                 <MenuItem Header="Launch tosu" Command="{Binding LaunchTosuCommand}" />
                                 <Separator />
@@ -2603,7 +2604,7 @@
                         <TextBlock Text="SETTINGS" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
                         <Button Content="Appearance &amp; application" Command="{Binding OpenSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Setup wizard" Command="{Binding OpenSetupWizardCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
-                        <Button Content="Skin library" Command="{Binding OpenSkinLibraryCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
+                        <Button Content="Replay viewer skin library" Command="{Binding OpenSkinLibraryCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="tosu setup" Command="{Binding OpenTosuSetupCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,5"/>
                         <Button Content="Launch tosu" Command="{Binding LaunchTosuCommand}" Style="{StaticResource TopActionButton}" HorizontalContentAlignment="Left" Margin="0,0,0,10"/>
                         <TextBlock Text="STATUS &amp; MAINTENANCE" Style="{StaticResource Text.LabelUpper}" Margin="6,0,0,5"/>
@@ -2814,6 +2815,17 @@
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="430"><TextBlock Text="No maps recorded yet" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock Text="Enable play tracking and play an osu!standard map to populate map statistics." FontSize="12" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,7,0,14"/><Button Content="Open Settings" Command="{Binding OpenSettingsCommand}" Style="{StaticResource TopActionButton}" HorizontalAlignment="Center"/></StackPanel>
                 </Border>
             </Grid>
+        </Grid>
+
+        <Grid x:Name="SkinEditorPage"
+              Grid.Row="1"
+              Grid.Column="1"
+              Background="{DynamicResource Brush.AppBackground}"
+              Visibility="Collapsed">
+            <ContentControl x:Name="SkinEditorHost"
+                            Background="{DynamicResource Brush.AppBackground}"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch" />
         </Grid>
 
         <Grid x:Name="OnboardingOverlay"

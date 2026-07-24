@@ -448,7 +448,7 @@
                             <Button Grid.Column="2" Content="Clear" Click="ClearSkin_Click" Margin="8,0,0,0" AutomationProperties.Name="Use built-in replay viewer skin" />
                         </Grid>
                         <WrapPanel Margin="0,0,0,12">
-                            <Button Content="Skin library" Click="SkinLibrary_Click" Margin="0,0,8,0" />
+                            <Button Content="Replay skin library" Click="SkinLibrary_Click" Margin="0,0,8,0" />
                             <Button Content="Delete imported skin" Click="DeleteSkin_Click" />
                         </WrapPanel>
                     </StackPanel>

@@ -10,6 +10,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Kumori.App.ViewModels;
+using Kumori.App.Skins;
 using Kumori.Core.Settings;
 using Kumori.Native;
 using Kumori.Storage;
@@ -35,6 +36,7 @@ public partial class MainWindow : Window
     private string _selectedPage = "Dashboard";
     private WelcomeWindow? _onboardingWindow;
     private SkinLibraryWindow? _onboardingToolWindow;
+    private SkinEditorPage? _skinEditorPage;
     private IInputElement? _focusBeforeOnboarding;
     private long? _expandedTechnicalDetailsAttemptId;
 
@@ -399,6 +401,19 @@ public partial class MainWindow : Window
         if (_importsViewModel is not null)
             await _importsViewModel.RefreshAsync(_importsViewModel.SelectedAttempt?.Id);
     }
+    private async void SkinEditorNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        ShowPage("SkinEditor");
+        if (_skinEditorPage is null)
+        {
+            _skinEditorPage = new SkinEditorPage(_settings);
+            SkinEditorHost.Content = _skinEditorPage;
+            // Let WPF paint the themed page shell before Realm discovery and
+            // preview decoding begin.
+            await Dispatcher.Yield(DispatcherPriority.Loaded);
+        }
+        await _skinEditorPage.EnsureLoadedAsync();
+    }
     private void ChangelogNavigation_Click(object sender, RoutedEventArgs e) =>
         OpenWorkspaceTab(new ChangelogWindow(), "Changelog");
     private void DiscordNavigation_Click(object sender, RoutedEventArgs e)
@@ -438,6 +453,7 @@ public partial class MainWindow : Window
         InspectorHeaderTitle.Text = page == "Imports" ? "Shared Play" : "Selected Play";
         PerformancePage.Visibility = page == "Performance" ? Visibility.Visible : Visibility.Collapsed;
         MapsPage.Visibility = page == "Maps" ? Visibility.Visible : Visibility.Collapsed;
+        SkinEditorPage.Visibility = page == "SkinEditor" ? Visibility.Visible : Visibility.Collapsed;
         WorkspacePage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         ApplyResponsiveLayout();
     }

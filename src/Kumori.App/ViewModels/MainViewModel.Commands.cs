@@ -54,7 +54,7 @@ public partial class MainViewModel
     [RelayCommand]
     private void OpenSkinLibrary()
     {
-        OpenInWorkspace(new SkinLibraryWindow(_settings), "Skin library");
+        OpenInWorkspace(new SkinLibraryWindow(_settings), "Replay viewer skin library");
     }
 
     [RelayCommand]

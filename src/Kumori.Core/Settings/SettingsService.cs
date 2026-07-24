@@ -135,6 +135,8 @@ public sealed class SettingsService
     {
         settings.Tracking ??= new KumoriSettings.TrackingSettings();
         settings.ReplayViewer ??= new KumoriSettings.ReplayViewerSettings();
+        settings.SkinEditor ??= new KumoriSettings.SkinEditorSettings();
+        settings.SkinEditor.CustomSwatches ??= new List<string>();
         settings.Capture ??= new KumoriSettings.CaptureSettings();
         settings.Media ??= new KumoriSettings.MediaSettings();
         settings.OpenTabletDriver ??= new KumoriSettings.OpenTabletDriverSettings();

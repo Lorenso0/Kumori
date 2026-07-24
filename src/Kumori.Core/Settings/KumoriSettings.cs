@@ -14,6 +14,7 @@ public sealed class KumoriSettings
 
     public TrackingSettings Tracking { get; set; } = new();
     public ReplayViewerSettings ReplayViewer { get; set; } = new();
+    public SkinEditorSettings SkinEditor { get; set; } = new();
     public CaptureSettings Capture { get; set; } = new();
     public MediaSettings Media { get; set; } = new();
     public OpenTabletDriverSettings OpenTabletDriver { get; set; } = new();
@@ -76,6 +77,13 @@ public sealed class KumoriSettings
         public bool RegisterKumoriFiles { get; set; } = true;
         public bool DeleteSharedPackageAfterImport { get; set; } = false;
         public string ExecutablePath { get; set; } = "";
+    }
+
+    public sealed class SkinEditorSettings
+    {
+        public string LazerRootOverride { get; set; } = "";
+        public List<string> CustomSwatches { get; set; } = new();
+        public bool HideEmptyElements { get; set; }
     }
 
 

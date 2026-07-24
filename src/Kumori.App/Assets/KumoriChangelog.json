@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.5.0",
+    "date": "2026-07-24",
+    "major": [
+      "Added a first-class osu!lazer Skin Editor for browsing and editing installed skins directly from Kumori"
+    ],
+    "features": [
+      "Added live gameplay previews for cursors, cursor trails, slider bodies, slider balls, reverse arrows, approach circles, hit circles, and skin.ini colours",
+      "Added colourize, hue-shift, saturation, and lightness editing with Kumori's in-app colour picker and reusable custom swatches",
+      "Added skin.ini editing with colour previews while preserving comments, unknown properties, and repeated sections",
+      "Added automatic backups, batch saving, file import and export, and external-editor auto-sync"
+    ],
+    "improvements": [
+      "Sorted assets into element categories, combined normal and @2x variants into one entry that edits both files, and clearly identifies paired resolutions",
+      "Added an option to hide fully transparent placeholder elements",
+      "Kept the editor themed and responsive while Realm data and previews load or save, without white transition flashes"
+    ]
+  },
+  {
     "version": "0.4.14",
     "date": "2026-07-21",
     "fixes": [

@@ -60,6 +60,7 @@ public static class AppPaths
 
     public static string ReportsDir => Path.Combine(AppDataDir, "reports");
     public static string BackupsDir => Path.Combine(AppDataDir, "backups");
+    public static string LazerSkinBackupsDir => Path.Combine(BackupsDir, "lazer-skins");
     public static string PendingRestoreDir => Path.Combine(RuntimeDir, "pending-restore");
 
     public static string ToolsDir => Path.Combine(AppDataDir, "tools");

@@ -26,12 +26,16 @@ public partial class CustomThemeColorPicker : UserControl
     public event Action<string>? ColourChanged;
     public event Action? CloseRequested;
 
-    public void Open(string value, string title, string description)
+    public void Open(string value, string title, string description, bool allowOpacity = true)
     {
         RoleTitle.Text = title;
         RoleDescription.Text = description;
         if (!TryParse(value, out var color))
             color = MediaColor.FromRgb(byte.MaxValue, byte.MaxValue, byte.MaxValue);
+        OpacityLabel.Visibility = allowOpacity ? Visibility.Visible : Visibility.Collapsed;
+        OpacityControl.Visibility = allowOpacity ? Visibility.Visible : Visibility.Collapsed;
+        if (!allowOpacity)
+            color.A = byte.MaxValue;
         SetFromColor(color, raiseChanged: false);
         Focus();
     }

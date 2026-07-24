@@ -113,8 +113,8 @@
                 <Slider x:Name="HueSlider" Minimum="0" Maximum="360" Style="{StaticResource PickerSlider}" ValueChanged="HueSlider_ValueChanged" PreviewMouseLeftButtonDown="Slider_PreviewMouseLeftButtonDown" />
             </Grid>
 
-            <TextBlock Text="Opacity" Margin="0,9,0,4" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" />
-            <Grid Height="18">
+            <TextBlock x:Name="OpacityLabel" Text="Opacity" Margin="0,9,0,4" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" />
+            <Grid x:Name="OpacityControl" Height="18">
                 <Border Margin="5,5" CornerRadius="4">
                     <Border.Background>
                         <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">

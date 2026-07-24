@@ -44,6 +44,7 @@ public partial class AdaptiveNavigationRail : UserControl
     public event RoutedEventHandler? PerformanceRequested;
     public event RoutedEventHandler? MapsRequested;
     public event RoutedEventHandler? ImportsRequested;
+    public event RoutedEventHandler? SkinEditorRequested;
     public event RoutedEventHandler? ChangelogRequested;
     public event RoutedEventHandler? DiscordRequested;
     public event RoutedEventHandler? SettingsRequested;
@@ -53,6 +54,7 @@ public partial class AdaptiveNavigationRail : UserControl
     private void Performance_Click(object sender, RoutedEventArgs e) => PerformanceRequested?.Invoke(this, e);
     private void Maps_Click(object sender, RoutedEventArgs e) => MapsRequested?.Invoke(this, e);
     private void Imports_Click(object sender, RoutedEventArgs e) => ImportsRequested?.Invoke(this, e);
+    private void SkinEditor_Click(object sender, RoutedEventArgs e) => SkinEditorRequested?.Invoke(this, e);
     private void Changelog_Click(object sender, RoutedEventArgs e) => ChangelogRequested?.Invoke(this, e);
     private void Discord_Click(object sender, RoutedEventArgs e) => DiscordRequested?.Invoke(this, e);
     private void Settings_Click(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke(this, e);
@@ -67,11 +69,13 @@ public partial class AdaptiveNavigationRail : UserControl
         PerformanceButton.Style = SelectedPage == "Performance" ? active : normal;
         MapsButton.Style = SelectedPage == "Maps" ? active : normal;
         ImportsButton.Style = SelectedPage == "Imports" ? active : normal;
+        SkinEditorButton.Style = SelectedPage == "SkinEditor" ? active : normal;
         SettingsButton.Style = SelectedPage == "Settings" ? active : normal;
         SetCurrentPageStatus(DashboardButton, "Dashboard");
         SetCurrentPageStatus(PerformanceButton, "Performance");
         SetCurrentPageStatus(MapsButton, "Maps");
         SetCurrentPageStatus(ImportsButton, "Imports");
+        SetCurrentPageStatus(SkinEditorButton, "SkinEditor");
         SetCurrentPageStatus(SettingsButton, "Settings");
     }
 

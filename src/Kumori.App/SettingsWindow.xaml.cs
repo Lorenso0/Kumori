@@ -622,7 +622,7 @@ public partial class SettingsWindow : Window
 
     private void SkinLibrary_Click(object sender, RoutedEventArgs e)
     {
-        MainWindow.TryOpenWorkspace(new SkinLibraryWindow(_settings), "Skin library");
+        MainWindow.TryOpenWorkspace(new SkinLibraryWindow(_settings), "Replay viewer skin library");
         SkinPath.Text = _settings.Current.ReplayViewer.SkinPath;
     }
 

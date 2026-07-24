@@ -204,7 +204,7 @@ public partial class MainViewModel : ObservableObject
     public bool HasActiveSession => _activeSessionId is not null;
     public bool ShowSessionGrouping => true;
     private bool CanMaintainTrackingData() => !HasActiveSession;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.4.14"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.5.0"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
