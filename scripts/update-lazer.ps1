@@ -19,8 +19,12 @@ if (-not (Test-Path (Join-Path $Checkout ".git"))) {
     }
 }
 
-$head = [string](git -C $Checkout rev-parse --verify --quiet 'HEAD^{commit}' 2>$null)
-$head = $head.Trim()
+$headOutput = git -C $Checkout rev-parse --verify --quiet 'HEAD^{commit}' 2>$null
+$head = if ($LASTEXITCODE -eq 0 -and $null -ne $headOutput) {
+    ([string]$headOutput).Trim()
+} else {
+    ""
+}
 if (-not [string]::Equals($head, $PinnedCommit, [StringComparison]::OrdinalIgnoreCase)) {
     $changes = @(git -C $Checkout status --porcelain --untracked-files=no)
     if ($LASTEXITCODE -ne 0) {
