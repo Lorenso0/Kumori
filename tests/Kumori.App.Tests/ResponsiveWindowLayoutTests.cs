@@ -541,8 +541,14 @@ public sealed class ResponsiveWindowLayoutTests
                         skinWindow.Height = size.Height;
                         skinWindow.UpdateLayout();
 
-                        var compact = size.Width <= ResponsiveLayoutResolver.CompactMaximumWidth;
-                        var shortLayout = size.Height <= ResponsiveLayoutResolver.ShortMaximumHeight;
+                        // WPF can clamp an off-screen test window to the runner's
+                        // virtual desktop. Assert against the editor's measured
+                        // size, which is also what production layout resolves.
+                        var measuredState = ResponsiveLayoutResolver.Resolve(
+                            skinEditor.ActualWidth,
+                            skinEditor.ActualHeight);
+                        var compact = measuredState.IsCompact;
+                        var shortLayout = measuredState.IsShort;
                         var compactBar = Assert.IsType<Border>(skinEditor.FindName("CompactSurfaceBar"));
                         var navigator = Assert.IsType<Border>(skinEditor.FindName("NavigatorPanel"));
                         var center = Assert.IsType<Border>(skinEditor.FindName("CenterPanel"));
@@ -571,8 +577,8 @@ public sealed class ResponsiveWindowLayoutTests
                             Assert.Equal(Visibility.Visible, inspector.Visibility);
                             var navigatorColumn = Assert.IsType<ColumnDefinition>(skinEditor.FindName("NavigatorColumn"));
                             var inspectorColumn = Assert.IsType<ColumnDefinition>(skinEditor.FindName("InspectorColumn"));
-                            Assert.Equal(size.Width < 1280 ? 220 : 256, navigatorColumn.Width.Value);
-                            Assert.Equal(size.Width < 1280 ? 288 : 320, inspectorColumn.Width.Value);
+                            Assert.Equal(measuredState.IsStandard ? 220 : 256, navigatorColumn.Width.Value);
+                            Assert.Equal(measuredState.IsStandard ? 288 : 320, inspectorColumn.Width.Value);
                         }
 
                         var root = Assert.IsType<Grid>(skinEditor.FindName("RootGrid"));
