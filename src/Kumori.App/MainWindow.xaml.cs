@@ -64,9 +64,7 @@ public partial class MainWindow : Window
         _mainViewModel = viewModel;
         _importsViewModel = importsViewModel;
         _playShare = playShare;
-        _lazerSkinReload = gameplayWork is null
-            ? null
-            : new LazerSkinReloadService(gameplayWork, this);
+        _lazerSkinReload = new LazerSkinReloadService(this);
         DataContext = viewModel;
         viewModel.WorkspaceWindowRequested += OpenWorkspaceTab;
         InitializeComponent();

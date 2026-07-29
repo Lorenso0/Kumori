@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Interop;
 using Kumori.Native;
 using Kumori.Tracking;
 using osu.Framework.Input;
@@ -35,28 +34,43 @@ internal interface ILazerSkinReloadService
 
 internal sealed class LazerSkinReloadService : ILazerSkinReloadService, IDisposable
 {
-    private const string QueueKey = "lazer-current-skin-reload";
+    private static readonly TimeSpan DefaultForegroundPollInterval =
+        TimeSpan.FromMilliseconds(150);
     private readonly object gate = new();
-    private readonly GameplayWorkCoordinator coordinator;
-    private readonly Window owner;
+    private readonly Func<Action, Task> dispatchCompletion;
     private readonly LazerSkinReloadExecutor executor;
+    private readonly TimeSpan foregroundPollInterval;
     private PendingReload? pending;
+    private CancellationTokenSource? pendingCancellation;
     private long nextRequestId;
     private bool disposed;
 
     public LazerSkinReloadService(
-        GameplayWorkCoordinator coordinator,
         Window owner,
         ILazerSkinRealmService? realmService = null,
         ILazerSkinReloadPlatform? platform = null)
     {
-        this.coordinator = coordinator;
-        this.owner = owner;
+        ArgumentNullException.ThrowIfNull(owner);
         var realm = realmService ?? new LazerSkinRealmService();
         executor = new LazerSkinReloadExecutor(
             realm.LoadGlobalKeyBindings,
             platform ?? new WindowsLazerSkinReloadPlatform());
-        owner.Activated += Owner_Activated;
+        dispatchCompletion = action => owner.Dispatcher.InvokeAsync(action).Task;
+        foregroundPollInterval = DefaultForegroundPollInterval;
+    }
+
+    internal LazerSkinReloadService(
+        LazerSkinReloadExecutor executor,
+        TimeSpan? foregroundPollInterval = null)
+    {
+        this.executor = executor;
+        dispatchCompletion = action =>
+        {
+            action();
+            return Task.CompletedTask;
+        };
+        this.foregroundPollInterval =
+            foregroundPollInterval ?? DefaultForegroundPollInterval;
     }
 
     public void RequestReload(
@@ -65,86 +79,130 @@ internal sealed class LazerSkinReloadService : ILazerSkinReloadService, IDisposa
         Action<LazerSkinReloadResult>? completed = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        PendingReload request;
+        CancellationTokenSource cancellation;
+        CancellationTokenSource? previousCancellation;
         lock (gate)
         {
             if (disposed)
                 return;
-            pending = new PendingReload(
+            request = new PendingReload(
                 ++nextRequestId,
                 Path.GetFullPath(rootPath),
                 editedSkinId,
                 completed);
+            pending = request;
+            cancellation = new CancellationTokenSource();
+            previousCancellation = pendingCancellation;
+            pendingCancellation = cancellation;
         }
-        SchedulePending();
+        previousCancellation?.Cancel();
+        Log.Information(
+            "Queued lazer skin reload request {RequestId} for skin {SkinId}",
+            request.Id,
+            request.EditedSkinId);
+        _ = Task.Run(() => RunRequestAsync(request, cancellation));
     }
 
-    private void Owner_Activated(object? sender, EventArgs e) => SchedulePending();
-
-    private void SchedulePending()
+    private async Task RunRequestAsync(
+        PendingReload request,
+        CancellationTokenSource cancellation)
     {
-        PendingReload? request;
-        lock (gate)
-        {
-            if (disposed || pending is null)
-                return;
-            request = pending;
-        }
-
         try
         {
-            _ = coordinator.Enqueue(
-                QueueKey,
-                token => ExecuteAsync(request, token),
-                coalesce: true);
+            string? previousWaitingMessage = null;
+            while (true)
+            {
+                var result = await executor.ExecuteAsync(
+                    request.RootPath,
+                    request.EditedSkinId,
+                    cancellation.Token).ConfigureAwait(false);
+                if (result.Status != LazerSkinReloadStatus.WaitingForForeground)
+                {
+                    await CompleteAsync(request, cancellation, result)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                if (!string.Equals(
+                        previousWaitingMessage,
+                        result.Message,
+                        StringComparison.Ordinal))
+                {
+                    previousWaitingMessage = result.Message;
+                    Log.Information(
+                        "Lazer skin reload request {RequestId} is waiting: {Message}",
+                        request.Id,
+                        result.Message);
+                }
+                await Task.Delay(foregroundPollInterval, cancellation.Token)
+                    .ConfigureAwait(false);
+            }
         }
-        catch (ObjectDisposedException)
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(
+                ex,
+                "Lazer skin reload request {RequestId} failed unexpectedly",
+                request.Id);
+            await CompleteAsync(
+                request,
+                cancellation,
+                new LazerSkinReloadResult(
+                    LazerSkinReloadStatus.ManualReloadRequired,
+                    "Automatic lazer reload failed; switch skins manually."))
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            cancellation.Dispose();
         }
     }
 
-    private async Task ExecuteAsync(PendingReload request, CancellationToken cancellationToken)
+    private async Task CompleteAsync(
+        PendingReload request,
+        CancellationTokenSource cancellation,
+        LazerSkinReloadResult result)
     {
-        nint ownerHandle = 0;
-        await owner.Dispatcher.InvokeAsync(() =>
-            ownerHandle = new WindowInteropHelper(owner).Handle);
-        if (ownerHandle == 0)
-            return;
-
-        var result = await executor.ExecuteAsync(
-            request.RootPath,
-            request.EditedSkinId,
-            ownerHandle,
-            cancellationToken).ConfigureAwait(false);
-        if (result.Status == LazerSkinReloadStatus.WaitingForForeground)
-            return;
-
-        Action<LazerSkinReloadResult>? completed = null;
+        Action<LazerSkinReloadResult>? completed;
         lock (gate)
         {
-            if (pending?.Id != request.Id)
+            if (disposed
+                || pending?.Id != request.Id
+                || !ReferenceEquals(pendingCancellation, cancellation))
+            {
                 return;
+            }
             completed = pending.Completed;
             pending = null;
+            pendingCancellation = null;
         }
 
         Log.Information(
-            "Lazer skin reload finished with {Status}: {Message}",
+            "Lazer skin reload request {RequestId} finished with {Status}: {Message}",
+            request.Id,
             result.Status,
             result.Message);
         if (completed is not null)
-            await owner.Dispatcher.InvokeAsync(() => completed(result));
+            await dispatchCompletion(() => completed(result)).ConfigureAwait(false);
     }
 
     public void Dispose()
     {
+        CancellationTokenSource? cancellation;
         lock (gate)
         {
             if (disposed)
                 return;
             disposed = true;
             pending = null;
+            cancellation = pendingCancellation;
+            pendingCancellation = null;
         }
-        owner.Activated -= Owner_Activated;
+        cancellation?.Cancel();
     }
 
     private sealed record PendingReload(
@@ -158,28 +216,53 @@ internal sealed class LazerSkinReloadExecutor
 {
     private readonly Func<string, int, IReadOnlyList<string>> loadBindings;
     private readonly ILazerSkinReloadPlatform platform;
+    private readonly SemaphoreSlim cycleGate = new(1, 1);
     private readonly TimeSpan selectionTimeout;
     private readonly TimeSpan selectionPollInterval;
+    private readonly TimeSpan returnFocusTimeout;
 
     public LazerSkinReloadExecutor(
         Func<string, int, IReadOnlyList<string>> loadBindings,
         ILazerSkinReloadPlatform platform,
         TimeSpan? selectionTimeout = null,
-        TimeSpan? selectionPollInterval = null)
+        TimeSpan? selectionPollInterval = null,
+        TimeSpan? returnFocusTimeout = null)
     {
         this.loadBindings = loadBindings;
         this.platform = platform;
-        this.selectionTimeout = selectionTimeout ?? TimeSpan.FromSeconds(2);
+        this.selectionTimeout = selectionTimeout ?? TimeSpan.FromSeconds(5);
         this.selectionPollInterval = selectionPollInterval ?? TimeSpan.FromMilliseconds(25);
+        this.returnFocusTimeout = returnFocusTimeout ?? TimeSpan.FromSeconds(30);
     }
 
     public async Task<LazerSkinReloadResult> ExecuteAsync(
         string rootPath,
         Guid editedSkinId,
-        nint ownerWindow,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var lazerWindow = platform.FindLazerWindow();
+        if (lazerWindow is null)
+        {
+            return new LazerSkinReloadResult(
+                LazerSkinReloadStatus.LazerNotRunning,
+                "The skin will load fresh the next time lazer starts.");
+        }
+        if (lazerWindow.Value.Handle != 0
+            && platform.IsMinimized(lazerWindow.Value.Handle))
+        {
+            return new LazerSkinReloadResult(
+                LazerSkinReloadStatus.WaitingForForeground,
+                "Reload is queued and will run when osu!lazer is restored and focused.");
+        }
+
+        if (!IsProcessForeground(lazerWindow.Value.ProcessId))
+        {
+            return new LazerSkinReloadResult(
+                LazerSkinReloadStatus.WaitingForForeground,
+                "Reload is queued and will run when osu!lazer is focused.");
+        }
+
         var selectedSkin = ReadSelectedSkinId(rootPath);
         if (selectedSkin != editedSkinId)
         {
@@ -188,49 +271,27 @@ internal sealed class LazerSkinReloadExecutor
                 "The edited skin is not active; lazer will load it fresh when selected.");
         }
 
-        var lazerWindow = platform.FindLazerWindow();
-        if (lazerWindow is null)
-        {
-            return new LazerSkinReloadResult(
-                LazerSkinReloadStatus.LazerNotRunning,
-                "The skin will load fresh the next time lazer starts.");
-        }
-        if (platform.IsMinimized(lazerWindow.Value.Handle))
-        {
-            return new LazerSkinReloadResult(
-                LazerSkinReloadStatus.ManualReloadRequired,
-                "Lazer is minimized; switch skins manually to reload.");
-        }
-
-        var previousForeground = platform.GetForegroundWindow();
-        if (previousForeground != ownerWindow && previousForeground != lazerWindow.Value.Handle)
-        {
-            return new LazerSkinReloadResult(
-                LazerSkinReloadStatus.WaitingForForeground,
-                "Reload is waiting until Kumori or lazer is active.");
-        }
-
-        var nextKeys = ResolveKeyboardBinding(rootPath, GlobalAction.NextSkin);
-        var previousKeys = ResolveKeyboardBinding(rootPath, GlobalAction.PreviousSkin);
-        if (nextKeys is null || previousKeys is null)
-        {
-            return new LazerSkinReloadResult(
-                LazerSkinReloadStatus.ManualReloadRequired,
-                "Lazer's Next/Previous Skin bindings are unavailable for keyboard input.");
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!platform.TryActivate(lazerWindow.Value.Handle))
-        {
-            return new LazerSkinReloadResult(
-                LazerSkinReloadStatus.WaitingForForeground,
-                "Reload is waiting until lazer can receive input.");
-        }
-
+        await cycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // Once the first action is sent, always attempt to return to the
-            // original skin even if gameplay cancellation arrives meanwhile.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsProcessForeground(lazerWindow.Value.ProcessId))
+            {
+                return new LazerSkinReloadResult(
+                    LazerSkinReloadStatus.WaitingForForeground,
+                    "Reload is queued and will run when osu!lazer is focused.");
+            }
+
+            var nextKeys = ResolveKeyboardBinding(rootPath, GlobalAction.NextSkin);
+            var previousKeys = ResolveKeyboardBinding(rootPath, GlobalAction.PreviousSkin);
+            if (nextKeys is null || previousKeys is null)
+            {
+                return new LazerSkinReloadResult(
+                    LazerSkinReloadStatus.ManualReloadRequired,
+                    "Lazer's Next/Previous Skin bindings are unavailable for keyboard input.");
+            }
+
+            Log.Information("Sending osu!lazer Next Skin shortcut");
             if (!platform.SendChord(nextKeys))
                 return ManualInputFailure();
 
@@ -240,6 +301,14 @@ internal sealed class LazerSkinReloadExecutor
             if (cycledSkin is null)
                 return ManualInputFailure();
 
+            if (!await WaitForForegroundProcessAsync(
+                    lazerWindow.Value.ProcessId,
+                    returnFocusTimeout).ConfigureAwait(false))
+            {
+                return ManualReturnFailure();
+            }
+
+            Log.Information("Sending osu!lazer Previous Skin shortcut");
             if (!platform.SendChord(previousKeys)
                 && !platform.SendChord(previousKeys))
             {
@@ -251,7 +320,10 @@ internal sealed class LazerSkinReloadExecutor
             {
                 // A transient dropped input should not strand the user on the
                 // neighbouring skin. Retry the return action once.
-                if (!platform.SendChord(previousKeys)
+                if (!await WaitForForegroundProcessAsync(
+                        lazerWindow.Value.ProcessId,
+                        returnFocusTimeout).ConfigureAwait(false)
+                    || !platform.SendChord(previousKeys)
                     || await WaitForSelectionAsync(
                         rootPath,
                         value => value == editedSkinId).ConfigureAwait(false) is null)
@@ -266,11 +338,7 @@ internal sealed class LazerSkinReloadExecutor
         }
         finally
         {
-            if (previousForeground != 0
-                && previousForeground != lazerWindow.Value.Handle)
-            {
-                platform.TryActivate(previousForeground);
-            }
+            cycleGate.Release();
         }
     }
 
@@ -279,6 +347,8 @@ internal sealed class LazerSkinReloadExecutor
         var path = Path.Combine(rootPath, "game.ini");
         try
         {
+            if (!File.Exists(path))
+                return null;
             using var stream = new FileStream(
                 path,
                 FileMode.Open,
@@ -293,9 +363,9 @@ internal sealed class LazerSkinReloadExecutor
                 {
                     continue;
                 }
-                return Guid.TryParse(line[(separator + 1)..].Trim(), out var skinId)
-                    ? skinId
-                    : null;
+                if (Guid.TryParse(line[(separator + 1)..].Trim(), out var skinId))
+                    return skinId;
+                return null;
             }
         }
         catch (IOException)
@@ -331,15 +401,50 @@ internal sealed class LazerSkinReloadExecutor
     {
         try
         {
-            return loadBindings(rootPath, (int)action)
+            var configured = loadBindings(rootPath, (int)action);
+            var resolved = configured
                 .Select(ParseKeyboardBinding)
                 .FirstOrDefault(binding => binding is { Length: > 0 });
+            return resolved ?? (configured.Count == 0
+                ? DefaultKeyboardBinding(action)
+                : null);
         }
         catch (Exception ex)
         {
             Log.Debug(ex, "Could not read lazer binding for {Action}", action);
-            return null;
+            return DefaultKeyboardBinding(action);
         }
+    }
+
+    private static ushort[]? DefaultKeyboardBinding(GlobalAction action) =>
+        action switch
+        {
+            GlobalAction.NextSkin => [0x10, 0x11, (ushort)'T'],
+            GlobalAction.PreviousSkin => [0x10, 0x11, (ushort)'E'],
+            _ => null,
+        };
+
+    private bool IsProcessForeground(int processId)
+    {
+        var foreground = platform.GetForegroundWindow();
+        var foregroundProcessId = foreground == 0
+            ? 0
+            : platform.GetWindowProcessId(foreground);
+        return foreground != 0 && foregroundProcessId == processId;
+    }
+
+    private async Task<bool> WaitForForegroundProcessAsync(
+        int processId,
+        TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (IsProcessForeground(processId))
+                return true;
+            await Task.Delay(selectionPollInterval).ConfigureAwait(false);
+        }
+        return false;
     }
 
     private async Task<Guid?> WaitForSelectionAsync(
@@ -421,8 +526,8 @@ internal interface ILazerSkinReloadPlatform
 {
     LazerWindow? FindLazerWindow();
     nint GetForegroundWindow();
+    int GetWindowProcessId(nint window);
     bool IsMinimized(nint window);
-    bool TryActivate(nint window);
     bool SendChord(IReadOnlyList<ushort> virtualKeys);
 }
 
@@ -430,25 +535,31 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
 {
     private static readonly string[] ProcessNames = ["osu!", "osu", "osu.Desktop", "osulazer"];
 
+    internal static int NativeInputSize => Marshal.SizeOf<NativeMethods.Input>();
+
     public LazerWindow? FindLazerWindow()
     {
         var preferredId = LazerReplayFrameDiagnostics.Load().ProcessId;
-        var candidates = new List<(Process Process, DateTime Started)>();
+        var candidates = new List<(Process Process, DateTime Started, nint Handle)>();
         try
         {
             foreach (var name in ProcessNames)
             {
                 foreach (var process in Process.GetProcessesByName(name))
                 {
-                    if (!IsLikelyLazer(process) || process.MainWindowHandle == 0)
+                    if (!IsLikelyLazer(process))
                     {
                         process.Dispose();
                         continue;
                     }
+                    process.Refresh();
+                    var handle = process.MainWindowHandle;
+                    if (handle == 0)
+                        handle = NativeMethods.FindVisibleTopLevelWindow(process.Id);
                     DateTime started;
                     try { started = process.StartTime; }
                     catch { started = DateTime.MinValue; }
-                    candidates.Add((process, started));
+                    candidates.Add((process, started, handle));
                 }
             }
 
@@ -458,7 +569,7 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
                 .FirstOrDefault();
             return selected.Process is null
                 ? null
-                : new LazerWindow(selected.Process.Id, selected.Process.MainWindowHandle);
+                : new LazerWindow(selected.Process.Id, selected.Handle);
         }
         finally
         {
@@ -469,25 +580,13 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
 
     public nint GetForegroundWindow() => NativeMethods.GetForegroundWindow();
 
-    public bool IsMinimized(nint window) => NativeMethods.IsIconic(window);
-
-    public bool TryActivate(nint window)
+    public int GetWindowProcessId(nint window)
     {
-        if (window == 0)
-            return false;
-        if (NativeMethods.GetForegroundWindow() == window)
-            return true;
-        if (!NativeMethods.SetForegroundWindow(window))
-            return false;
-        var stopwatch = Stopwatch.StartNew();
-        while (stopwatch.Elapsed < TimeSpan.FromMilliseconds(500))
-        {
-            if (NativeMethods.GetForegroundWindow() == window)
-                return true;
-            Thread.Sleep(20);
-        }
-        return false;
+        _ = NativeMethods.GetWindowThreadProcessId(window, out var processId);
+        return unchecked((int)processId);
     }
+
+    public bool IsMinimized(nint window) => NativeMethods.IsIconic(window);
 
     public bool SendChord(IReadOnlyList<ushort> virtualKeys)
     {
@@ -501,10 +600,11 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
                 NativeMethods.Input.Key(virtualKeys[index], keyUp: true);
         }
 
+        var inputSize = NativeInputSize;
         var sent = NativeMethods.SendInput(
             (uint)inputs.Length,
             inputs,
-            Marshal.SizeOf<NativeMethods.Input>());
+            inputSize);
         if (sent == inputs.Length)
             return true;
 
@@ -516,7 +616,7 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
         _ = NativeMethods.SendInput(
             (uint)releases.Length,
             releases,
-            Marshal.SizeOf<NativeMethods.Input>());
+            inputSize);
         return false;
     }
 
@@ -545,17 +645,42 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool SetForegroundWindow(nint window);
+        internal static extern bool IsIconic(nint window);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool IsIconic(nint window);
+        private static extern bool EnumWindows(EnumWindowsCallback callback, nint parameter);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowVisible(nint window);
+
+        [DllImport("user32.dll")]
+        internal static extern uint GetWindowThreadProcessId(
+            nint window,
+            out uint processId);
 
         [DllImport("user32.dll", SetLastError = true)]
         internal static extern uint SendInput(
             uint inputCount,
             [In] Input[] inputs,
             int inputSize);
+
+        internal static nint FindVisibleTopLevelWindow(int processId)
+        {
+            nint result = 0;
+            _ = EnumWindows((window, parameter) =>
+            {
+                _ = GetWindowThreadProcessId(window, out var candidateProcessId);
+                if (candidateProcessId != processId || !IsWindowVisible(window))
+                    return true;
+                result = window;
+                return false;
+            }, 0);
+            return result;
+        }
+
+        private delegate bool EnumWindowsCallback(nint window, nint parameter);
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Input
@@ -582,6 +707,14 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
         {
             [FieldOffset(0)]
             internal KeyboardInput Keyboard;
+
+            // INPUT contains a native union. Its size is determined by
+            // MOUSEINPUT, even when this particular event is a keyboard event.
+            [FieldOffset(0)]
+            internal MouseInput Mouse;
+
+            [FieldOffset(0)]
+            internal HardwareInput Hardware;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -592,6 +725,25 @@ internal sealed class WindowsLazerSkinReloadPlatform : ILazerSkinReloadPlatform
             internal uint Flags;
             internal uint Time;
             internal nuint ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct MouseInput
+        {
+            internal int X;
+            internal int Y;
+            internal uint MouseData;
+            internal uint Flags;
+            internal uint Time;
+            internal nuint ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct HardwareInput
+        {
+            internal uint Message;
+            internal ushort ParameterLow;
+            internal ushort ParameterHigh;
         }
     }
 }

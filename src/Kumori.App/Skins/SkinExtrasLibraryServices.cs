@@ -15,68 +15,239 @@ public static class SkinExtrasPersistentIndex
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
     };
+    private static string? memoryRoot;
+    private static IReadOnlyList<SkinExtraPackDescriptor>? memoryPacks;
+    private static FileSystemWatcher? memoryWatcher;
+    private static string? memoryWatcherRoot;
+    private static string? refreshingRoot;
+
+    public static event EventHandler? CacheRefreshed;
 
     public static IReadOnlyList<SkinExtraPackDescriptor> Scan(string extrasRoot)
     {
         if (!Directory.Exists(extrasRoot)) return [];
         lock (gate)
         {
-            var cache = ReadCache(extrasRoot);
-            var cached = cache.Packs.ToDictionary(
-                pack => pack.RelativePath,
-                StringComparer.OrdinalIgnoreCase);
-            var next = new List<CachedPack>();
-            var result = new List<SkinExtraPackDescriptor>();
-            foreach (var directory in SkinExtraPackIndex.FindCandidateDirectories(extrasRoot))
-            {
-                var relative = Path.GetRelativePath(extrasRoot, directory);
-                var stamp = Stamp(directory);
-                if (cached.TryGetValue(relative, out var existing)
-                    && existing.Stamp.Equals(stamp, StringComparison.Ordinal))
-                {
-                    next.Add(existing);
-                    result.Add(new SkinExtraPackDescriptor(
-                        directory,
-                        existing.Manifest,
-                        existing.IsLegacy));
-                    continue;
-                }
+            return ScanCore(extrasRoot, out _);
+        }
+    }
 
-                SkinExtraPackDescriptor? descriptor;
-                try { descriptor = SkinExtraPackIndex.TryBuildDescriptor(extrasRoot, directory); }
-                catch { continue; }
-                if (descriptor is null) continue;
-                if (descriptor.Manifest.Files.Any(file =>
-                        SkinElementCategorizer.IsAudio(file.TargetFilename))
-                    || SkinCursorMiddlePolicy.IsCursorFamily(
-                        descriptor.Manifest.FamilyId))
-                    descriptor = SkinExtraPackValidator.CanonicalizeDuplicateTargets(
-                        descriptor,
-                        forceRebuild: true);
-                var fresh = new CachedPack
-                {
-                    RelativePath = relative,
-                    Stamp = stamp,
-                    Manifest = descriptor.Manifest,
-                    IsLegacy = descriptor.IsLegacy,
-                };
-                next.Add(fresh);
-                result.Add(descriptor);
+    public static IReadOnlyList<SkinExtraPackDescriptor> ScanCached(string extrasRoot)
+    {
+        if (!Directory.Exists(extrasRoot)) return [];
+        var normalizedRoot = NormalizeRoot(extrasRoot);
+        lock (gate)
+        {
+            EnsureMemoryWatcher(normalizedRoot);
+            if (memoryPacks is not null
+                && StringComparer.OrdinalIgnoreCase.Equals(memoryRoot, normalizedRoot))
+            {
+                return memoryPacks;
             }
+
+            var persisted = ReadCache(normalizedRoot);
+            if (persisted.Packs.Count > 0)
+            {
+                memoryRoot = normalizedRoot;
+                memoryPacks = persisted.Packs
+                    .Select(pack => new SkinExtraPackDescriptor(
+                        Path.Combine(normalizedRoot, pack.RelativePath),
+                        pack.Manifest,
+                        pack.IsLegacy))
+                    .Where(pack => Directory.Exists(pack.DirectoryPath))
+                    .ToArray();
+                ScheduleBackgroundRefresh(normalizedRoot);
+                return memoryPacks;
+            }
+
+            return ScanCore(normalizedRoot, out _);
+        }
+    }
+
+    private static IReadOnlyList<SkinExtraPackDescriptor> ScanCore(
+        string extrasRoot,
+        out bool cacheChanged)
+    {
+        var normalizedRoot = NormalizeRoot(extrasRoot);
+        var cache = ReadCache(extrasRoot);
+        var cached = cache.Packs.ToDictionary(
+            pack => pack.RelativePath,
+            StringComparer.OrdinalIgnoreCase);
+        var next = new List<CachedPack>();
+        var result = new List<SkinExtraPackDescriptor>();
+        cacheChanged = cache.Schema != SchemaVersion
+                       || !File.Exists(IndexPath(extrasRoot));
+        foreach (var directory in SkinExtraPackIndex.FindCandidateDirectories(extrasRoot))
+        {
+            var relative = Path.GetRelativePath(extrasRoot, directory);
+            var stamp = Stamp(directory);
+            if (cached.TryGetValue(relative, out var existing)
+                && existing.Stamp.Equals(stamp, StringComparison.Ordinal))
+            {
+                next.Add(existing);
+                result.Add(new SkinExtraPackDescriptor(
+                    directory,
+                    existing.Manifest,
+                    existing.IsLegacy));
+                continue;
+            }
+
+            SkinExtraPackDescriptor? descriptor;
+            try { descriptor = SkinExtraPackIndex.TryBuildDescriptor(extrasRoot, directory); }
+            catch { continue; }
+            if (descriptor is null) continue;
+            cacheChanged = true;
+            if (descriptor.Manifest.Files.Any(file =>
+                    SkinElementCategorizer.IsAudio(file.TargetFilename))
+                || SkinCursorMiddlePolicy.IsCursorFamily(
+                    descriptor.Manifest.FamilyId))
+            {
+                descriptor = SkinExtraPackValidator.CanonicalizeDuplicateTargets(
+                    descriptor,
+                    forceRebuild: true);
+            }
+            var fresh = new CachedPack
+            {
+                RelativePath = relative,
+                Stamp = stamp,
+                Manifest = descriptor.Manifest,
+                IsLegacy = descriptor.IsLegacy,
+            };
+            next.Add(fresh);
+            result.Add(descriptor);
+        }
+        cacheChanged |= cached.Count != next.Count;
+        if (cacheChanged)
+        {
             WriteCache(extrasRoot, new IndexCache
             {
                 Schema = SchemaVersion,
                 Packs = next,
             });
-            return result;
         }
+        memoryRoot = normalizedRoot;
+        memoryPacks = result.ToArray();
+        return memoryPacks;
     }
 
     public static void Invalidate(string extrasRoot)
     {
+        InvalidateMemory(extrasRoot);
         var path = IndexPath(extrasRoot);
         try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
+
+    public static void InvalidateMemory(string extrasRoot)
+    {
+        var normalizedRoot = NormalizeRoot(extrasRoot);
+        lock (gate)
+        {
+            if (!StringComparer.OrdinalIgnoreCase.Equals(memoryRoot, normalizedRoot))
+                return;
+            memoryRoot = null;
+            memoryPacks = null;
+        }
+    }
+
+    private static void EnsureMemoryWatcher(string extrasRoot)
+    {
+        if (memoryWatcher is not null
+            && StringComparer.OrdinalIgnoreCase.Equals(memoryWatcherRoot, extrasRoot))
+        {
+            return;
+        }
+
+        memoryWatcher?.Dispose();
+        memoryWatcher = null;
+        memoryWatcherRoot = null;
+        try
+        {
+            var watcher = new FileSystemWatcher(extrasRoot)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName
+                               | NotifyFilters.LastWrite | NotifyFilters.Size,
+            };
+            FileSystemEventHandler changed = (_, args) =>
+            {
+                if (!IsIndexPath(extrasRoot, args.FullPath))
+                    InvalidateMemory(extrasRoot);
+            };
+            RenamedEventHandler renamed = (_, args) =>
+            {
+                if (!IsIndexPath(extrasRoot, args.FullPath)
+                    || !IsIndexPath(extrasRoot, args.OldFullPath))
+                {
+                    InvalidateMemory(extrasRoot);
+                }
+            };
+            watcher.Created += changed;
+            watcher.Changed += changed;
+            watcher.Deleted += changed;
+            watcher.Renamed += renamed;
+            watcher.EnableRaisingEvents = true;
+            memoryWatcher = watcher;
+            memoryWatcherRoot = extrasRoot;
+        }
+        catch
+        {
+            // The persistent cache remains the fallback when watching is unavailable.
+        }
+    }
+
+    private static void ScheduleBackgroundRefresh(string extrasRoot)
+    {
+        if (StringComparer.OrdinalIgnoreCase.Equals(refreshingRoot, extrasRoot))
+            return;
+        refreshingRoot = extrasRoot;
+        _ = Task.Run(async () =>
+        {
+            // Let the cached catalog render before competing for the same disk
+            // with a full recursive validation.
+            await Task.Delay(500).ConfigureAwait(false);
+            var changed = false;
+            try
+            {
+                lock (gate)
+                    _ = ScanCore(extrasRoot, out changed);
+            }
+            catch
+            {
+                // A pack may be changing while the background validation walks it.
+                // The watcher will schedule another refresh after that mutation settles.
+            }
+            finally
+            {
+                lock (gate)
+                {
+                    if (StringComparer.OrdinalIgnoreCase.Equals(
+                            refreshingRoot,
+                            extrasRoot))
+                    {
+                        refreshingRoot = null;
+                    }
+                }
+            }
+            if (changed)
+                CacheRefreshed?.Invoke(null, EventArgs.Empty);
+        });
+    }
+
+    private static bool IsIndexPath(string extrasRoot, string path)
+    {
+        var internalRoot = Path.Combine(extrasRoot, ".kumori")
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var candidate = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return candidate.Equals(internalRoot, StringComparison.OrdinalIgnoreCase)
+               || candidate.StartsWith(
+                   internalRoot + Path.DirectorySeparatorChar,
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRoot(string root) =>
+        Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
     private static string Stamp(string directory)
     {
@@ -535,9 +706,10 @@ public static class SkinExtraPackValidator
             && SkinFollowpointSequence.Validate(
                 manifest.Files.Select(file => file.TargetFilename)) is { } sequenceProblem)
         {
-            issues.Add(Error(
+            issues.Add(Warn(
                 sequenceProblem.Code,
-                sequenceProblem.Message,
+                sequenceProblem.Message
+                + " Kumori will restore missing timing frames as transparent placeholders when staged.",
                 sequenceProblem.Filename));
         }
 

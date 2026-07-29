@@ -161,6 +161,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         };
         audioProgressTimer.Tick += (_, _) => UpdateAudioProgress();
         Unloaded += (_, _) => Dispose();
+        SkinExtrasPersistentIndex.CacheRefreshed += PersistentIndex_CacheRefreshed;
         extrasSyncService.ProgressChanged += ExtrasSyncService_ProgressChanged;
         extrasSyncService.LibraryChanged += ExtrasSyncService_LibraryChanged;
         if (extrasSyncService.CurrentProgress is not null)
@@ -188,6 +189,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         previewCancellation?.Cancel();
         previewCancellation?.Dispose();
         extrasWatcher?.Dispose();
+        SkinExtrasPersistentIndex.CacheRefreshed -= PersistentIndex_CacheRefreshed;
         extrasSyncService.ProgressChanged -= ExtrasSyncService_ProgressChanged;
         extrasSyncService.LibraryChanged -= ExtrasSyncService_LibraryChanged;
         StopAudio();
@@ -295,6 +297,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private void ExtrasSyncService_LibraryChanged(object? sender, EventArgs e) =>
         _ = Dispatcher.InvokeAsync(RefreshLibrary);
 
+    private void PersistentIndex_CacheRefreshed(object? sender, EventArgs e) =>
+        _ = Dispatcher.InvokeAsync(RefreshLibrary);
+
     private async void CheckExtrasUpdates_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -350,13 +355,20 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         };
         FileSystemEventHandler changed = (_, args) =>
         {
-            if (!IsInternalLibraryPath(args.FullPath)) ScheduleReload();
+            if (!IsInternalLibraryPath(args.FullPath))
+            {
+                SkinExtrasPersistentIndex.InvalidateMemory(AppPaths.SkinExtrasDir);
+                ScheduleReload();
+            }
         };
         RenamedEventHandler renamed = (_, args) =>
         {
             if (!IsInternalLibraryPath(args.FullPath)
                 && !IsInternalLibraryPath(args.OldFullPath))
+            {
+                SkinExtrasPersistentIndex.InvalidateMemory(AppPaths.SkinExtrasDir);
                 ScheduleReload();
+            }
         };
         extrasWatcher.Created += changed;
         extrasWatcher.Changed += changed;
@@ -619,7 +631,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     {
         Directory.CreateDirectory(AppPaths.SkinExtrasDir);
         var libraryState = SkinExtrasLibraryStateStore.GetAll(AppPaths.SkinExtrasDir);
-        var previews = SkinExtraPackIndex.Scan(AppPaths.SkinExtrasDir)
+        var previews = SkinExtrasPersistentIndex.ScanCached(AppPaths.SkinExtrasDir)
             .SelectMany(descriptor => SplitDisplayFamilies(descriptor)
                 .Select(split => TryCreatePack(
                     split,
@@ -754,22 +766,19 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             return other is not null
                    && !file.IsAudio
                    && !other.IsAudio
-                   && IsFullyTransparentImageFile(file.Path)
-                   && IsFullyTransparentImageFile(other.Path);
+                   && IsTransparentManifestFile(left.Manifest, file.Name)
+                   && IsTransparentManifestFile(right.Manifest, other.Name);
         });
     }
 
-    private static bool IsFullyTransparentImageFile(string path)
-    {
-        try
-        {
-            return SkinImageTools.IsFullyTransparentImage(File.ReadAllBytes(path));
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool IsTransparentManifestFile(
+        SkinExtraPackManifest manifest,
+        string targetFilename) =>
+        manifest.Files.FirstOrDefault(file => file.TargetFilename.Equals(
+            targetFilename,
+            StringComparison.OrdinalIgnoreCase))?.SimilarityHash?.Equals(
+            "transparent",
+            StringComparison.OrdinalIgnoreCase) == true;
 
     private static bool SamePackSource(
         SkinExtraPackManifest left,
@@ -3943,6 +3952,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             .Where(file => file.IsSelected)
             .Select(file => file.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        SkinFollowpointSequence.IncludeTransparentManifestFrames(
+            pack.Manifest,
+            selectedTargets);
         var selectedSettings = pack.Settings
             .Where(setting => setting.IsSelected
                               && (!setting.IsRequired || selectedTargets.Count > 0))

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.6.2",
+    "date": "2026-07-29",
+    "improvements": [
+      "Made Extras Studio reopen faster from a persistent catalog snapshot while pack validation and update checks continue in the background",
+      "Avoided unnecessary image decoding while collapsing duplicate Extras packs"
+    ],
+    "fixes": [
+      "Queued osu!lazer skin reloads until the game is focused and sent the configured skin-cycle shortcuts through the correct native Windows input layout",
+      "Restored missing followpoint timing frames as transparent placeholders so incomplete numbered sequences can be staged safely"
+    ]
+  },
+  {
     "version": "0.6.1",
     "date": "2026-07-29",
     "features": [

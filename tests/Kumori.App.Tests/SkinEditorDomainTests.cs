@@ -798,6 +798,69 @@ public sealed class SkinEditorDomainTests
     }
 
     [Fact]
+    public void Followpoint_staging_restores_missing_timing_frames_as_transparent_pngs()
+    {
+        var completed = SkinFollowpointSequence.CompleteWithTransparentFrames(
+        [
+            new SkinExtraPackFile("followpoint-1.png", [1]),
+            new SkinExtraPackFile("followpoint-3@2x.png", [3]),
+        ]);
+
+        Assert.Equal(4, completed.Count);
+        var frameZero = Assert.Single(completed, file =>
+            file.Filename == "followpoint-0.png");
+        var frameTwo = Assert.Single(completed, file =>
+            file.Filename == "followpoint-2.png");
+        foreach (var frame in new[] { frameZero, frameTwo })
+        {
+            var bitmap = SkinImageTools.Decode(frame.Bytes);
+            Assert.Equal(1, bitmap.PixelWidth);
+            Assert.Equal(1, bitmap.PixelHeight);
+            Assert.False(SkinImageTools.HasVisiblePixels(
+                SkinImageTools.Pixels(bitmap, out _)));
+        }
+    }
+
+    [Fact]
+    public void Followpoint_selection_includes_hidden_transparent_manifest_frames()
+    {
+        var manifest = new SkinExtraPackManifest
+        {
+            Id = "followpoints",
+            DisplayName = "Followpoints",
+            FamilyId = "osu.followpoints",
+            Area = "osu!",
+            FamilyName = "Followpoints",
+            Fingerprint = new string('a', 64),
+            Files =
+            [
+                new SkinExtraManifestFile(
+                    "followpoint-0.png",
+                    "followpoint-0.png",
+                    "followpoint-0.png",
+                    "zero",
+                    "zero",
+                    "transparent"),
+                new SkinExtraManifestFile(
+                    "followpoint-1.png",
+                    "followpoint-1.png",
+                    "followpoint-1.png",
+                    "one",
+                    "visible"),
+            ],
+        };
+        var selected = new HashSet<string>(
+            ["followpoint-1.png"],
+            StringComparer.OrdinalIgnoreCase);
+
+        SkinFollowpointSequence.IncludeTransparentManifestFrames(
+            manifest,
+            selected);
+
+        Assert.Contains("followpoint-0.png", selected);
+    }
+
+    [Fact]
     public void Logical_element_selection_replaces_only_stale_files_in_selected_elements()
     {
         var replaced = SkinExtraLogicalSelectionPlanner.FindReplacedCurrentFiles(

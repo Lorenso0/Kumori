@@ -218,6 +218,7 @@ internal sealed record SkinFollowpointSequenceProblem(
 internal static class SkinFollowpointSequence
 {
     private const string FramePrefix = "followpoint-";
+    private const int MaxAutoCompletedFrame = 4096;
 
     public static SkinFollowpointSequenceProblem? Validate(IEnumerable<string> filenames)
     {
@@ -258,6 +259,67 @@ internal static class SkinFollowpointSequence
 
         return null;
     }
+
+    public static IReadOnlyList<SkinExtraPackFile> CompleteWithTransparentFrames(
+        IEnumerable<SkinExtraPackFile> files)
+    {
+        var completed = files.ToList();
+        var present = completed
+            .Select(file => TryGetFrameIndex(file.Filename, out var index)
+                ? (BigInteger?)index
+                : null)
+            .Where(index => index.HasValue)
+            .Select(index => index!.Value)
+            .ToHashSet();
+        if (present.Count == 0)
+            return completed;
+
+        var last = present.Max();
+        if (last > MaxAutoCompletedFrame)
+        {
+            throw new InvalidDataException(
+                $"Followpoint frame {last} is too large to safely complete the animation.");
+        }
+
+        for (var index = BigInteger.Zero; index <= last; index++)
+        {
+            if (present.Contains(index))
+                continue;
+            var filename = $"{FramePrefix}{index.ToString(CultureInfo.InvariantCulture)}.png";
+            completed.Add(new SkinExtraPackFile(
+                filename,
+                CreateTransparentFramePng(filename)));
+        }
+
+        return completed;
+    }
+
+    public static void IncludeTransparentManifestFrames(
+        SkinExtraPackManifest manifest,
+        ISet<string> selectedTargets)
+    {
+        if (selectedTargets.Count == 0
+            || !manifest.FamilyId.Equals(
+                "osu.followpoints",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var file in manifest.Files.Where(file =>
+                     string.Equals(
+                         file.SimilarityHash,
+                         "transparent",
+                         StringComparison.OrdinalIgnoreCase)))
+        {
+            selectedTargets.Add(file.TargetFilename);
+        }
+    }
+
+    private static byte[] CreateTransparentFramePng(string filename) =>
+        SkinImageTools.Encode(
+            SkinImageTools.ToBitmap([0, 0, 0, 0], 1, 1, 4),
+            filename);
 
     private static bool TryGetFrameIndex(string filename, out BigInteger index)
     {

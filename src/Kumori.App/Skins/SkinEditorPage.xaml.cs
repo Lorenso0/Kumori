@@ -4846,7 +4846,7 @@ public partial class SkinEditorPage : UserControl
                     return false;
                 }
             }
-            var effectiveIncoming = incoming
+            IReadOnlyList<SkinExtraPackFile> effectiveIncoming = incoming
                 .Where(file => !lazerUsedOnly
                                || SkinExtraLazerCompatibility.IsLazerUsed(
                                    file.Filename,
@@ -4854,6 +4854,14 @@ public partial class SkinEditorPage : UserControl
                 .Where(file => !SkinCursorMiddlePolicy.IsCursorFamily(manifest.FamilyId)
                                || !SkinCursorMiddlePolicy.IsCursorMiddle(file.Filename))
                 .ToArray();
+            if (manifest.FamilyId.Equals(
+                    "osu.followpoints",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                effectiveIncoming =
+                    SkinFollowpointSequence.CompleteWithTransparentFrames(
+                        effectiveIncoming);
+            }
             var effectiveFiles = SkinDraftProjection.EffectiveFiles(
                 currentSkin.Files,
                 draft.Changes);
@@ -4968,7 +4976,7 @@ public partial class SkinEditorPage : UserControl
                 $"Use {packName} for {manifest.FamilyName}?\n\n"
                 + $"{selection.LogicalElementCount} selected element"
                 + (selection.LogicalElementCount == 1 ? "" : "s")
-                + $" · {selection.PhysicalFileCount} files"
+                + $" · {resolvedIncoming.Count + (selection.SmoothTrail ? 1 : 0)} files"
                 + (selection.SettingCount == 0 ? "" : $" · {selection.SettingCount} settings")
                 + $"\n{replaced} replaced · {added} added"
                 + (removed == 0 ? "" : $" · {removed} family-owned files removed")

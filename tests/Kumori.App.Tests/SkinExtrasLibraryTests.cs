@@ -47,6 +47,12 @@ public sealed class SkinExtrasLibraryTests
 
             var refreshed = Assert.Single(SkinExtraPackIndex.Scan(root));
             Assert.Equal("Renamed", refreshed.Manifest.DisplayName);
+
+            var indexPath = Path.Combine(root, ".kumori", "index-v1.json");
+            var stableWriteTime = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(indexPath, stableWriteTime);
+            _ = SkinExtraPackIndex.Scan(root);
+            Assert.Equal(stableWriteTime, File.GetLastWriteTimeUtc(indexPath));
         }
         finally { Delete(root); }
     }
@@ -198,7 +204,7 @@ public sealed class SkinExtrasLibraryTests
     }
 
     [Fact]
-    public void Validator_rejects_followpoint_animations_that_start_late_or_have_gaps()
+    public void Validator_warns_for_followpoint_timing_gaps_that_staging_can_restore()
     {
         var root = TempDirectory();
         try
@@ -225,12 +231,25 @@ public sealed class SkinExtrasLibraryTests
                     verifyContent: false);
             }
 
+            var late = Validate("followpoint-26.png", "followpoint-27@2x.png");
+            var gap = Validate("followpoint-0.png", "followpoint-2.png");
+
             Assert.Contains(
-                Validate("followpoint-26.png", "followpoint-27@2x.png").Issues,
-                issue => issue.Code == "followpoint-sequence-start");
+                late.Issues,
+                issue => issue.Code == "followpoint-sequence-start"
+                         && issue.Severity == SkinExtraHealthSeverity.Warning);
             Assert.Contains(
-                Validate("followpoint-0.png", "followpoint-2.png").Issues,
-                issue => issue.Code == "followpoint-sequence-gap");
+                gap.Issues,
+                issue => issue.Code == "followpoint-sequence-gap"
+                         && issue.Severity == SkinExtraHealthSeverity.Warning);
+            Assert.DoesNotContain(
+                late.Issues,
+                issue => issue.Code == "followpoint-sequence-start"
+                         && issue.Severity == SkinExtraHealthSeverity.Error);
+            Assert.DoesNotContain(
+                gap.Issues,
+                issue => issue.Code == "followpoint-sequence-gap"
+                         && issue.Severity == SkinExtraHealthSeverity.Error);
             Assert.DoesNotContain(
                 Validate("followpoint.png").Issues,
                 issue => issue.Code.StartsWith(
