@@ -178,9 +178,9 @@ internal static class DifficultyStrainCurveBuilder
         return result;
     }
 
-    // The NuGet packages do not expose lazer's source-only object-difficulty
-    // helper. These tiny derived types capture the values while the public
-    // skill processor runs, without modifying upstream code.
+    // Upstream does not expose its object-difficulty helper publicly. These
+    // tiny derived types capture the values while the public skill processor
+    // runs, without modifying upstream code.
     private sealed class KumoriAim(Mod[] mods, bool includeSliders) : Aim(mods, includeSliders)
     {
         public double LastObjectDifficulty { get; private set; }

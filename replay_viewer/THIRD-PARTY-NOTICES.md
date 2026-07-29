@@ -1,9 +1,11 @@
 # Third-party notices
 
-Kumori Replay Viewer uses the official [ppy/osu](https://github.com/ppy/osu)
-and osu.Framework NuGet packages. Both are used under their MIT licences.
+Kumori Replay Viewer builds against the official [ppy/osu](https://github.com/ppy/osu)
+`2026.726.0-lazer` source and its osu.Framework dependency. Both are used
+under their MIT licences.
 
-The exact package versions are pinned in `Kumori.ReplayViewer.csproj`.
+The exact ppy/osu revision is pinned by `scripts/update-lazer.ps1` and the
+release version is emitted by `Kumori.ReplayViewer --probe`.
 
 Copyright (c) ppy Pty Ltd.
 

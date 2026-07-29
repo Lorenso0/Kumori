@@ -36,3 +36,7 @@ capture_tests/obj/
 third_party/osu/
 push-to-github.bat
 /UPDATE.md
+/SKINS.md
+/.tmp/
+/.recovery/
+/.restore-points/

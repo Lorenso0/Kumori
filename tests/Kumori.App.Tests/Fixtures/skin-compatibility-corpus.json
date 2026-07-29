@@ -1,0 +1,42 @@
+[
+  {
+    "name": "classic-v1-default-fonts",
+    "ini": "[General]\r\nName: Classic\r\nAuthor: Mapper\r\nVersion: 1.0\r\n\r\n[Fonts]\r\nHitCirclePrefix: default\r\nHitCircleOverlap: -2\r\nScorePrefix: score\r\nScoreOverlap: 0\r\nComboPrefix: score\r\nComboOverlap: 0\r\n",
+    "expected": {
+      "General.Version": "1.0",
+      "Fonts.HitCirclePrefix": "default",
+      "Fonts.HitCircleOverlap": "-2",
+      "Fonts.ComboPrefix": "score"
+    }
+  },
+  {
+    "name": "custom-combo-number-font",
+    "ini": "[General]\nVersion: 2.7\n\n[Fonts]\nHitCirclePrefix: hc\nHitCircleOverlap: 3\nScorePrefix: points\nScoreOverlap: -1\nComboPrefix: combo\nComboOverlap: 5\n",
+    "expected": {
+      "Fonts.HitCirclePrefix": "hc",
+      "Fonts.ScorePrefix": "points",
+      "Fonts.ComboPrefix": "combo",
+      "Fonts.ComboOverlap": "5"
+    }
+  },
+  {
+    "name": "colours-and-slider-settings",
+    "ini": "[General]\r\nAllowSliderBallTint: 1\r\nHitCircleOverlayAboveNumber: 0\r\n\r\n[Colours]\r\nCombo1: 255,100,100\r\nCombo2: 100,200,255\r\nSliderBorder: 245,245,245\r\nSliderTrackOverride: 15,20,25\r\nSpinnerBackground: 50,60,70\r\n",
+    "expected": {
+      "General.AllowSliderBallTint": "1",
+      "Colours.Combo1": "255,100,100",
+      "Colours.SliderTrackOverride": "15,20,25",
+      "Colours.SpinnerBackground": "50,60,70"
+    }
+  },
+  {
+    "name": "repeated-mania-sections",
+    "ini": "[General]\nVersion: latest\n\n[Mania]\nKeys: 4\nColumnStart: 136\nHitPosition: 402\n\n[Mania]\nKeys: 7\nColumnStart: 82\nHitPosition: 410\n",
+    "expected": {
+      "General.Version": "latest",
+      "Mania[4].Keys": "4",
+      "Mania[4].ColumnStart": "136",
+      "Mania[7].HitPosition": "410"
+    }
+  }
+]

@@ -18,6 +18,111 @@ public sealed record SkinIniKeyDefinition(
     SkinIniValueType Type,
     string DefaultValue);
 
+public enum SkinIniVisualGroup
+{
+    Identity,
+    Animation,
+    Slider,
+    Combo,
+    Cursor,
+    HitObjects,
+    Spinner,
+    Interface,
+    Fonts,
+    Catch,
+}
+
+public enum SkinIniPreviewKind
+{
+    Information,
+    ComboPalette,
+    Slider,
+    Cursor,
+    HitObjects,
+    Spinner,
+    Interface,
+    Catch,
+}
+
+public sealed record SkinIniRichMetadata(
+    SkinIniVisualGroup Group,
+    SkinIniPreviewKind Preview,
+    string Help,
+    IReadOnlyList<string> Affects);
+
+public sealed record SkinIniSectionInstance(
+    string Name,
+    int Occurrence,
+    int? ManiaKeys,
+    IReadOnlyDictionary<string, string> Values);
+
+/// <summary>
+/// Presentation-only metadata for Form mode. It deliberately sits beside the
+/// schema so its ordering and Raw-mode serialization never change.
+/// </summary>
+public static class SkinIniRichEditor
+{
+    public static SkinIniRichMetadata Describe(SkinIniKeyDefinition definition)
+    {
+        var (section, key) = (definition.Section, definition.Key);
+        if (section.Equals("Colours", StringComparison.OrdinalIgnoreCase))
+        {
+            if (key.StartsWith("Combo", StringComparison.OrdinalIgnoreCase))
+                return New(SkinIniVisualGroup.Combo, SkinIniPreviewKind.ComboPalette,
+                    "Controls the repeating hit-object colour sequence.", "Hit circles", "Approach circles", "Slider ball");
+            if (key.StartsWith("Slider", StringComparison.OrdinalIgnoreCase))
+                return New(SkinIniVisualGroup.Slider, SkinIniPreviewKind.Slider,
+                    "Updates the rendered slider body and ball in the live preview.", "Slider body", "Slider border", "Slider ball");
+            if (key.StartsWith("SongSelect", StringComparison.OrdinalIgnoreCase) || key is "InputOverlayText" or "MenuGlow")
+                return New(SkinIniVisualGroup.Interface, SkinIniPreviewKind.Interface,
+                    "Applies to osu!'s interface rather than the playfield.", "HUD", "Song select");
+            if (key.StartsWith("Spinner", StringComparison.OrdinalIgnoreCase) || key == "StarBreakAdditive")
+                return New(SkinIniVisualGroup.Spinner, SkinIniPreviewKind.Spinner,
+                    "Applies to spinner or break-time presentation.", "Spinner", "Break effects");
+        }
+
+        if (section.Equals("CatchTheBeat", StringComparison.OrdinalIgnoreCase))
+            return New(SkinIniVisualGroup.Catch, SkinIniPreviewKind.Catch,
+                "Applies to Catch the Beat hyperdash effects.", "Catch", "Hyperdash");
+        if (section.Equals("Fonts", StringComparison.OrdinalIgnoreCase))
+            return New(SkinIniVisualGroup.Fonts, SkinIniPreviewKind.HitObjects,
+                "Changes the number assets used by hit objects or score displays.", "Hit-object numbers", "Score");
+
+        return key switch
+        {
+            "AnimationFramerate" => New(SkinIniVisualGroup.Animation, SkinIniPreviewKind.Information,
+                "Sets the frame rate for animated skin elements.", "Animated assets"),
+            "AllowSliderBallTint" or "SliderBallFlip" => New(SkinIniVisualGroup.Slider, SkinIniPreviewKind.Slider,
+                "Changes slider behaviour in the live slider preview.", "Slider ball", "Reverse arrows"),
+            "ComboBurstRandom" or "CustomComboBurstSounds" => New(SkinIniVisualGroup.Combo, SkinIniPreviewKind.ComboPalette,
+                "Changes combo progression feedback.", "Combo colours", "Combo bursts"),
+            "CursorCentre" or "CursorExpand" or "CursorRotate" or "CursorTrailRotate" => New(SkinIniVisualGroup.Cursor, SkinIniPreviewKind.Cursor,
+                "Changes how the cursor and cursor trail behave.", "Cursor", "Cursor trail"),
+            "HitCircleOverlayAboveNumber" or "LayeredHitSounds" => New(SkinIniVisualGroup.HitObjects, SkinIniPreviewKind.HitObjects,
+                "Changes how hit objects are layered or sounded.", "Hit circles", "Numbers", "Overlay"),
+            "SpinnerFadePlayfield" or "SpinnerFrequencyModulate" or "SpinnerNoBlink" => New(SkinIniVisualGroup.Spinner, SkinIniPreviewKind.Spinner,
+                "Changes spinner presentation or feedback.", "Spinner"),
+            _ => New(SkinIniVisualGroup.Identity, SkinIniPreviewKind.Information,
+                "General skin information.", "Skin metadata"),
+        };
+    }
+
+    public static string DisplayName(SkinIniVisualGroup group) => group switch
+    {
+        SkinIniVisualGroup.HitObjects => "Hit objects",
+        SkinIniVisualGroup.Combo => "Combo & hit colours",
+        SkinIniVisualGroup.Interface => "Interface colours",
+        SkinIniVisualGroup.Catch => "Catch the Beat",
+        _ => group.ToString(),
+    };
+
+    private static SkinIniRichMetadata New(
+        SkinIniVisualGroup group,
+        SkinIniPreviewKind preview,
+        string help,
+        params string[] affects) => new(group, preview, help, affects);
+}
+
 /// <summary>Line-preserving skin.ini parser/editor, including unknown and repeated sections.</summary>
 public sealed class SkinIniDocument
 {
@@ -85,6 +190,26 @@ public sealed class SkinIniDocument
     public bool HasValue(string section, string key) =>
         index.TryGetValue(section, out var keys) && keys.ContainsKey(key);
 
+    public IReadOnlyList<SkinIniSectionInstance> GetSections(string section)
+    {
+        var result = new List<SkinIniSectionInstance>();
+        foreach (var header in FindSections(section))
+        {
+            var values = ReadSectionValues(header);
+            int? maniaKeys = null;
+            if (section.Equals("Mania", StringComparison.OrdinalIgnoreCase)
+                && values.TryGetValue("Keys", out var rawKeys)
+                && int.TryParse(rawKeys, out var parsedKeys))
+                maniaKeys = parsedKeys;
+            result.Add(new SkinIniSectionInstance(
+                section,
+                result.Count,
+                maniaKeys,
+                values));
+        }
+        return result;
+    }
+
     public void SetValue(string section, string key, string value)
     {
         if (index.TryGetValue(section, out var keys)
@@ -122,6 +247,62 @@ public sealed class SkinIniDocument
         }
 
         Reindex();
+    }
+
+    /// <summary>
+    /// Sets a value in the Mania section for a specific key count. Unlike the
+    /// regular editor index this safely addresses repeated [Mania] sections.
+    /// </summary>
+    public void SetManiaValue(int keys, string key, string value)
+    {
+        var header = FindManiaSection(keys);
+        if (header < 0)
+        {
+            if (lines.Count > 0 && lines[^1].Length > 0)
+                lines.Add("");
+            lines.Add("[Mania]");
+            lines.Add($"Keys: {keys}");
+            if (!key.Equals("Keys", StringComparison.OrdinalIgnoreCase))
+                lines.Add($"{key}: {value}");
+            Reindex();
+            return;
+        }
+        SetValueInSection(header, key, value);
+    }
+
+    public void RemoveManiaValue(int keys, string key)
+    {
+        var header = FindManiaSection(keys);
+        if (header < 0) return;
+        var line = FindKeyInSection(header, key);
+        if (line < 0) return;
+        lines.RemoveAt(line);
+        Reindex();
+    }
+
+    public void ApplyPatch(IEnumerable<SkinExtraIniPatchEntry> patch)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        foreach (var entry in patch)
+        {
+            if (entry.Section.Equals("Mania", StringComparison.OrdinalIgnoreCase))
+            {
+                if (entry.ManiaKeys is not int maniaKeys)
+                    continue;
+                if (entry.Value is null)
+                    RemoveManiaValue(maniaKeys, entry.Key);
+                else
+                    SetManiaValue(maniaKeys, entry.Key, entry.Value);
+            }
+            else if (entry.Value is null)
+            {
+                RemoveValue(entry.Section, entry.Key);
+            }
+            else
+            {
+                SetValue(entry.Section, entry.Key, entry.Value);
+            }
+        }
     }
 
     public void RemoveValue(string section, string key)
@@ -187,7 +368,10 @@ public sealed class SkinIniDocument
             if (colon <= 0) continue;
             if (!index.TryGetValue(section, out var keys))
                 index[section] = keys = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            keys.TryAdd(line[..colon].Trim(), lineIndex);
+            // osu!'s legacy decoder assigns every value as it is encountered,
+            // so a repeated key (including one in a repeated section) is
+            // resolved using its last occurrence.
+            keys[line[..colon].Trim()] = lineIndex;
         }
     }
 
@@ -200,6 +384,83 @@ public sealed class SkinIniDocument
         }
 
         return -1;
+    }
+
+    private IReadOnlyList<int> FindSections(string section)
+    {
+        var result = new List<int>();
+        for (var line = 0; line < lines.Count; line++)
+            if (lines[line].Trim().Equals($"[{section}]", StringComparison.OrdinalIgnoreCase))
+                result.Add(line);
+        return result;
+    }
+
+    private int FindManiaSection(int keys)
+    {
+        foreach (var header in FindSections("Mania"))
+        {
+            var values = ReadSectionValues(header);
+            if (values.TryGetValue("Keys", out var raw)
+                && int.TryParse(raw, out var parsed)
+                && parsed == keys)
+                return header;
+        }
+        return -1;
+    }
+
+    private Dictionary<string, string> ReadSectionValues(int header)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var line = header + 1; line < lines.Count; line++)
+        {
+            var trimmed = lines[line].Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']')) break;
+            if (trimmed.Length == 0 || trimmed.StartsWith("//")) continue;
+            var colon = trimmed.IndexOf(':');
+            if (colon <= 0) continue;
+            result[trimmed[..colon].Trim()] = trimmed[(colon + 1)..].Trim();
+        }
+        return result;
+    }
+
+    private int FindKeyInSection(int header, string key)
+    {
+        var result = -1;
+        for (var line = header + 1; line < lines.Count; line++)
+        {
+            var trimmed = lines[line].Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']')) break;
+            var colon = trimmed.IndexOf(':');
+            if (colon > 0 && trimmed[..colon].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                result = line;
+        }
+        return result;
+    }
+
+    private void SetValueInSection(int header, string key, string value)
+    {
+        var existingLine = FindKeyInSection(header, key);
+        if (existingLine >= 0)
+        {
+            var existing = lines[existingLine];
+            var indentation = existing[..(existing.Length - existing.TrimStart().Length)];
+            lines[existingLine] = $"{indentation}{key}: {value}";
+        }
+        else
+        {
+            var insertion = lines.Count;
+            for (var line = header + 1; line < lines.Count; line++)
+            {
+                var trimmed = lines[line].Trim();
+                if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+                {
+                    insertion = line;
+                    break;
+                }
+            }
+            lines.Insert(insertion, $"{key}: {value}");
+        }
+        Reindex();
     }
 
     private static SkinIniDocument ParseText(string text, Encoding encoding)

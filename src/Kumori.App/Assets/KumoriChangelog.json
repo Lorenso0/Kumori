@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.6.0",
+    "date": "2026-07-29",
+    "major": [
+      "Added Extras Studio, a complete osu! skin-element library for extracting, browsing, comparing, mixing, and staging individual assets before applying them"
+    ],
+    "features": [
+      "Added reusable Extras packs from osu!lazer skins, stable skin folders, and .osk archives, with search, tags, favorites, renaming, health checks, repair, and portable .kextra import and export",
+      "Added a signed public Extras catalog that installs and updates complete verified packs automatically while preserving locally modified and withdrawn packs",
+      "Added transactional creation and editing of osu!lazer skins with backups, draft recovery, conflict detection, and atomic multi-file saves",
+      "Added replay-viewer controls for slider snaking and hit animations"
+    ],
+    "improvements": [
+      "Made Extras changes stageable by logical element, keeping animation frames and matching 1x and 2x files together while previewing the exact mixed result beside the current skin",
+      "Added Smooth Trail as an explicit cursor option using a transparent 1x1 cursormiddle placeholder while removing pack-provided cursor-middle files",
+      "Added blocking download and installation progress with cancellation, automatic refresh, and shared-bundle verification that avoids repeatedly reading the same large download",
+      "Updated difficulty and replay rendering to the official osu! 2026.726.0 source"
+    ],
+    "fixes": [
+      "Prevented catalog installation from getting stuck when cursor packs are normalized during import",
+      "Preserved Extras libraries and Skin Studio backups during application-data migration",
+      "Kept staged previews, preserved layers, fallback removals, audio comparisons, and 1x or 2x replacements consistent with the final applied skin"
+    ]
+  },
+  {
     "version": "0.5.0",
     "date": "2026-07-24",
     "major": [

@@ -14,8 +14,8 @@
     <!-- osu! is compiled against AutoMapper's pre-v15 constructor ABI. The build-time
          compatibility patch updates those calls so the viewer can use the secured release. -->
     <PackageReference Include="AutoMapper" Version="15.1.1" />
-    <PackageReference Include="ppy.osu.Game" Version="2026.702.0" />
-    <PackageReference Include="ppy.osu.Game.Rulesets.Osu" Version="2026.702.0" />
+    <ProjectReference Include="..\third_party\osu\osu.Game\osu.Game.csproj" />
+    <ProjectReference Include="..\third_party\osu\osu.Game.Rulesets.Osu\osu.Game.Rulesets.Osu.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,10 @@
+{
+  "solution": {
+    "path": "Kumori.sln",
+    "projects": [
+      "replay_viewer\\Kumori.ReplayViewer.csproj",
+      "src\\Kumori.App\\Kumori.App.csproj",
+      "src\\Kumori.StableFrameBridge\\Kumori.StableFrameBridge.csproj"
+    ]
+  }
+}

@@ -46,6 +46,22 @@ public static class AppPaths
 
     public static string SkinsDir => Path.Combine(AssetsDir, "skins");
 
+    public static string SkinEditorDataDir => Path.Combine(AppDataDir, "skins");
+
+    public static string SkinEditorBackupsDir => Path.Combine(SkinEditorDataDir, "backup");
+
+    public static string SkinExtrasContainerDir => Path.Combine(SkinEditorDataDir, "Extras");
+
+    public static string SkinExtrasDir => Path.Combine(SkinExtrasContainerDir, "osu");
+
+    public static string SkinExtrasCatalogCacheDir => Path.Combine(CacheDir, "skin-extras-catalog");
+
+    public static string SkinExtrasDownloadCacheDir => Path.Combine(CacheDir, "skin-extras-downloads");
+
+    public static string SkinExtrasRevisionBackupsDir => Path.Combine(
+        SkinEditorBackupsDir,
+        "extras-revisions");
+
     public static string RuntimeDir => Path.Combine(AppDataDir, "runtime");
 
     public static string StatusDir => Path.Combine(RuntimeDir, "status");
@@ -60,7 +76,7 @@ public static class AppPaths
 
     public static string ReportsDir => Path.Combine(AppDataDir, "reports");
     public static string BackupsDir => Path.Combine(AppDataDir, "backups");
-    public static string LazerSkinBackupsDir => Path.Combine(BackupsDir, "lazer-skins");
+    public static string LazerSkinBackupsDir => SkinEditorBackupsDir;
     public static string PendingRestoreDir => Path.Combine(RuntimeDir, "pending-restore");
 
     public static string ToolsDir => Path.Combine(AppDataDir, "tools");

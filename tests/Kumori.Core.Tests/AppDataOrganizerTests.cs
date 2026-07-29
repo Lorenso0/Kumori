@@ -125,6 +125,47 @@ public sealed class AppDataOrganizerTests : IDisposable
     }
 
     [Fact]
+    public void Organize_PreservesSkinStudioExtrasAndBackupsAcrossLaunches()
+    {
+        var cursor = Write(
+            Path.Combine(
+                "skins",
+                "Extras",
+                "osu!",
+                "Cursor",
+                "Cursors with long cursortrail",
+                "Blue",
+                "cursor.png"),
+            "cursor");
+        var backup = Write(
+            Path.Combine("skins", "backup", "Example Skin", "20260726", "cursor.png"),
+            "backup");
+        var legacySkin = Write(Path.Combine("skins", "Legacy import", "skin.ini"), "legacy");
+
+        AppDataOrganizer.Organize(_root);
+        AppDataOrganizer.Organize(_root);
+
+        var migratedCursor = Path.Combine(
+            _root,
+            "skins",
+            "Extras",
+            "osu",
+            "Cursor",
+            "Cursors with long cursortrail",
+            "Blue",
+            "cursor.png");
+        Assert.Equal("cursor", File.ReadAllText(migratedCursor));
+        Assert.False(File.Exists(cursor));
+        Assert.Equal("backup", File.ReadAllText(backup));
+        Assert.False(File.Exists(legacySkin));
+        Assert.Equal(
+            "legacy",
+            File.ReadAllText(Path.Combine(_root, "assets", "skins", "Legacy import", "skin.ini")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "assets", "skins", "Extras")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "assets", "skins", "backup")));
+    }
+
+    [Fact]
     public void Organize_MigratesCompleteWalDatabaseWithoutLosingCommittedRows()
     {
         var builderDirectory = Path.Combine(_root, "wal-builder");

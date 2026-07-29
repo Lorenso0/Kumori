@@ -4,6 +4,12 @@
     <!-- Run the patcher with the same dotnet installation that owns this SDK.
          A different system-wide host may not have the selected runtime. -->
     <_KumoriDotNetHost>$([System.IO.Path]::GetFullPath('$(MSBuildSDKsPath)\..\..\..\dotnet.exe'))</_KumoriDotNetHost>
+    <_KumoriIsUpstreamOsuProject>$([System.String]::Copy('$(MSBuildProjectDirectory)').Replace('\', '/').Contains('/third_party/osu'))</_KumoriIsUpstreamOsuProject>
+    <!-- A running Debug app can lock output assemblies. Keep direct builds
+         responsive; build-app.cmd handles the lock by stopping only this
+         checkout's processes before MSBuild starts. -->
+    <CopyRetryCount Condition="'$(Configuration)' == 'Debug'">2</CopyRetryCount>
+    <CopyRetryDelayMilliseconds Condition="'$(Configuration)' == 'Debug'">100</CopyRetryDelayMilliseconds>
   </PropertyGroup>
 
   <!--
@@ -13,7 +19,9 @@
     upstream IL changes, which forces this compatibility layer to be reviewed.
   -->
   <Target Name="BuildKumoriAutoMapperCompatPatcher"
-          Condition="Exists('$(TargetDir)osu.Game.dll') or Exists('$(PublishDir)osu.Game.dll')">
+          Inputs="$(MSBuildThisFileDirectory)tools\Kumori.AutoMapperCompatPatcher\Kumori.AutoMapperCompatPatcher.csproj;$(MSBuildThisFileDirectory)tools\Kumori.AutoMapperCompatPatcher\Program.cs"
+          Outputs="$(_KumoriAutoMapperPatcherDll)"
+          Condition="'$(_KumoriIsUpstreamOsuProject)' != 'True' and (Exists('$(TargetDir)osu.Game.dll') or Exists('$(PublishDir)osu.Game.dll'))">
     <!-- RID publish properties can flow through ProjectReference despite its
          metadata. Build one predictable framework-dependent tool output so a
          clean standalone app publish never relies on an earlier viewer build. -->
@@ -26,7 +34,7 @@
   <Target Name="PatchOsuGameAutoMapperInBuildOutput"
           AfterTargets="CopyFilesToOutputDirectory"
           DependsOnTargets="BuildKumoriAutoMapperCompatPatcher"
-          Condition="Exists('$(TargetDir)osu.Game.dll')">
+          Condition="'$(_KumoriIsUpstreamOsuProject)' != 'True' and Exists('$(TargetDir)osu.Game.dll')">
     <Error Condition="!Exists('$(_KumoriAutoMapperPatcherDll)')"
            Text="The AutoMapper compatibility patcher was not built: $(_KumoriAutoMapperPatcherDll)" />
     <Exec Command="&quot;$(_KumoriDotNetHost)&quot; &quot;$(_KumoriAutoMapperPatcherDll)&quot; &quot;$(TargetDir)osu.Game.dll&quot;" />
@@ -36,7 +44,7 @@
           AfterTargets="CopyFilesToPublishDirectory"
           BeforeTargets="GenerateSingleFileBundle"
           DependsOnTargets="BuildKumoriAutoMapperCompatPatcher"
-          Condition="Exists('$(PublishDir)osu.Game.dll')">
+          Condition="'$(_KumoriIsUpstreamOsuProject)' != 'True' and Exists('$(PublishDir)osu.Game.dll')">
     <Error Condition="!Exists('$(_KumoriAutoMapperPatcherDll)')"
            Text="The AutoMapper compatibility patcher was not built: $(_KumoriAutoMapperPatcherDll)" />
     <Exec Command="&quot;$(_KumoriDotNetHost)&quot; &quot;$(_KumoriAutoMapperPatcherDll)&quot; &quot;$(PublishDir)osu.Game.dll&quot;" />

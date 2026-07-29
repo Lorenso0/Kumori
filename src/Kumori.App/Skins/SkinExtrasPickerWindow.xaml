@@ -1,0 +1,1538 @@
+<UserControl x:Class="Kumori.App.Skins.SkinExtrasPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Focusable="True"
+        PreviewKeyDown="ExtrasPicker_PreviewKeyDown"
+        Background="{DynamicResource Brush.AppBackground}"
+        Foreground="{DynamicResource Brush.TextPrimary}">
+    <UserControl.Resources>
+        <Style x:Key="ExtrasBackButton" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="MinWidth" Value="156" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome"
+                                        Property="Background"
+                                        Value="{DynamicResource Brush.AccentPink}" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.78" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Chrome"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource Brush.StrongBorder}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PreviewModeToggle" TargetType="ToggleButton">
+            <Setter Property="MinWidth" Value="92" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="12,4" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource Brush.TextPrimary}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                <Setter TargetName="Root"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource Brush.AccentPink}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource Brush.TextPrimary}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource Brush.AccentPink}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="VirtualizedExtrasItems" TargetType="ItemsControl">
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Hidden" />
+            <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+            <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+            <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+            <Setter Property="VirtualizingPanel.CacheLength" Value="2" />
+            <Setter Property="VirtualizingPanel.CacheLengthUnit" Value="Page" />
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ItemsControl">
+                        <ScrollViewer CanContentScroll="True"
+                                      HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+                            <ItemsPresenter />
+                        </ScrollViewer>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <DataTemplate x:Key="PackFileChoiceTemplate">
+            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding IsSelectable}"
+                      Margin="0,1"
+                      Padding="3,2"
+                      ToolTip="{Binding PreviewToolTip}"
+                      Click="PackFileChoice_Click">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding DisplayKind}"
+                               Width="56"
+                               FontSize="9"
+                               Foreground="{DynamicResource Brush.TextMuted}" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding Name}"
+                               FontSize="10"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Name}" />
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding CompatibilityBadge}"
+                               Margin="10,0,0,0"
+                               FontSize="9"
+                               Foreground="{DynamicResource Brush.AccentPink}" />
+                    <TextBlock Grid.Column="3"
+                               Text="{Binding Size}"
+                               Margin="10,0,0,0"
+                               FontSize="9"
+                               Foreground="{DynamicResource Brush.TextMuted}" />
+                </Grid>
+            </CheckBox>
+        </DataTemplate>
+        <DataTemplate x:Key="PackElementChoiceTemplate">
+            <Border Margin="0,2"
+                    Padding="5"
+                    Background="{DynamicResource Brush.ControlBackground}"
+                    CornerRadius="5">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="36" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                  IsThreeState="True"
+                                  VerticalAlignment="Center"
+                                  Click="PackElementChoice_Click" />
+                        <Border Grid.Column="1"
+                                Width="30"
+                                Height="30"
+                                Margin="5,0"
+                                Background="#FF000000"
+                                BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                BorderThickness="1"
+                                CornerRadius="4">
+                            <Image Source="{Binding Thumbnail}"
+                                   Margin="2"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="LowQuality" />
+                        </Border>
+                        <StackPanel Grid.Column="2"
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding FileCountText}"
+                                       Margin="0,2,0,0"
+                                       FontSize="9"
+                                       Foreground="{DynamicResource Brush.TextMuted}" />
+                        </StackPanel>
+                        <Button Grid.Column="3"
+                                Content="Only"
+                                Margin="6,0,0,0"
+                                Padding="7,2"
+                                Tag="{Binding}"
+                                Click="SelectOnlyElement_Click"
+                                ToolTip="Select only this logical element" />
+                    </Grid>
+                    <Expander Grid.Row="1"
+                              Header="Physical files"
+                              Margin="23,4,0,0">
+                        <ItemsControl ItemsSource="{Binding Files}"
+                                      ItemTemplate="{StaticResource PackFileChoiceTemplate}" />
+                    </Expander>
+                </Grid>
+            </Border>
+        </DataTemplate>
+        <DataTemplate x:Key="PackSettingChoiceTemplate">
+            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                      IsEnabled="{Binding IsEditable}"
+                      Margin="0,2"
+                      Padding="3,2"
+                      Click="PackSettingChoice_Click">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="115" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Section}"
+                               FontSize="9"
+                               Foreground="{DynamicResource Brush.TextMuted}" />
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="{Binding Key}"
+                                   FontSize="10"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding ChangeText}"
+                                   Margin="0,2,0,0"
+                                   FontSize="9"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding RequirementText}"
+                               Margin="8,0,0,0"
+                               FontSize="9"
+                               Foreground="{DynamicResource Brush.AccentPink}" />
+                </Grid>
+            </CheckBox>
+        </DataTemplate>
+        <DataTemplate x:Key="PreviewElementLayerTemplate">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="34" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <CheckBox VerticalAlignment="Center"
+                          HorizontalAlignment="Center"
+                          IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                          Click="PackElementChoice_Click"
+                          ToolTip="{Binding SelectionToolTip}" />
+                <Border Grid.Column="1"
+                        Width="28"
+                        Height="28"
+                        Background="#FF000000"
+                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                    <Image Source="{Binding Thumbnail}"
+                           Margin="2"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="LowQuality" />
+                </Border>
+                <StackPanel Grid.Column="2"
+                            Margin="7,0,0,0"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding LayerDetailText}"
+                               Margin="0,1,0,0"
+                               FontSize="9">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource Brush.TextMuted}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding FromCurrentSkin}"
+                                                 Value="True">
+                                        <Setter Property="Foreground"
+                                                Value="{DynamicResource Brush.AccentPink}" />
+                                        <Setter Property="FontWeight"
+                                                Value="SemiBold" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border x:Name="WindowFrame"
+            Background="{DynamicResource Brush.AppBackground}"
+            BorderBrush="{DynamicResource Brush.BorderSubtle}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Background="{DynamicResource Brush.TopBarBackground}"
+                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                    BorderThickness="0,0,0,1"
+                    CornerRadius="8,8,0,0">
+                <Grid Margin="8,0,12,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Style="{StaticResource ExtrasBackButton}"
+                            Content="&#x2190;  Back to Skin Studio"
+                            Click="CloseWindow_Click"
+                            ToolTip="Return to Skin Studio (Esc or Alt+Left)"
+                            AutomationProperties.Name="Back to Skin Studio"
+                            AutomationProperties.HelpText="Close Extras and return to the Skin Studio workspace" />
+                    <Border Grid.Column="1"
+                            Width="1"
+                            Height="20"
+                            Margin="12,0"
+                            Background="{DynamicResource Brush.BorderSubtle}" />
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <Image Source="pack://siteoforigin:,,,/assets/logo.ico"
+                               Width="20"
+                               Height="20"
+                               Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock Text="Kumori"
+                                   Margin="8,0,0,0"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Border Width="1"
+                                Height="14"
+                                Margin="10,0"
+                                Background="{DynamicResource Brush.BorderSubtle}" />
+                        <TextBlock x:Name="HeaderTitleText"
+                                   Text="Extras Library"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Border Grid.Column="3"
+                            Padding="7,3"
+                            Background="{DynamicResource Brush.ControlBackground}"
+                            BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="Esc"
+                                   FontSize="9"
+                                   Foreground="{DynamicResource Brush.TextMuted}" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="260" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="TitleText"
+                           Text="Browse Skin Extras"
+                           FontSize="20"
+                           FontWeight="SemiBold" />
+                <TextBox x:Name="SearchBox"
+                         Grid.Column="1"
+                         Height="30"
+                         Padding="9,4"
+                         ToolTip="Search names, authors, families, filenames, or tags"
+                         TextChanged="SearchBox_TextChanged" />
+                <CheckBox x:Name="LazerUsedOnlyCheckBox"
+                          Grid.Column="3"
+                          Content="Lazer-used only"
+                          Margin="10,0,0,0"
+                          VerticalAlignment="Center"
+                          ToolTip="Show only assets requested by osu! lazer 2026.702.0"
+                          Checked="LazerFilter_Changed"
+                          Unchecked="LazerFilter_Changed" />
+                <CheckBox x:Name="FavoritesOnlyCheckBox"
+                          Grid.Column="4"
+                          Content="Favorites"
+                          Margin="10,0,0,0"
+                          VerticalAlignment="Center"
+                          Checked="LibraryFilter_Changed"
+                          Unchecked="LibraryFilter_Changed" />
+                <Button x:Name="CheckExtrasUpdatesButton"
+                        Grid.Column="2"
+                        Content="Check for updates"
+                        Height="30"
+                        Margin="10,0,0,0"
+                        Padding="10,0"
+                        Click="CheckExtrasUpdates_Click"
+                        ToolTip="Check GitHub and synchronize the complete Extras catalog"
+                        AutomationProperties.Name="Check Extras for updates" />
+            </Grid>
+            <TextBlock x:Name="SubtitleText"
+                       Margin="0,3,0,0"
+                       Foreground="{DynamicResource Brush.TextSecondary}"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="ExtrasSyncStatusText"
+                       Margin="0,3,0,0"
+                       FontSize="10"
+                       Foreground="{DynamicResource Brush.AccentPink}"
+                       Text="Extras catalog has not been checked yet."
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Background="{DynamicResource Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                    BorderThickness="1"
+                    CornerRadius="{DynamicResource Radius.ThemeCard}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="ELEMENT FAMILIES"
+                               Style="{StaticResource Text.LabelUpper}"
+                               Margin="12,10,12,8" />
+                <ListBox x:Name="FamilyList"
+                             Grid.Row="1"
+                             Margin="7,0,7,7"
+                             BorderThickness="0"
+                             Background="Transparent"
+                             ScrollViewer.CanContentScroll="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             VirtualizingPanel.CacheLength="2"
+                             VirtualizingPanel.CacheLengthUnit="Page"
+                             SelectionChanged="FamilyList_SelectionChanged">
+                        <ListBox.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}"
+                                                   Margin="8,10,6,4"
+                                                   FontSize="9"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Brush.AccentPink}" />
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListBox.GroupStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid MinHeight="34" Margin="4,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Name}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <Border Grid.Column="1"
+                                            MinWidth="22"
+                                            Padding="5,2"
+                                            CornerRadius="8"
+                                            Background="{DynamicResource Brush.ControlBackground}"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding PackCount}"
+                                                   HorizontalAlignment="Center"
+                                                   FontSize="9"
+                                                   Foreground="{DynamicResource Brush.TextMuted}" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Background="{DynamicResource Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                    BorderThickness="1"
+                    CornerRadius="{DynamicResource Radius.ThemeCard}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="AVAILABLE PACKS"
+                               Style="{StaticResource Text.LabelUpper}"
+                               Margin="12,10,12,8" />
+                    <ItemsControl x:Name="PackList"
+                                  Grid.Row="1"
+                                  Margin="7,0,7,7"
+                                  ScrollViewer.CanContentScroll="True"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                  ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  VirtualizingPanel.ScrollUnit="Pixel"
+                                  VirtualizingPanel.CacheLength="2"
+                                  VirtualizingPanel.CacheLengthUnit="Page">
+                        <ItemsControl.Template>
+                            <ControlTemplate TargetType="ItemsControl">
+                                <ScrollViewer CanContentScroll="True"
+                                              HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                              VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+                                    <ItemsPresenter />
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ItemsControl.Template>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                        <ItemsControl.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="4,8,4,4"
+                                                Padding="6,4"
+                                                Background="{DynamicResource Brush.ControlBackground}"
+                                                CornerRadius="4">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource Brush.AccentPink}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                                <GroupStyle.Panel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel />
+                                    </ItemsPanelTemplate>
+                                </GroupStyle.Panel>
+                            </GroupStyle>
+                        </ItemsControl.GroupStyle>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,2"
+                                        Padding="4"
+                                        BorderThickness="1"
+                                        CornerRadius="5">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="Transparent" />
+                                            <Setter Property="BorderBrush" Value="Transparent" />
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="{DynamicResource Brush.CardHoverBackground}" />
+                                                    <Setter Property="BorderBrush"
+                                                            Value="{DynamicResource Brush.BorderSubtle}" />
+                                                </Trigger>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter Property="Background"
+                                                            Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                                    <Setter Property="BorderBrush"
+                                                            Value="{DynamicResource Brush.BorderStrong}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid MinHeight="66"
+                                              PreviewMouseLeftButtonDown="PackRow_PreviewMouseLeftButtonDown">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="26" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <ToggleButton x:Name="PackExpandToggle"
+                                                      Width="26"
+                                                      Height="46"
+                                                      Padding="0"
+                                                      BorderThickness="0"
+                                                      Background="Transparent"
+                                                      IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                                      Checked="PackExpander_Expanded"
+                                                      Unchecked="PackExpander_Collapsed"
+                                                      ToolTip="Expand or collapse files">
+                                            <ToggleButton.Template>
+                                                <ControlTemplate TargetType="ToggleButton">
+                                                    <Border x:Name="ToggleChrome"
+                                                            Background="Transparent"
+                                                            CornerRadius="4">
+                                                        <ContentPresenter HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ToggleChrome"
+                                                                    Property="Background"
+                                                                    Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </ToggleButton.Template>
+                                            <Path Width="10"
+                                                  Height="6"
+                                                  Data="M 1,1 L 5,5 L 9,1"
+                                                  Stroke="{DynamicResource Brush.TextSecondary}"
+                                                  StrokeThickness="1.5"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  RenderTransformOrigin="0.5,0.5">
+                                                <Path.Style>
+                                                    <Style TargetType="Path">
+                                                        <Setter Property="RenderTransform">
+                                                            <Setter.Value>
+                                                                <RotateTransform Angle="0" />
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsChecked, ElementName=PackExpandToggle}"
+                                                                         Value="True">
+                                                                <Setter Property="RenderTransform">
+                                                                    <Setter.Value>
+                                                                        <RotateTransform Angle="180" />
+                                                                    </Setter.Value>
+                                                                </Setter>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Path.Style>
+                                            </Path>
+                                        </ToggleButton>
+                                        <Grid Grid.Column="1"
+                                              MinHeight="66"
+                                              Background="Transparent"
+                                              Cursor="Hand">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="54" />
+                                                <ColumnDefinition Width="10" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="54"
+                                                    Height="54"
+                                                    Background="#FF000000"
+                                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6">
+                                                <Image Source="{Binding Thumbnail}"
+                                                       Margin="5"
+                                                       Stretch="Uniform"
+                                                       RenderOptions.BitmapScalingMode="LowQuality" />
+                                            </Border>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <DockPanel>
+                                                    <TextBlock Text="{Binding FavoriteGlyph}"
+                                                               DockPanel.Dock="Right"
+                                                               Margin="5,0,0,0"
+                                                               Foreground="{DynamicResource Brush.AccentPink}" />
+                                                    <TextBlock Text="{Binding Name}"
+                                                               FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </DockPanel>
+                                                <TextBlock Text="{Binding SelectionText}"
+                                                           Margin="0,4,0,0"
+                                                           FontSize="9"
+                                                           Foreground="{DynamicResource Brush.TextMuted}" />
+                                                <TextBlock Text="{Binding CompatibilityBadge}"
+                                                           Margin="0,2,0,0"
+                                                           FontSize="9"
+                                                           Foreground="{DynamicResource Brush.AccentPink}" />
+                                                <TextBlock Text="{Binding CatalogBadge}"
+                                                           Margin="0,2,0,0"
+                                                           FontSize="9"
+                                                           Foreground="{DynamicResource Brush.TextSecondary}" />
+                                            </StackPanel>
+                                        </Grid>
+                                        </Grid>
+                                        <Border Margin="14,3,2,7"
+                                                Grid.Row="1"
+                                                Padding="7,5"
+                                                Background="{DynamicResource Brush.ControlBackground}"
+                                                CornerRadius="5">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding IsSelected}" Value="True" />
+                                                            <Condition Binding="{Binding IsChecked, ElementName=PackExpandToggle}"
+                                                                       Value="True" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                <Button Content="All"
+                                                        Padding="7,2"
+                                                        Click="SelectAllPackFiles_Click" />
+                                                <Button Content="None"
+                                                        Margin="5,0,0,0"
+                                                        Padding="7,2"
+                                                        Click="SelectNoPackFiles_Click" />
+                                                <Button Content="Invert"
+                                                        Margin="5,0,0,0"
+                                                        Padding="7,2"
+                                                        Click="InvertPackFiles_Click" />
+                                            </StackPanel>
+                                            <ItemsControl Grid.Row="1"
+                                                          MaxHeight="180"
+                                                          Style="{StaticResource VirtualizedExtrasItems}"
+                                                          ItemsSource="{Binding Elements}"
+                                                          ItemTemplate="{StaticResource PackElementChoiceTemplate}" />
+                                        </Grid>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="4"
+                    Background="{DynamicResource Brush.PanelBackground}"
+                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                    BorderThickness="1"
+                    CornerRadius="{DynamicResource Radius.ThemeCard}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <!-- Keep the preview geometry stable when a pack exposes
+                             resolution choices, settings, or longer health text. -->
+                        <RowDefinition Height="272" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="14,11,14,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="SelectedPackName"
+                                       Text="Select a pack"
+                                       FontSize="15"
+                                       FontWeight="SemiBold" />
+                            <TextBlock x:Name="SelectedPackPath"
+                                       Margin="0,3,0,0"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <Button x:Name="FavoriteButton"
+                                Grid.Column="1"
+                                Content="☆ Favorite"
+                                Margin="12,0,0,0"
+                                Padding="9,3"
+                                VerticalAlignment="Top"
+                                IsEnabled="False"
+                                Click="Favorite_Click"
+                                ToolTip="Keep this pack at the top of its family" />
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            Margin="14,0"
+                            Background="#FF000000"
+                            BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            ClipToBounds="True">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel x:Name="EmptyPreview"
+                                        Grid.RowSpan="3"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="Select a pack to preview it"
+                                           FontSize="13"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock Text="Images are composed here, and audio packs can be auditioned before replacement."
+                                           Margin="0,4,0,0"
+                                           MaxWidth="320"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center" />
+                            </StackPanel>
+                            <Grid x:Name="AudioPlayerPreview"
+                                  Grid.RowSpan="3"
+                                  Margin="40"
+                                  MaxWidth="980"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Visibility="Collapsed">
+                                <Border Padding="28"
+                                        Background="{DynamicResource Brush.PanelBackground}"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="1"
+                                        CornerRadius="12">
+                                    <Grid>
+                                        <Grid.Resources>
+                                            <Style x:Key="AudioTrackItemStyle"
+                                                   TargetType="ListBoxItem">
+                                                <EventSetter Event="PreviewMouseLeftButtonUp"
+                                                             Handler="AudioTrackItem_Click" />
+                                                <Setter Property="Margin" Value="3" />
+                                                <Setter Property="Padding" Value="11,6" />
+                                                <Setter Property="MinWidth" Value="104" />
+                                                <Setter Property="HorizontalContentAlignment"
+                                                        Value="Center" />
+                                                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="ListBoxItem">
+                                                            <Border x:Name="TrackChip"
+                                                                    Padding="{TemplateBinding Padding}"
+                                                                    Background="{DynamicResource Brush.ControlBackground}"
+                                                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="6">
+                                                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                                                  VerticalAlignment="Center" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver"
+                                                                         Value="True">
+                                                                    <Setter TargetName="TrackChip"
+                                                                            Property="BorderBrush"
+                                                                            Value="{DynamicResource Brush.AccentPink}" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsSelected"
+                                                                         Value="True">
+                                                                    <Setter TargetName="TrackChip"
+                                                                            Property="Background"
+                                                                            Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                                                    <Setter TargetName="TrackChip"
+                                                                            Property="BorderBrush"
+                                                                            Value="{DynamicResource Brush.AccentPink}" />
+                                                                    <Setter Property="FontWeight"
+                                                                            Value="SemiBold" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                            <DataTemplate x:Key="AudioTrackItemTemplate">
+                                                <TextBlock Text="{Binding Label}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </DataTemplate>
+                                        </Grid.Resources>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="AUDIO PREVIEW"
+                                                       Style="{StaticResource Text.LabelUpper}"
+                                                       HorizontalAlignment="Center" />
+                                            <TextBlock x:Name="AudioNowPlayingText"
+                                                       Margin="0,7,0,0"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       HorizontalAlignment="Center"
+                                                       Text="Choose a track"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock x:Name="AudioSourceStatusText"
+                                                       Margin="0,4,0,0"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                                       HorizontalAlignment="Center"
+                                                       Text="With selection" />
+                                        </StackPanel>
+                                        <Grid Grid.Row="1" Margin="0,18,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="14" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0"
+                                                    Padding="14"
+                                                    Background="{DynamicResource Brush.ControlBackground}"
+                                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="8">
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock Text="CURRENT SKIN"
+                                                               Style="{StaticResource Text.LabelUpper}"
+                                                               HorizontalAlignment="Center" />
+                                                    <Grid Grid.Row="1"
+                                                          Margin="0,9,0,0"
+                                                          MinHeight="42">
+                                                        <TextBlock x:Name="AudioCurrentEmptyText"
+                                                                   Text="No matching sound"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   FontSize="10"
+                                                                   Foreground="{DynamicResource Brush.TextMuted}" />
+                                                        <ListBox x:Name="AudioCurrentTrackPicker"
+                                                                 HorizontalContentAlignment="Center"
+                                                                 Background="Transparent"
+                                                                 BorderThickness="0"
+                                                                 SelectionMode="Single"
+                                                                 ScrollViewer.CanContentScroll="False"
+                                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                                 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                                                 ItemContainerStyle="{StaticResource AudioTrackItemStyle}"
+                                                                 ItemTemplate="{StaticResource AudioTrackItemTemplate}"
+                                                                 SelectionChanged="AudioCurrentTrackPicker_SelectionChanged"
+                                                                 ToolTip="Click a current-skin sound to play it">
+                                                            <ListBox.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel HorizontalAlignment="Center" />
+                                                                </ItemsPanelTemplate>
+                                                            </ListBox.ItemsPanel>
+                                                        </ListBox>
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
+                                            <Border Grid.Column="2"
+                                                    Padding="14"
+                                                    Background="{DynamicResource Brush.ControlBackground}"
+                                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="8">
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock Text="WITH SELECTION"
+                                                               Style="{StaticResource Text.LabelUpper}"
+                                                               HorizontalAlignment="Center" />
+                                                    <Grid Grid.Row="1"
+                                                          Margin="0,9,0,0"
+                                                          MinHeight="42">
+                                                        <TextBlock x:Name="AudioPackEmptyText"
+                                                                   Text="No sound in this pack"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   FontSize="10"
+                                                                   Foreground="{DynamicResource Brush.TextMuted}" />
+                                                        <ListBox x:Name="AudioPackTrackPicker"
+                                                                 HorizontalContentAlignment="Center"
+                                                                 Background="Transparent"
+                                                                 BorderThickness="0"
+                                                                 SelectionMode="Single"
+                                                                 ScrollViewer.CanContentScroll="False"
+                                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                                 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                                                 ItemContainerStyle="{StaticResource AudioTrackItemStyle}"
+                                                                 ItemTemplate="{StaticResource AudioTrackItemTemplate}"
+                                                                 SelectionChanged="AudioPackTrackPicker_SelectionChanged"
+                                                                 ToolTip="Click a new-pack sound to play it">
+                                                            <ListBox.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel HorizontalAlignment="Center" />
+                                                                </ItemsPanelTemplate>
+                                                            </ListBox.ItemsPanel>
+                                                        </ListBox>
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
+                                        </Grid>
+                                        <Grid Grid.Row="2" Margin="0,22,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button x:Name="AudioPlayPauseButton"
+                                                    Content="Play"
+                                                    Width="82"
+                                                    Height="34"
+                                                    Style="{StaticResource Button.Primary}"
+                                                    Click="AudioPlayPause_Click" />
+                                            <Button x:Name="StopAudioPreviewButton"
+                                                    Grid.Column="1"
+                                                    Content="Stop"
+                                                    Width="70"
+                                                    Height="34"
+                                                    Margin="8,0,14,0"
+                                                    Click="StopAudioPreview_Click"
+                                                    IsEnabled="False" />
+                                            <Slider x:Name="AudioProgressSlider"
+                                                    Grid.Column="2"
+                                                    Minimum="0"
+                                                    Maximum="1"
+                                                    Value="0"
+                                                    VerticalAlignment="Center"
+                                                    PreviewMouseLeftButtonDown="AudioProgress_PreviewMouseLeftButtonDown"
+                                                    PreviewMouseLeftButtonUp="AudioProgress_PreviewMouseLeftButtonUp"
+                                                    ToolTip="Seek within the selected sound" />
+                                        </Grid>
+                                        <Grid Grid.Row="3" Margin="164,6,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="AudioElapsedText"
+                                                       Text="0:00"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource Brush.TextSecondary}" />
+                                            <TextBlock x:Name="AudioPlaybackStateText"
+                                                       Grid.Column="1"
+                                                       Text="Ready"
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource Brush.TextMuted}" />
+                                            <TextBlock x:Name="AudioDurationText"
+                                                       Grid.Column="2"
+                                                       Text="0:00"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource Brush.TextSecondary}" />
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                            <Border x:Name="PreviewModeBar"
+                                    Grid.Row="0"
+                                    Margin="8,7,8,3"
+                                    Padding="3"
+                                    HorizontalAlignment="Right"
+                                    Background="{DynamicResource Brush.ControlBackground}"
+                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                    BorderThickness="1"
+                                    CornerRadius="7"
+                                    Visibility="Collapsed">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Preview"
+                                               Margin="7,0,9,0"
+                                               VerticalAlignment="Center"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                    <ToggleButton x:Name="ComparePreviewButton"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Compare"
+                                                  Tag="Compare"
+                                                  IsChecked="False"
+                                                  Click="PreviewMode_Click" />
+                                    <ToggleButton x:Name="PackOnlyPreviewButton"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Pack only"
+                                                  Tag="Pack"
+                                                  Margin="3,0,0,0"
+                                                  IsChecked="True"
+                                                  Click="PreviewMode_Click" />
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="PreviewElementSidebar"
+                                    Grid.Row="1"
+                                    Width="176"
+                                    Margin="8,2,0,2"
+                                    HorizontalAlignment="Left"
+                                    Panel.ZIndex="20"
+                                    Background="{DynamicResource Brush.PanelBackground}"
+                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                    BorderThickness="1"
+                                    CornerRadius="7"
+                                    Visibility="Collapsed">
+                                <Grid Margin="7">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="ELEMENT LAYERS"
+                                               Margin="4,2,4,6"
+                                               Style="{StaticResource Text.LabelUpper}" />
+                                    <ToggleButton x:Name="FullRenderButton"
+                                                  Grid.Row="1"
+                                                  Height="34"
+                                                  Margin="0,0,0,3"
+                                                  Padding="8,0"
+                                                  HorizontalContentAlignment="Left"
+                                                  IsChecked="True"
+                                                  Click="FullRenderButton_Click"
+                                                  Content="Full render"
+                                                  ToolTip="Show the complete element without highlighting a layer">
+                                        <ToggleButton.Template>
+                                            <ControlTemplate TargetType="ToggleButton">
+                                                <Border x:Name="FullRenderChrome"
+                                                        Padding="{TemplateBinding Padding}"
+                                                        Background="Transparent"
+                                                        BorderBrush="Transparent"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6">
+                                                    <ContentPresenter VerticalAlignment="Center" />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="FullRenderChrome"
+                                                                Property="Background"
+                                                                Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsChecked" Value="True">
+                                                        <Setter TargetName="FullRenderChrome"
+                                                                Property="Background"
+                                                                Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                                        <Setter TargetName="FullRenderChrome"
+                                                                Property="BorderBrush"
+                                                                Value="{DynamicResource Brush.AccentPink}" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </ToggleButton.Template>
+                                    </ToggleButton>
+                                    <ListBox x:Name="PreviewElementList"
+                                             Grid.Row="2"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             HorizontalContentAlignment="Stretch"
+                                             ScrollViewer.CanContentScroll="True"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                                             VirtualizingPanel.IsVirtualizing="True"
+                                             VirtualizingPanel.VirtualizationMode="Recycling"
+                                             ItemTemplate="{StaticResource PreviewElementLayerTemplate}"
+                                             SelectionChanged="PreviewElementList_SelectionChanged">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Margin" Value="0,1" />
+                                                <Setter Property="Padding" Value="6,5" />
+                                                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="ListBoxItem">
+                                                            <Border x:Name="LayerChrome"
+                                                                    Padding="{TemplateBinding Padding}"
+                                                                    Background="Transparent"
+                                                                    BorderBrush="Transparent"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="6">
+                                                                <ContentPresenter />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="LayerChrome"
+                                                                            Property="Background"
+                                                                            Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsSelected" Value="True">
+                                                                    <Setter TargetName="LayerChrome"
+                                                                            Property="Background"
+                                                                            Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                                                    <Setter TargetName="LayerChrome"
+                                                                            Property="BorderBrush"
+                                                                            Value="{DynamicResource Brush.AccentPink}" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                    </ListBox>
+                                </Grid>
+                            </Border>
+                            <Grid x:Name="ComparisonPreview"
+                                  Grid.Row="1"
+                                  Visibility="Collapsed">
+                                <Grid.Style>
+                                    <Style TargetType="Grid">
+                                        <Setter Property="Margin" Value="8,2" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Visibility, ElementName=PreviewElementSidebar}"
+                                                         Value="Visible">
+                                                <Setter Property="Margin" Value="190,2,8,2" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Grid.Style>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="1" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid>
+                                    <Viewbox Margin="3,18,3,3"
+                                             Stretch="Uniform">
+                                        <Canvas x:Name="CurrentPreviewCanvas"
+                                                Width="380"
+                                                Height="210"
+                                                ClipToBounds="False" />
+                                    </Viewbox>
+                                    <TextBlock x:Name="CurrentSkinPreviewLabel"
+                                               Text="CURRENT SKIN"
+                                               Margin="7,2,0,0"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                </Grid>
+                                <Border Grid.Column="1"
+                                        Background="{DynamicResource Brush.BorderSubtle}" />
+                                <Grid Grid.Column="2">
+                                    <Viewbox Margin="3,18,3,3"
+                                             Stretch="Uniform">
+                                        <Canvas x:Name="ResultPreviewCanvas"
+                                                Width="380"
+                                                Height="210"
+                                                ClipToBounds="False" />
+                                    </Viewbox>
+                                    <TextBlock Text="WITH SELECTION"
+                                               Margin="7,2,0,0"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.AccentPink}" />
+                                </Grid>
+                            </Grid>
+                            <Grid x:Name="CursorPreview"
+                                  Grid.Row="1"
+                                  Visibility="Collapsed">
+                                <Grid.Style>
+                                    <Style TargetType="Grid">
+                                        <Setter Property="Margin" Value="8,2" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Visibility, ElementName=PreviewElementSidebar}"
+                                                         Value="Visible">
+                                                <Setter Property="Margin" Value="190,2,8,2" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Grid.Style>
+                                <Viewbox Stretch="Uniform">
+                                    <Canvas x:Name="CursorTrailCanvas"
+                                            Width="380"
+                                            Height="210"
+                                            ClipToBounds="False" />
+                                </Viewbox>
+                            </Grid>
+                            <TextBlock x:Name="PreviewCaption"
+                                       Grid.Row="2"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,3,0,7"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource Brush.TextSecondary}" />
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer Grid.Row="2"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Hidden"
+                                  PanningMode="VerticalOnly">
+                    <StackPanel Margin="14,10,14,12">
+                        <TextBlock x:Name="PackDetails"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   TextWrapping="Wrap" />
+                        <Expander x:Name="PackFilesExpander"
+                                  Header="Elements"
+                                  Margin="0,7,0,0"
+                                  IsExpanded="False"
+                                  Expanded="PackFilesExpander_Expanded">
+                            <Border Margin="0,5,0,0"
+                                    Padding="8,5"
+                                    Background="{DynamicResource Brush.ControlBackground}"
+                                    CornerRadius="5">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Orientation="Horizontal"
+                                                Margin="0,0,0,4">
+                                        <Button Content="All"
+                                                Padding="7,2"
+                                                Click="SelectAllPackFiles_Click" />
+                                        <Button Content="None"
+                                                Margin="5,0,0,0"
+                                                Padding="7,2"
+                                                Click="SelectNoPackFiles_Click" />
+                                        <Button Content="Invert"
+                                                Margin="5,0,0,0"
+                                                Padding="7,2"
+                                                Click="InvertPackFiles_Click" />
+                                    </StackPanel>
+                                    <ItemsControl x:Name="PackFilesList"
+                                                  Grid.Row="1"
+                                                  MaxHeight="132"
+                                                  Style="{StaticResource VirtualizedExtrasItems}"
+                                                  ItemTemplate="{StaticResource PackElementChoiceTemplate}" />
+                                </Grid>
+                            </Border>
+                        </Expander>
+                        <Border x:Name="ResolutionMismatchPanel"
+                                Margin="0,8,0,0"
+                                Padding="10,8"
+                                Background="{DynamicResource Brush.ControlBackground}"
+                                BorderBrush="{DynamicResource Brush.AccentPink}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="RESOLUTION MATCH"
+                                           Style="{StaticResource Text.LabelUpper}" />
+                                <TextBlock x:Name="ResolutionMismatchText"
+                                           Margin="0,3,0,7"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource Brush.TextSecondary}"
+                                           TextWrapping="Wrap" />
+                                <RadioButton x:Name="UpscaleResolutionOption"
+                                             GroupName="ExtrasResolutionPolicy"
+                                             IsChecked="True"
+                                             Content="Create matching @2x automatically (recommended)"
+                                             ToolTip="High-quality 2× upscale that replaces the current @2x file." />
+                                <TextBlock Margin="22,1,0,5"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                           Text="Keeps the skin's high-resolution variant and uses the selected artwork."
+                                           TextWrapping="Wrap" />
+                                <RadioButton x:Name="UseOneXResolutionOption"
+                                             GroupName="ExtrasResolutionPolicy"
+                                             Content="Use the pack's 1× file only"
+                                             ToolTip="Removes the current @2x file so osu! uses the selected 1× file." />
+                                <TextBlock Margin="22,1,0,0"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                           Text="Removes the conflicting @2x from your skin when the change is applied."
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="CursorOptionsPanel"
+                                Margin="0,8,0,0"
+                                Padding="10,8"
+                                Background="{DynamicResource Brush.ControlBackground}"
+                                CornerRadius="6"
+                                Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="CURSOR TRAIL"
+                                           Style="{StaticResource Text.LabelUpper}" />
+                                <CheckBox x:Name="SmoothTrailCheckBox"
+                                          Margin="0,5,0,0"
+                                          Content="Smooth Trail"
+                                          Checked="SmoothTrail_Changed"
+                                          Unchecked="SmoothTrail_Changed"
+                                          ToolTip="Adds a transparent 1×1 cursormiddle.png placeholder." />
+                                <TextBlock Margin="22,2,0,0"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                           TextWrapping="Wrap"
+                                           Text="Cursor-middle files from the pack and current skin are removed. Enable this to add a blank 1×1 cursormiddle.png for a smooth continuous trail." />
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Margin="0,8,0,0"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right">
+                            <Button x:Name="RenamePackButton"
+                                    Content="Rename…"
+                                    Padding="9,3"
+                                    Click="RenamePack_Click" />
+                            <Button
+                                    Content="Delete…"
+                                    Margin="6,0,0,0"
+                                    Padding="9,3"
+                                    Style="{StaticResource Button.Danger}"
+                                    Click="DeletePack_Click" />
+                        </StackPanel>
+                        <Expander x:Name="PackSettingsExpander"
+                                  Header="Settings"
+                                  Margin="0,7,0,0"
+                                  Visibility="Collapsed">
+                            <Border Margin="0,5,0,0"
+                                    Padding="8,5"
+                                    Background="{DynamicResource Brush.ControlBackground}"
+                                    CornerRadius="5">
+                                <ItemsControl x:Name="PackSettingsList"
+                                              MaxHeight="132"
+                                              Style="{StaticResource VirtualizedExtrasItems}"
+                                              ItemTemplate="{StaticResource PackSettingChoiceTemplate}" />
+                            </Border>
+                        </Expander>
+                    </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" HorizontalAlignment="Left" Orientation="Horizontal">
+                <Button Content="Open Extras folder"
+                        Click="OpenFolder_Click" />
+                <Button Content="Import file…"
+                        Margin="8,0,0,0"
+                        Click="ImportPackage_Click" />
+                <Button Content="Import skin folder..."
+                        Margin="8,0,0,0"
+                        Click="ImportFolder_Click" />
+                <Button Content="Export…"
+                        Margin="8,0,0,0"
+                        Click="ExportPackage_Click" />
+                <Button Content="Check &amp; repair"
+                        Margin="8,0,0,0"
+                        Click="ValidateRepair_Click" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal">
+                <Button x:Name="UsePackButton"
+                        Content="Add selected to Changes"
+                        Width="160"
+                        Style="{StaticResource Button.Primary}"
+                        IsDefault="True"
+                        IsEnabled="False"
+                        Click="UsePack_Click" />
+            </StackPanel>
+        </Grid>
+            </Grid>
+
+            <Grid x:Name="CatalogSyncOverlay"
+                  Grid.RowSpan="2"
+                  Panel.ZIndex="100"
+                  Background="#E8100D12"
+                  Visibility="Collapsed"
+                  Focusable="True"
+                  AutomationProperties.Name="Extras synchronization in progress"
+                  AutomationProperties.LiveSetting="Polite">
+                <Border Width="520"
+                        MaxWidth="520"
+                        Padding="22"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource Brush.PanelBackground}"
+                        BorderBrush="{DynamicResource Brush.AccentPink}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                    <StackPanel>
+                        <TextBlock Text="UPDATING EXTRAS"
+                                   Style="{StaticResource Text.LabelUpper}"
+                                   Foreground="{DynamicResource Brush.AccentPink}" />
+                        <TextBlock x:Name="CatalogSyncOverlayText"
+                                   Margin="0,9,0,0"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap" />
+                        <ProgressBar x:Name="CatalogSyncProgressBar"
+                                     Height="9"
+                                     Margin="0,14,0,0"
+                                     Minimum="0"
+                                     Maximum="100"
+                                     IsIndeterminate="True" />
+                        <TextBlock x:Name="CatalogSyncProgressDetailText"
+                                   Margin="0,7,0,0"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Margin="0,12,0,0"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource Brush.TextMuted}"
+                                   Text="The Extras library will refresh automatically when this finishes."
+                                   TextWrapping="Wrap" />
+                        <Button x:Name="CancelCatalogSyncButton"
+                                Margin="0,16,0,0"
+                                Padding="14,5"
+                                HorizontalAlignment="Right"
+                                Content="Cancel download"
+                                Style="{StaticResource Button.Danger}"
+                                Click="CancelCatalogSync_Click"
+                                AutomationProperties.Name="Cancel Extras download" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

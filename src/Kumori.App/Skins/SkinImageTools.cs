@@ -15,14 +15,89 @@ public static class SkinImageTools
         return false;
     }
 
-    public static BitmapSource Decode(byte[] bytes)
+    public static bool IsFullyTransparentImage(byte[] encoded)
     {
+        try
+        {
+            var image = Decode(encoded);
+            return !HasVisiblePixels(Pixels(image, out _));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static BitmapSource? CropToVisiblePixels(BitmapSource source)
+    {
+        var pixels = Pixels(source, out var stride);
+        var left = source.PixelWidth;
+        var top = source.PixelHeight;
+        var right = -1;
+        var bottom = -1;
+        for (var y = 0; y < source.PixelHeight; y++)
+            for (var x = 0; x < source.PixelWidth; x++)
+            {
+                if (pixels[y * stride + x * 4 + 3] == 0)
+                    continue;
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x);
+                bottom = Math.Max(bottom, y);
+            }
+        if (right < left || bottom < top)
+            return null;
+        if (left == 0 && top == 0
+                      && right == source.PixelWidth - 1
+                      && bottom == source.PixelHeight - 1)
+            return source;
+        var cropped = new CroppedBitmap(
+            source,
+            new System.Windows.Int32Rect(
+                left,
+                top,
+                right - left + 1,
+                bottom - top + 1));
+        cropped.Freeze();
+        return cropped;
+    }
+
+    public static BitmapSource Decode(byte[] bytes, int decodePixelWidth = 0)
+    {
+        var shouldDownsample = false;
+        if (decodePixelWidth > 0)
+        {
+            using var headerStream = new MemoryStream(bytes, writable: false);
+            var decoder = BitmapDecoder.Create(
+                headerStream,
+                BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.DelayCreation,
+                BitmapCacheOption.None);
+            shouldDownsample = decoder.Frames[0].PixelWidth > decodePixelWidth;
+        }
+
         using var stream = new MemoryStream(bytes);
-        var frame = BitmapFrame.Create(
-            stream,
-            BitmapCreateOptions.PreservePixelFormat,
-            BitmapCacheOption.OnLoad);
-        var converted = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+        BitmapSource source;
+        if (shouldDownsample)
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+            image.StreamSource = stream;
+            image.DecodePixelWidth = decodePixelWidth;
+            image.EndInit();
+            image.Freeze();
+            source = image;
+        }
+        else
+        {
+            source = BitmapFrame.Create(
+                stream,
+                BitmapCreateOptions.PreservePixelFormat,
+                BitmapCacheOption.OnLoad);
+        }
+
+        var converted = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
         converted.Freeze();
         return converted;
     }
@@ -74,15 +149,12 @@ public static class SkinImageTools
 
     public static void ApplyColorize(byte[] bgra, Color target)
     {
-        RgbToHsl(target.R, target.G, target.B, out var targetHue, out var targetSaturation, out _);
         for (var index = 0; index < bgra.Length; index += 4)
         {
             if (bgra[index + 3] == 0) continue;
-            RgbToHsl(bgra[index + 2], bgra[index + 1], bgra[index], out _, out _, out var lightness);
-            HslToRgb(targetHue, targetSaturation, lightness, out var red, out var green, out var blue);
-            bgra[index] = blue;
-            bgra[index + 1] = green;
-            bgra[index + 2] = red;
+            bgra[index] = target.B;
+            bgra[index + 1] = target.G;
+            bgra[index + 2] = target.R;
         }
     }
 
@@ -165,6 +237,34 @@ public static class SkinImageTools
         using var stream = new MemoryStream();
         encoder.Save(stream);
         return stream.ToArray();
+    }
+
+    public static byte[] Upscale2X(byte[] encoded, string targetFilename)
+    {
+        // An osu! @2x asset keeps the same logical size with twice the pixels.
+        var source = Decode(encoded);
+        var targetWidth = checked(source.PixelWidth * 2);
+        var targetHeight = checked(source.PixelHeight * 2);
+        if (targetWidth > 32767 || targetHeight > 32767)
+            throw new InvalidDataException(
+                $"The image is too large to upscale to {targetWidth} × {targetHeight}.");
+
+        var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
+        using (var drawing = visual.RenderOpen())
+        {
+            drawing.DrawImage(source, new System.Windows.Rect(0, 0, targetWidth, targetHeight));
+        }
+
+        var upscaled = new RenderTargetBitmap(
+            targetWidth,
+            targetHeight,
+            96,
+            96,
+            PixelFormats.Pbgra32);
+        upscaled.Render(visual);
+        upscaled.Freeze();
+        return Encode(upscaled, targetFilename);
     }
 
     private static void RgbToHsl(

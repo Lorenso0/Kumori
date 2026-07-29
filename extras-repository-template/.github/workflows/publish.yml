@@ -1,0 +1,99 @@
+name: Sign and publish catalog
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tags:
+        description: Comma-separated existing immutable draft release tags
+        required: true
+        type: string
+      final_tag:
+        description: Final shard tag that becomes the latest release
+        required: true
+        type: string
+      verify_only:
+        description: Verify an already-published immutable catalog without uploading
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: extras-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: catalog-publication
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Validate merged catalog state
+        run: python scripts/validate_catalog.py
+      - name: Sign the exact complete catalog
+        env:
+          SIGNING_KEY: ${{ secrets.KUMORI_EXTRAS_SIGNING_KEY_PEM }}
+        run: |
+          test -n "$SIGNING_KEY"
+          printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/signing-key.pem"
+          chmod 600 "$RUNNER_TEMP/signing-key.pem"
+          openssl ec -in "$RUNNER_TEMP/signing-key.pem" -check -noout
+          openssl dgst -sha256 -sign "$RUNNER_TEMP/signing-key.pem" \
+            -out "$RUNNER_TEMP/catalog-v1.sig.bin" catalog-v1.json
+          signature="$(base64 -w0 "$RUNNER_TEMP/catalog-v1.sig.bin")"
+          jq -n \
+            --arg keyId "kumori-extras-2026-01" \
+            --arg algorithm "ecdsa-p256-sha256" \
+            --arg signature "$signature" \
+            '{schemaVersion:1,keyId:$keyId,algorithm:$algorithm,signature:$signature}' \
+            > "$RUNNER_TEMP/catalog-v1.sig"
+          sha256sum catalog-v1.json | awk '{print $1}' \
+            > "$RUNNER_TEMP/catalog-v1.json.sha256"
+      - name: Attach signed complete catalog to every shard
+        if: ${{ !inputs.verify_only }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAGS: ${{ inputs.release_tags }}
+          FINAL_TAG: ${{ inputs.final_tag }}
+        run: |
+          IFS=',' read -r -a tags <<<"$RELEASE_TAGS"
+          test "${#tags[@]}" -gt 0
+          for tag in "${tags[@]}"; do
+            gh release view "$tag" --json isDraft --jq '.isDraft' | grep -qx true
+            gh release upload "$tag" \
+              catalog-v1.json \
+              "$RUNNER_TEMP/catalog-v1.sig" \
+              "$RUNNER_TEMP/catalog-v1.json.sha256"
+          done
+          for tag in "${tags[@]}"; do
+            if [ "$tag" = "$FINAL_TAG" ]; then
+              gh release edit "$tag" --draft=false --latest
+            else
+              gh release edit "$tag" --draft=false --latest=false
+            fi
+          done
+      - name: Verify published signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_TAG: ${{ inputs.final_tag }}
+        run: |
+          mkdir "$RUNNER_TEMP/verify"
+          gh release download "$FINAL_TAG" --dir "$RUNNER_TEMP/verify" \
+            --pattern catalog-v1.json \
+            --pattern catalog-v1.sig \
+            --pattern catalog-v1.json.sha256
+          jq -r '.signature' "$RUNNER_TEMP/verify/catalog-v1.sig" \
+            | base64 -d > "$RUNNER_TEMP/verify/signature.bin"
+          openssl dgst -sha256 -verify keys/kumori-extras-2026-01.pem \
+            -signature "$RUNNER_TEMP/verify/signature.bin" \
+            "$RUNNER_TEMP/verify/catalog-v1.json"
+          expected="$(cat "$RUNNER_TEMP/verify/catalog-v1.json.sha256")"
+          actual="$(sha256sum "$RUNNER_TEMP/verify/catalog-v1.json" | awk '{print $1}')"
+          test "$expected" = "$actual"

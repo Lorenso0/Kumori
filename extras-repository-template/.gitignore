@@ -1,0 +1,6 @@
+.publish/
+*.pem
+*.key
+!keys/*.pem
+catalog-v1.sig
+catalog-v1.json.sha256

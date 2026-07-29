@@ -1,6 +1,8 @@
 using Kumori.ReplayViewer;
 using osu.Framework.Platform;
 using osu.Framework.Graphics;
+using osu.Game.Rulesets.Osu;
+using osu.Game.Rulesets.Osu.Configuration;
 using osuTK;
 using Xunit;
 
@@ -20,6 +22,9 @@ public sealed class KumoriViewerConfigTests : IDisposable
         Assert.True(config.Get<bool>(KumoriViewerSetting.ShowSliderBreakMarkers));
         Assert.False(config.Get<bool>(KumoriViewerSetting.ShowMehMarkers));
         Assert.False(config.Get<bool>(KumoriViewerSetting.ShowOkMarkers));
+        Assert.True(config.Get<bool>(KumoriViewerSetting.SnakingInSliders));
+        Assert.True(config.Get<bool>(KumoriViewerSetting.SnakingOutSliders));
+        Assert.True(config.Get<bool>(KumoriViewerSetting.HitAnimations));
         Assert.True(config.Get<bool>(KumoriViewerSetting.MissAnalyzerLoopEnabled));
         Assert.Equal(0.5, config.Get<double>(KumoriViewerSetting.MissAnalyzerPlaybackRate));
         Assert.Equal(800, config.Get<double>(KumoriViewerSetting.MissAnalyzerLoopBefore));
@@ -49,6 +54,40 @@ public sealed class KumoriViewerConfigTests : IDisposable
         Assert.Equal(0.8, reopened.Get<double>(KumoriViewerSetting.MasterVolume));
         Assert.Equal(0.6, reopened.Get<double>(KumoriViewerSetting.MusicVolume));
         Assert.Equal(0.4, reopened.Get<double>(KumoriViewerSetting.HitsoundVolume));
+    }
+
+    [Fact]
+    public void GameplayPreferencesPersist()
+    {
+        var storage = new NativeStorage(directory);
+        using (var config = new KumoriViewerConfig(storage))
+        {
+            config.SetValue(KumoriViewerSetting.SnakingInSliders, false);
+            config.SetValue(KumoriViewerSetting.SnakingOutSliders, false);
+            config.SetValue(KumoriViewerSetting.HitAnimations, false);
+            config.Save();
+        }
+
+        using var reopened = new KumoriViewerConfig(new NativeStorage(directory));
+        Assert.False(reopened.Get<bool>(KumoriViewerSetting.SnakingInSliders));
+        Assert.False(reopened.Get<bool>(KumoriViewerSetting.SnakingOutSliders));
+        Assert.False(reopened.Get<bool>(KumoriViewerSetting.HitAnimations));
+    }
+
+    [Fact]
+    public void GameplayPreferencesDriveOfficialRulesetConfig()
+    {
+        using var viewerConfig = new KumoriViewerConfig(new NativeStorage(directory));
+        using var rulesetConfig = new OsuRulesetConfigManager(null, new OsuRuleset().RulesetInfo);
+        using var settings = new KumoriGameplaySettings(viewerConfig, rulesetConfig);
+
+        viewerConfig.SetValue(KumoriViewerSetting.SnakingInSliders, false);
+        viewerConfig.SetValue(KumoriViewerSetting.SnakingOutSliders, false);
+        viewerConfig.SetValue(KumoriViewerSetting.HitAnimations, false);
+
+        Assert.False(rulesetConfig.Get<bool>(OsuRulesetSetting.SnakingInSliders));
+        Assert.False(rulesetConfig.Get<bool>(OsuRulesetSetting.SnakingOutSliders));
+        Assert.False(rulesetConfig.Get<bool>(OsuRulesetSetting.HitAnimations));
     }
 
     [Fact]

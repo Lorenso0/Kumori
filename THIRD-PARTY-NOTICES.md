@@ -16,8 +16,9 @@ tosu to listen on `127.0.0.1:24051` via `tosu.env`.
 
 ## ppy/osu and osu.Framework
 
-Kumori and Kumori Replay Viewer use the official ppy/osu, osu.Framework, and
-osu! ruleset NuGet packages under the MIT License.
+Kumori and Kumori Replay Viewer build against the official ppy/osu
+`2026.726.0-lazer` source and its osu.Framework dependency under the MIT
+License.
 
 Copyright (c) 2025 ppy Pty Ltd <contact@ppy.sh>.
 

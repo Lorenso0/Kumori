@@ -1,4 +1,6 @@
 using System.Runtime.ExceptionServices;
+using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
@@ -8,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Polygon = System.Windows.Shapes.Polygon;
 using Kumori.App.Controls;
+using Kumori.App.Skins;
 using Kumori.App.ViewModels;
 using Kumori.Core.Settings;
 using Kumori.Core.State;
@@ -466,6 +469,290 @@ public sealed class ResponsiveWindowLayoutTests
                             encoder.Save(stream);
                         }
                     }
+
+                    var skinEditor = new SkinEditorPage(settings);
+                    var layoutIni = SkinIniDocument.Parse(Encoding.UTF8.GetBytes(
+                        """
+                        [General]
+                        Name: Layout skin with a deliberately long display name
+                        Author: Layout tester
+                        Version: 2.7
+                        CursorCentre: 1
+                        CursorExpand: 0
+                        CursorRotate: 1
+
+                        [Colours]
+                        Combo1: 80,220,255
+                        Combo2: 243,72,63
+                        SliderBorder: 255,255,255
+                        SliderTrackOverride: 34,48,64
+
+                        [Fonts]
+                        HitCirclePrefix: default
+                        ScorePrefix: score
+                        """));
+                    typeof(SkinEditorPage)
+                        .GetField("iniDocument", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .SetValue(skinEditor, layoutIni);
+                    typeof(SkinEditorPage)
+                        .GetMethod("BuildIniForm", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(skinEditor, null);
+                    var skinWindow = new Window
+                    {
+                        Content = skinEditor,
+                        ShowInTaskbar = false,
+                        WindowStartupLocation = WindowStartupLocation.Manual,
+                        WindowStyle = WindowStyle.None,
+                        ResizeMode = ResizeMode.NoResize,
+                        Left = -20000,
+                        Top = -20000,
+                    };
+                    skinWindow.Show();
+                    var pickerSkin = new Kumori.Tracking.LazerSkinInfo(
+                        Guid.NewGuid(),
+                        "A selected skin whose name must remain visible",
+                        "Layout tester",
+                        []);
+                    typeof(SkinEditorPage)
+                        .GetField("allSkins", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .SetValue(skinEditor, new[] { pickerSkin });
+                    Assert.IsType<ComboBox>(skinEditor.FindName("CompactSkinPicker"))
+                        .ItemsSource = new[] { pickerSkin };
+                    typeof(SkinEditorPage)
+                        .GetMethod("SetSkinPickerSelection", BindingFlags.Instance | BindingFlags.NonPublic)!
+                        .Invoke(skinEditor, [pickerSkin]);
+                    skinWindow.UpdateLayout();
+                    var activeSkinPicker = Assert.IsType<ComboBox>(
+                        skinEditor.FindName("CompactSkinPicker"));
+                    Assert.Same(pickerSkin, activeSkinPicker.SelectedItem);
+                    Assert.Equal(pickerSkin.DisplayName, activeSkinPicker.Text);
+                    var editableSkinText = Assert.IsType<TextBox>(
+                        activeSkinPicker.Template.FindName("PART_EditableTextBox", activeSkinPicker));
+                    Assert.Equal(Visibility.Visible, editableSkinText.Visibility);
+                    Assert.Equal(pickerSkin.DisplayName, editableSkinText.Text);
+
+                    (double Width, double Height)[] skinSizes =
+                    [
+                        (720, 480), (1024, 600), (1180, 820), (1472, 1035), (1920, 1080),
+                    ];
+                    foreach (var size in skinSizes)
+                    {
+                        skinWindow.Width = size.Width;
+                        skinWindow.Height = size.Height;
+                        skinWindow.UpdateLayout();
+
+                        var compact = size.Width <= ResponsiveLayoutResolver.CompactMaximumWidth;
+                        var shortLayout = size.Height <= ResponsiveLayoutResolver.ShortMaximumHeight;
+                        var compactBar = Assert.IsType<Border>(skinEditor.FindName("CompactSurfaceBar"));
+                        var navigator = Assert.IsType<Border>(skinEditor.FindName("NavigatorPanel"));
+                        var center = Assert.IsType<Border>(skinEditor.FindName("CenterPanel"));
+                        var inspector = Assert.IsType<Border>(skinEditor.FindName("InspectorPanel"));
+                        Assert.Equal(compact ? Visibility.Visible : Visibility.Collapsed, compactBar.Visibility);
+                        Assert.Equal(
+                            shortLayout ? Visibility.Collapsed : Visibility.Visible,
+                            Assert.IsType<TextBlock>(skinEditor.FindName("ActiveSkinLabel")).Visibility);
+                        if (compact)
+                        {
+                            Assert.Equal(Visibility.Collapsed, navigator.Visibility);
+                            Assert.Equal(Visibility.Visible, center.Visibility);
+                            Assert.Equal(Visibility.Collapsed, inspector.Visibility);
+                            Assert.IsType<ToggleButton>(skinEditor.FindName("CompactBrowseButton"))
+                                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                            skinWindow.UpdateLayout();
+                            Assert.Equal(Visibility.Visible, navigator.Visibility);
+                            Assert.Equal(Visibility.Collapsed, center.Visibility);
+                            Assert.IsType<ToggleButton>(skinEditor.FindName("CompactCanvasButton"))
+                                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                        }
+                        else
+                        {
+                            Assert.Equal(Visibility.Visible, navigator.Visibility);
+                            Assert.Equal(Visibility.Visible, center.Visibility);
+                            Assert.Equal(Visibility.Visible, inspector.Visibility);
+                            var navigatorColumn = Assert.IsType<ColumnDefinition>(skinEditor.FindName("NavigatorColumn"));
+                            var inspectorColumn = Assert.IsType<ColumnDefinition>(skinEditor.FindName("InspectorColumn"));
+                            Assert.Equal(size.Width < 1280 ? 220 : 256, navigatorColumn.Width.Value);
+                            Assert.Equal(size.Width < 1280 ? 288 : 320, inspectorColumn.Width.Value);
+                        }
+
+                        var root = Assert.IsType<Grid>(skinEditor.FindName("RootGrid"));
+                        Assert.True(root.DesiredSize.Width <= root.ActualWidth + LayoutTolerance,
+                            $"Skin editor overflows at {size.Width}x{size.Height}: desired {root.DesiredSize}, actual {root.RenderSize}.");
+                        Assert.True(root.DesiredSize.Height <= root.ActualHeight + LayoutTolerance,
+                            $"Skin editor clips vertically at {size.Width}x{size.Height}: desired {root.DesiredSize}, actual {root.RenderSize}.");
+
+                        if (Environment.GetEnvironmentVariable("KUMORI_SKIN_EDITOR_SNAPSHOT_DIR") is { Length: > 0 } skinSnapshotDirectory)
+                        {
+                            Directory.CreateDirectory(skinSnapshotDirectory);
+                            SaveSnapshot(
+                                root,
+                                Path.Combine(skinSnapshotDirectory, $"skin-editor-{size.Width:0}x{size.Height:0}.png"),
+                                1);
+                        }
+                    }
+
+                    Assert.IsType<ToggleButton>(skinEditor.FindName("GameplayCanvasButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    skinWindow.UpdateLayout();
+                    Assert.Equal(Visibility.Visible, Assert.IsType<Grid>(skinEditor.FindName("GameplayPreviewPanel")).Visibility);
+                    var gameplayScroller = Assert.IsType<ScrollViewer>(skinEditor.FindName("GameplayPreviewScrollViewer"));
+                    Assert.True(gameplayScroller.ScrollableHeight > 0);
+                    var gameplayCards = new[]
+                    {
+                        Assert.IsType<Border>(skinEditor.FindName("GameplayHudCard")),
+                        Assert.IsType<Border>(skinEditor.FindName("GameplayHitObjectCard")),
+                        Assert.IsType<Border>(skinEditor.FindName("GameplaySliderCard")),
+                        Assert.IsType<Border>(skinEditor.FindName("GameplaySpinnerCard")),
+                        Assert.IsType<Border>(skinEditor.FindName("GameplayCursorCard")),
+                    };
+                    Assert.All(gameplayCards, card =>
+                        Assert.InRange(card.ActualWidth, gameplayScroller.ViewportWidth - 32, gameplayScroller.ViewportWidth));
+                    var spinnerScene = Assert.IsType<Canvas>(skinEditor.FindName("GameplaySpinnerScene"));
+                    Assert.Equal(640, spinnerScene.Width);
+                    Assert.Equal(480, spinnerScene.Height);
+                    var sliderEndToggle = Assert.IsType<ToggleButton>(skinEditor.FindName("SliderEndCircleToggle"));
+                    sliderEndToggle.IsChecked = false;
+                    sliderEndToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert.Equal(Visibility.Collapsed, Assert.IsType<Image>(skinEditor.FindName("GameplayTailCircle")).Visibility);
+                    Assert.Equal(Visibility.Collapsed, Assert.IsType<Image>(skinEditor.FindName("GameplayTailOverlay")).Visibility);
+                    Assert.Equal(Visibility.Visible, Assert.IsType<Image>(skinEditor.FindName("GameplayReverseArrow")).Visibility);
+                    sliderEndToggle.IsChecked = true;
+                    sliderEndToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert.Equal(Visibility.Visible, Assert.IsType<Image>(skinEditor.FindName("GameplayTailCircle")).Visibility);
+                    if (Environment.GetEnvironmentVariable("KUMORI_SKIN_EDITOR_SNAPSHOT_DIR") is { Length: > 0 } gameplaySnapshotDirectory)
+                    {
+                        SaveSnapshot(
+                            Assert.IsType<Grid>(skinEditor.FindName("RootGrid")),
+                            Path.Combine(gameplaySnapshotDirectory, "skin-editor-gameplay.png"),
+                            1);
+                        gameplayScroller.ScrollToVerticalOffset(850);
+                        skinWindow.UpdateLayout();
+                        SaveSnapshot(
+                            Assert.IsType<Grid>(skinEditor.FindName("RootGrid")),
+                            Path.Combine(gameplaySnapshotDirectory, "skin-editor-gameplay-spinner.png"),
+                            1);
+                    }
+                    gameplayScroller.ScrollToVerticalOffset(850);
+                    skinWindow.UpdateLayout();
+                    var gameplayOffset = gameplayScroller.VerticalOffset;
+                    Assert.IsType<ToggleButton>(skinEditor.FindName("AssetCanvasButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Assert.IsType<ToggleButton>(skinEditor.FindName("GameplayCanvasButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    skinWindow.UpdateLayout();
+                    Assert.InRange(gameplayScroller.VerticalOffset, gameplayOffset - 1, gameplayOffset + 1);
+
+                    Assert.IsType<ToggleButton>(skinEditor.FindName("IniWorkspaceModeButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    skinWindow.UpdateLayout();
+                    Assert.Equal(Visibility.Visible, Assert.IsType<Grid>(skinEditor.FindName("IniNavigatorContent")).Visibility);
+                    Assert.Equal(Visibility.Collapsed, Assert.IsType<Grid>(skinEditor.FindName("ElementNavigatorContent")).Visibility);
+                    Assert.Equal(1, Assert.IsType<TabControl>(skinEditor.FindName("WorkspaceTabs")).SelectedIndex);
+                    var iniFormPanel = Assert.IsType<StackPanel>(skinEditor.FindName("IniFormPanel"));
+                    var visibleSection = Assert.Single(iniFormPanel.Children.OfType<StackPanel>());
+                    Assert.Equal(Visibility.Visible, visibleSection.Visibility);
+                    Assert.NotEmpty(Assert.IsType<StackPanel>(visibleSection.Children[0]).Children);
+                    var iniSections = Assert.IsType<ListBox>(skinEditor.FindName("IniSectionList"));
+                    iniSections.SelectedIndex = 0;
+                    skinWindow.UpdateLayout();
+                    visibleSection = Assert.Single(iniFormPanel.Children.OfType<StackPanel>());
+                    Assert.NotEmpty(Assert.IsType<StackPanel>(visibleSection.Children[0]).Children);
+                    iniSections.SelectedIndex = 1;
+                    skinWindow.UpdateLayout();
+                    visibleSection = Assert.Single(iniFormPanel.Children.OfType<StackPanel>());
+                    Assert.NotEmpty(Assert.IsType<StackPanel>(visibleSection.Children[0]).Children);
+                    Assert.IsType<ToggleButton>(skinEditor.FindName("IniRawModeButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    var rawIni = Assert.IsType<TextBox>(skinEditor.FindName("RawIniText"));
+                    rawIni.AppendText(Environment.NewLine + "; layout round-trip");
+                    Assert.IsType<ToggleButton>(skinEditor.FindName("IniFormModeButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    skinWindow.UpdateLayout();
+                    visibleSection = Assert.Single(iniFormPanel.Children.OfType<StackPanel>());
+                    Assert.Equal(Visibility.Visible, visibleSection.Visibility);
+                    Assert.NotEmpty(Assert.IsType<StackPanel>(visibleSection.Children[0]).Children);
+                    foreach (var iniSize in new[]
+                             {
+                                 (Width: 720d, Height: 480d),
+                                 (Width: 1024d, Height: 600d),
+                                 (Width: 1180d, Height: 820d),
+                             })
+                    {
+                        skinWindow.Width = iniSize.Width;
+                        skinWindow.Height = iniSize.Height;
+                        skinWindow.UpdateLayout();
+                        if (iniSize.Width <= ResponsiveLayoutResolver.CompactMaximumWidth)
+                        {
+                            Assert.IsType<ToggleButton>(skinEditor.FindName("CompactCanvasButton"))
+                                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                            skinWindow.UpdateLayout();
+                        }
+
+                        visibleSection = Assert.Single(iniFormPanel.Children.OfType<StackPanel>());
+                        var settingRows = Assert.IsType<StackPanel>(visibleSection.Children[0]);
+                        Assert.NotEmpty(settingRows.Children);
+                        Assert.All(
+                            Descendants<TextBlock>(settingRows)
+                                .Where(text => text.ToolTip is string),
+                            label =>
+                            {
+                                Assert.Equal(TextWrapping.Wrap, label.TextWrapping);
+                                Assert.Equal(TextTrimming.None, label.TextTrimming);
+                                Assert.True(label.ActualHeight + LayoutTolerance >= label.FontSize);
+                            });
+                        Assert.All(
+                            Descendants<TextBox>(settingRows),
+                            input => Assert.True(input.ActualHeight >= 32 - LayoutTolerance));
+                        var iniScroller = Assert.IsType<ScrollViewer>(
+                            skinEditor.FindName("IniFormScroll"));
+                        Assert.True(
+                            visibleSection.DesiredSize.Width <= iniScroller.ViewportWidth + LayoutTolerance,
+                            $"skin.ini form overflows at {iniSize.Width}x{iniSize.Height}: "
+                            + $"desired {visibleSection.DesiredSize.Width}, viewport {iniScroller.ViewportWidth}.");
+
+                        if (Environment.GetEnvironmentVariable("KUMORI_SKIN_EDITOR_SNAPSHOT_DIR")
+                            is { Length: > 0 } compactIniSnapshotDirectory)
+                        {
+                            SaveSnapshot(
+                                Assert.IsType<Grid>(skinEditor.FindName("RootGrid")),
+                                Path.Combine(
+                                    compactIniSnapshotDirectory,
+                                    $"skin-editor-ini-{iniSize.Width:0}x{iniSize.Height:0}.png"),
+                                1);
+                        }
+                    }
+                    skinWindow.Width = 1920;
+                    skinWindow.Height = 1080;
+                    skinWindow.UpdateLayout();
+                    if (Environment.GetEnvironmentVariable("KUMORI_SKIN_EDITOR_SNAPSHOT_DIR") is { Length: > 0 } modeSnapshotDirectory)
+                    {
+                        SaveSnapshot(
+                            Assert.IsType<Grid>(skinEditor.FindName("RootGrid")),
+                            Path.Combine(modeSnapshotDirectory, "skin-editor-ini.png"),
+                            1);
+                    }
+                    Assert.IsType<Button>(skinEditor.FindName("DraftReviewButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    skinWindow.UpdateLayout();
+                    Assert.Equal(Visibility.Visible, Assert.IsType<Grid>(skinEditor.FindName("ReviewInspectorContent")).Visibility);
+                    Assert.Equal(Visibility.Collapsed, Assert.IsType<Grid>(skinEditor.FindName("ContextInspectorContent")).Visibility);
+                    if (Environment.GetEnvironmentVariable("KUMORI_SKIN_EDITOR_SNAPSHOT_DIR") is { Length: > 0 } reviewSnapshotDirectory)
+                    {
+                        SaveSnapshot(
+                            Assert.IsType<Grid>(skinEditor.FindName("RootGrid")),
+                            Path.Combine(reviewSnapshotDirectory, "skin-editor-review.png"),
+                            1);
+                    }
+
+                    var themeOverride = new SolidColorBrush(Color.FromRgb(0x10, 0x20, 0x30));
+                    themeOverride.Freeze();
+                    app.Resources["Brush.PanelBackground"] = themeOverride;
+                    skinWindow.UpdateLayout();
+                    var themedPanel = Assert.IsType<SolidColorBrush>(
+                        Assert.IsType<Border>(skinEditor.FindName("CenterPanel")).Background);
+                    Assert.Equal(Color.FromRgb(0x10, 0x20, 0x30), themedPanel.Color);
+                    app.Resources.Remove("Brush.PanelBackground");
+                    skinWindow.Close();
 
                     settings.Update(s =>
                     {

@@ -5,365 +5,1167 @@
              xmlns:skins="clr-namespace:Kumori.App.Skins"
              MinWidth="0"
              MinHeight="0"
-             Background="{DynamicResource Brush.AppBackground}">
+             Background="{DynamicResource Brush.AppBackground}"
+             PreviewKeyDown="SkinEditor_PreviewKeyDown"
+             PreviewKeyUp="SkinEditor_PreviewKeyUp">
     <UserControl.Resources>
         <Style x:Key="SkinPanel" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Brush.PanelBackground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="CornerRadius" Value="{DynamicResource Radius.ThemeCard}" />
         </Style>
-        <Style x:Key="SkinLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+        <Style x:Key="SkinLabel" TargetType="TextBlock" BasedOn="{StaticResource Text.LabelUpper}">
             <Setter Property="FontSize" Value="10" />
-            <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style x:Key="SkinAction" TargetType="Button" BasedOn="{StaticResource Button.Chrome}">
             <Setter Property="Height" Value="30" />
             <Setter Property="Padding" Value="9,0" />
-            <Setter Property="Margin" Value="0,0,6,0" />
         </Style>
-        <Style x:Key="SkinTabItem" TargetType="TabItem">
-            <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+        <Style x:Key="SkinCompactAction" TargetType="Button" BasedOn="{StaticResource Button.Chrome}">
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="7,0" />
+            <Setter Property="FontSize" Value="10" />
+        </Style>
+        <Style x:Key="SkinIconAction" TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style x:Key="SkinSegment" TargetType="ToggleButton">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="68" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="TabItem">
-                        <Border x:Name="TabChrome"
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="SegmentChrome"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="0,0,0,2"
-                                CornerRadius="5,5,0,0"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
                                 Padding="{TemplateBinding Padding}">
-                            <ContentPresenter ContentSource="Header"
-                                              HorizontalAlignment="Center"
+                            <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
-                                <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}" />
-                                <Setter Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
-                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SegmentChrome" Property="Background" Value="{DynamicResource Brush.ControlHoverBackground}" />
                                 <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
                             </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.45" />
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="SegmentChrome" Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                <Setter TargetName="SegmentChrome" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
+                                <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="SegmentChrome" Property="BorderBrush" Value="{DynamicResource Brush.StrongBorder}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style x:Key="SkinTabControl" TargetType="TabControl">
-            <Setter Property="Background" Value="{DynamicResource Brush.PanelBackground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+        <Style x:Key="SkinSegmentGroup" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Brush.ControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Padding" Value="2" />
+        </Style>
+        <Style x:Key="SkinWorkspaceHost" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="ItemContainerStyle" Value="{StaticResource SkinTabItem}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabControl">
-                        <Grid Background="{TemplateBinding Background}">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-                            <Border BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="0,0,0,1"
-                                    Background="{TemplateBinding Background}">
-                                <TabPanel IsItemsHost="True"
-                                          KeyboardNavigation.TabIndex="1"
-                                          Panel.ZIndex="1" />
-                            </Border>
-                            <Border Grid.Row="1"
-                                    Background="{TemplateBinding Background}"
-                                    BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="{TemplateBinding BorderThickness}">
-                                <ContentPresenter x:Name="PART_SelectedContentHost"
-                                                  ContentSource="SelectedContent"
-                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
-                            </Border>
-                        </Grid>
+                        <ContentPresenter x:Name="PART_SelectedContentHost"
+                                          ContentSource="SelectedContent"
+                                          SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="GameplayPreviewCard" TargetType="Border" BasedOn="{StaticResource SkinPanel}">
+            <Setter Property="Margin" Value="0,0,0,12" />
+            <Setter Property="ClipToBounds" Value="True" />
+        </Style>
+        <Style x:Key="IniSettingRow" TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="MinHeight" Value="40" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Brush.ControlHoverBackground}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <DrawingBrush x:Key="TransparencyGridBrush"
+                      TileMode="Tile"
+                      Viewport="0,0,24,24"
+                      ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="{DynamicResource Brush.CardBackground}"
+                                     Geometry="M0,0 H24 V24 H0 Z" />
+                    <GeometryDrawing Brush="{DynamicResource Brush.ControlBackground}"
+                                     Geometry="M0,0 H12 V12 H0 Z M12,12 H24 V24 H12 Z" />
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
     </UserControl.Resources>
 
     <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
-            <RowDefinition Height="58" />
+            <RowDefinition x:Name="HeaderRow" Height="64" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="28" />
+            <RowDefinition x:Name="StatusRow" Height="26" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
                 Background="{DynamicResource Brush.PanelBackground}"
                 BorderBrush="{DynamicResource Brush.BorderSubtle}"
                 BorderThickness="0,0,0,1"
-                Padding="12,6">
+                Padding="12,7">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="12" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="Skin Editor"
+
+                <StackPanel x:Name="HeaderTitlePanel" VerticalAlignment="Center">
+                    <TextBlock Text="Skin Studio"
                                FontSize="18"
                                FontWeight="SemiBold"
-                               LineHeight="23"
-                               LineStackingStrategy="BlockLineHeight" />
+                               LineHeight="22" />
                     <TextBlock x:Name="RootPathText"
-                               Text="Open the editor to discover osu!lazer"
+                               Text="Discovering osu!lazer…"
                                Foreground="{DynamicResource Brush.TextMuted}"
                                FontSize="10"
-                               LineHeight="15"
-                               LineStackingStrategy="BlockLineHeight"
+                               MaxWidth="220"
                                TextTrimming="CharacterEllipsis" />
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <ComboBox x:Name="CompactSkinPicker"
-                              Width="210"
-                              Margin="0,0,8,0"
-                              Visibility="Collapsed"
-                              SelectionChanged="CompactSkinPicker_SelectionChanged"
-                              AutomationProperties.Name="Selected lazer skin">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <Button x:Name="ChangeFolderButton" Content="Change folder" Style="{StaticResource SkinAction}" Click="ChangeFolder_Click" />
-                    <Button x:Name="RefreshButton" Content="Refresh" Style="{StaticResource SkinAction}" Click="Refresh_Click" />
-                    <Button x:Name="BackupButton" Content="Backup now" Style="{StaticResource SkinAction}" Click="Backup_Click" />
-                    <Button x:Name="CompactActionsButton"
-                            Content="⋯"
-                            Width="32"
+
+                <Grid Grid.Column="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="ActiveSkinLabel"
+                                   Text="SELECT A SKIN"
+                                   Style="{StaticResource SkinLabel}"
+                                   Margin="2,0,0,2" />
+                        <ComboBox x:Name="CompactSkinPicker"
+                                  MinWidth="180"
+                                  Height="32"
+                                  HorizontalAlignment="Stretch"
+                                  IsEditable="True"
+                                  IsTextSearchEnabled="True"
+                                  StaysOpenOnEdit="True"
+                                  TextSearch.TextPath="DisplayName"
+                                  ToolTip="{Binding SelectedItem.DisplayName, RelativeSource={RelativeSource Self}}"
+                                  SelectionChanged="CompactSkinPicker_SelectionChanged"
+                                  KeyUp="CompactSkinPicker_KeyUp"
+                                  AutomationProperties.Name="Active lazer skin"
+                                  AutomationProperties.HelpText="Type to filter or open the list to switch skins.">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}"
+                                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ComboBoxItem}}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding Creator}"
+                                                       FontSize="9"
+                                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ComboBoxItem}}"
+                                                       Opacity="0.74"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Files.Count}"
+                                                   FontSize="9"
+                                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ComboBoxItem}}"
+                                                   Opacity="0.74"
+                                                   VerticalAlignment="Center"
+                                                   ToolTip="Files in this skin" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="New"
                             Style="{StaticResource SkinAction}"
-                            Visibility="Collapsed"
+                            Margin="10,0,0,0"
+                            ToolTip="Create a blank skin and start building it from Extras"
+                            AutomationProperties.Name="Create blank skin"
+                            Click="CreateBlankSkin_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Blank skin" Click="CreateBlankSkin_Click" />
+                                <MenuItem Header="Build from Extras…" Click="CreateSkinFromExtras_Click" />
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                    <Border Grid.Column="2"
+                            Margin="10,0,0,0"
+                            Style="{StaticResource SkinSegmentGroup}"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <ToggleButton x:Name="ElementsModeButton"
+                                          Content="Elements"
+                                          Tag="Elements"
+                                          Style="{StaticResource SkinSegment}"
+                                          Click="WorkspaceMode_Click"
+                                          IsChecked="True" />
+                            <ToggleButton x:Name="IniWorkspaceModeButton"
+                                          Content="skin.ini"
+                                          Tag="SkinIni"
+                                          Style="{StaticResource SkinSegment}"
+                                          Click="WorkspaceMode_Click" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <StackPanel Grid.Column="4"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button x:Name="HeaderUndoButton"
+                            Content="&#x21B6;"
+                            Style="{StaticResource SkinIconAction}"
+                            ToolTip="Undo last change"
+                            Click="UndoDraft_Click"
+                            IsEnabled="False" />
+                    <Button x:Name="HeaderRedoButton"
+                            Content="&#x21B7;"
+                            Style="{StaticResource SkinIconAction}"
+                            Margin="4,0,0,0"
+                            ToolTip="Redo change"
+                            Click="RedoDraft_Click"
+                            IsEnabled="False" />
+                    <Button x:Name="DraftReviewButton"
+                            Content="Changes"
+                            Style="{StaticResource SkinAction}"
+                            Margin="8,0,0,0"
+                            Click="DraftReview_Click" />
+                    <Button x:Name="CompactActionsButton"
+                            Content="&#x2026;"
+                            Style="{StaticResource SkinIconAction}"
+                            Margin="6,0,0,0"
                             Click="CompactActions_Click"
                             AutomationProperties.Name="Skin editor actions">
                         <Button.ContextMenu>
                             <ContextMenu>
                                 <MenuItem Header="Change lazer folder…" Click="ChangeFolder_Click" />
-                                <MenuItem Header="Refresh" Click="Refresh_Click" />
-                                <MenuItem Header="Backup now" Click="Backup_Click" />
+                                <MenuItem Header="Refresh skin library" Click="Refresh_Click" />
+                                <MenuItem Header="Rename skin / author…" Click="EditSkinIdentity_Click" />
+                                <MenuItem Header="Reset current category" Click="ResetCurrentCategory_Click" />
+                                <Separator />
+                                <MenuItem Header="Open Extras folder" Click="OpenExtrasFolder_Click" />
+                                <MenuItem Header="Check Extras for updates"
+                                          Click="CheckExtrasUpdates_Click" />
+                                <MenuItem Header="Replace from Extras…" Click="ReplaceFromExtras_Click" />
+                                <MenuItem Header="Extract skin to Extras…" Click="ExtractExtras_Click" />
+                                <Separator />
+                                <MenuItem Header="Back up current skin elements" Click="Backup_Click" />
+                                <MenuItem x:Name="AutoBackupElementsMenuItem"
+                                          Header="Automatically back up edited elements"
+                                          IsCheckable="True"
+                                          Click="AutoBackupElements_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
                     <Button x:Name="SaveAllButton"
-                            Content="Save all"
+                            Content="Save to osu!lazer"
                             Style="{StaticResource Button.Primary}"
                             Height="30"
                             Padding="12,0"
+                            Margin="6,0,0,0"
                             IsEnabled="False"
                             Click="SaveAll_Click" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <Grid x:Name="EditorGrid" Grid.Row="1" Margin="10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="SkinListColumn" Width="230" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition x:Name="InspectorColumn" Width="310" />
-            </Grid.ColumnDefinitions>
+        <Grid x:Name="StudioBody" Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-            <Border x:Name="SkinListPanel" Grid.Column="0" Style="{StaticResource SkinPanel}" Padding="10">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="LAZER SKINS" Style="{StaticResource SkinLabel}" Margin="2,0,0,7" />
-                    <TextBox x:Name="SkinSearchBox"
-                             DockPanel.Dock="Top"
-                             Height="30"
-                             Margin="0,0,0,8"
-                             TextChanged="SkinSearchBox_TextChanged"
-                             AutomationProperties.Name="Search lazer skins" />
-                    <ListBox x:Name="SkinList"
-                             DisplayMemberPath="DisplayName"
-                             SelectionChanged="SkinList_SelectionChanged"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             AutomationProperties.Name="Lazer skins" />
-                </DockPanel>
+            <Border x:Name="FirstRunGuide"
+                    Grid.Row="0"
+                    Margin="10,8,10,0"
+                    Padding="10,7"
+                    Background="{DynamicResource Brush.CardSelectedBackground}"
+                    BorderBrush="{DynamicResource Brush.AccentPink}"
+                    BorderThickness="1"
+                    CornerRadius="7"
+                    Visibility="Collapsed">
+                <Grid>
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,70,0">
+                        <Run Text="1  Choose an element" FontWeight="SemiBold" />
+                        <Run Text="   →   2  Preview and edit   →   3  Add to Changes   →   4  Save to osu!lazer" />
+                    </TextBlock>
+                    <Button HorizontalAlignment="Right"
+                            Content="Got it"
+                            Style="{StaticResource SkinCompactAction}"
+                            Margin="12,0,0,0"
+                            Click="DismissFirstRunGuide_Click" />
+                </Grid>
             </Border>
 
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" MinHeight="220" />
-                    <RowDefinition Height="6" />
-                    <RowDefinition x:Name="GameplayRow" Height="320" MinHeight="220" />
-                </Grid.RowDefinitions>
+            <Border x:Name="CompactSurfaceBar"
+                    Margin="8,8,8,0"
+                    Style="{StaticResource SkinSegmentGroup}"
+                    HorizontalAlignment="Center"
+                    Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                    <ToggleButton x:Name="CompactBrowseButton"
+                                  Content="Browse"
+                                  Tag="Browse"
+                                  Style="{StaticResource SkinSegment}"
+                                  Click="CompactSurface_Click" />
+                    <ToggleButton x:Name="CompactCanvasButton"
+                                  Content="Canvas"
+                                  Tag="Canvas"
+                                  Style="{StaticResource SkinSegment}"
+                                  Click="CompactSurface_Click"
+                                  IsChecked="True" />
+                    <ToggleButton x:Name="CompactPropertiesButton"
+                                  Content="Properties"
+                                  Tag="Properties"
+                                  Style="{StaticResource SkinSegment}"
+                                  Click="CompactSurface_Click" />
+                </StackPanel>
+            </Border>
 
-                <Border Grid.Row="0" Style="{StaticResource SkinPanel}">
-                    <TabControl x:Name="WorkspaceTabs"
-                                Style="{StaticResource SkinTabControl}"
-                                SelectionChanged="WorkspaceTabs_SelectionChanged">
-                        <TabItem Header="Elements">
-                            <Grid Margin="10">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <ComboBox x:Name="CategoryPicker"
-                                              MinWidth="180"
-                                              HorizontalAlignment="Left"
-                                              SelectionChanged="CategoryPicker_SelectionChanged"
-                                              AutomationProperties.Name="Element category">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding DisplayLabel}" />
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                    <StackPanel Grid.Column="1"
-                                                Orientation="Horizontal"
-                                                VerticalAlignment="Center">
-                                        <CheckBox x:Name="HideEmptyElementsToggle"
-                                                  Content="Hide empty"
-                                                  Margin="8,0,10,0"
-                                                  VerticalAlignment="Center"
-                                                  ToolTip="Hide fully transparent placeholder images"
-                                                  Checked="HideEmptyElements_Changed"
-                                                  Unchecked="HideEmptyElements_Changed"
-                                                  AutomationProperties.Name="Hide empty skin elements" />
-                                        <Button Content="Import files…"
-                                                Style="{StaticResource SkinAction}"
-                                                Margin="0"
-                                                Click="ImportFiles_Click" />
+            <Grid x:Name="EditorGrid" Grid.Row="1" Margin="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="NavigatorColumn" Width="256" />
+                    <ColumnDefinition x:Name="NavigatorGapColumn" Width="8" />
+                    <ColumnDefinition x:Name="CenterColumn" Width="*" />
+                    <ColumnDefinition x:Name="InspectorGapColumn" Width="8" />
+                    <ColumnDefinition x:Name="InspectorColumn" Width="320" />
+                </Grid.ColumnDefinitions>
+
+                <Border x:Name="NavigatorPanel"
+                        Grid.Column="0"
+                        Style="{StaticResource SkinPanel}"
+                        Padding="10">
+                    <Grid>
+                        <Grid x:Name="ElementNavigatorContent">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="ASSET LIBRARY" Style="{StaticResource SkinLabel}" Margin="2,0,0,7" />
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="ElementSearchBox"
+                                         Margin="0,0,9,0"
+                                         Tag="Search elements"
+                                         TextChanged="ElementSearchBox_TextChanged"
+                                         AutomationProperties.Name="Search skin elements" />
+                                <CheckBox x:Name="HideEmptyElementsToggle"
+                                          Grid.Column="1"
+                                          Content="Hide empty"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Hide fully transparent placeholder images"
+                                          AutomationProperties.Name="Hide empty placeholder images"
+                                          Checked="HideEmptyElements_Changed"
+                                          Unchecked="HideEmptyElements_Changed" />
+                            </Grid>
+                            <WrapPanel x:Name="SemanticGroupRail"
+                                       Grid.Row="2"
+                                       Margin="0,8,0,4" />
+                            <ComboBox x:Name="CategoryPicker"
+                                      Grid.Row="3"
+                                      Margin="0,0,0,8"
+                                      SelectionChanged="CategoryPicker_SelectionChanged"
+                                      AutomationProperties.Name="Element category">
+                                <ComboBox.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add current category to Extras..."
+                                                  Click="AddCategoryToExtras_Click" />
+                                    </ContextMenu>
+                                </ComboBox.ContextMenu>
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding DisplayLabel}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Expander x:Name="SkinReadinessPanel"
+                                      Grid.Row="4"
+                                      Header="Skin readiness"
+                                      Margin="0,0,0,7"
+                                      Visibility="Collapsed">
+                                <Border Margin="0,5,0,0"
+                                        Padding="7"
+                                        Background="{DynamicResource Brush.ControlBackground}"
+                                        CornerRadius="6">
+                                    <StackPanel>
+                                        <TextBlock Text="Fill the essentials in any order. Missing items open the matching Extras family."
+                                                   FontSize="9"
+                                                   Foreground="{DynamicResource Brush.TextMuted}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,0,5" />
+                                        <WrapPanel x:Name="SkinReadinessItems" />
                                     </StackPanel>
-                                </Grid>
-                                <ListBox x:Name="ElementList"
-                                         Grid.Row="1"
-                                         Margin="0,8,0,0"
-                                         SelectionMode="Extended"
-                                         AllowDrop="True"
-                                         SelectionChanged="ElementList_SelectionChanged"
-                                         KeyDown="ElementList_KeyDown"
-                                         DragOver="ElementList_DragOver"
-                                         Drop="ElementList_Drop"
-                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                         AutomationProperties.Name="Skin elements">
-                                    <ListBox.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="Copy element(s)" InputGestureText="Ctrl+C" Click="CopyElements_Click" />
-                                            <MenuItem Header="Paste element(s)" InputGestureText="Ctrl+V" Click="PasteElements_Click" />
-                                            <Separator />
-                                            <MenuItem Header="Import files…" Click="ImportFiles_Click" />
-                                        </ContextMenu>
-                                    </ListBox.ContextMenu>
-                                    <ListBox.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel />
-                                        </ItemsPanelTemplate>
-                                    </ListBox.ItemsPanel>
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type skins:SkinElementEntry}">
-                                            <StackPanel Width="118" Margin="5">
-                                                <Border Height="86"
-                                                        Background="{DynamicResource Brush.CardBackground}"
-                                                        BorderBrush="{DynamicResource Brush.SubtleBorder}"
-                                                        BorderThickness="1"
-                                                        CornerRadius="6"
-                                                        ClipToBounds="True">
-                                                    <Grid>
-                                                        <Image Source="{Binding Thumbnail}"
-                                                               Margin="5"
-                                                               Stretch="Uniform"
-                                                               RenderOptions.BitmapScalingMode="HighQuality" />
-                                                        <TextBlock Text="♫"
-                                                                   FontSize="26"
-                                                                   Foreground="{DynamicResource Brush.TextMuted}"
-                                                                   HorizontalAlignment="Center"
-                                                                   VerticalAlignment="Center">
-                                                            <TextBlock.Style>
-                                                                <Style TargetType="TextBlock">
-                                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsAudio}" Value="True">
-                                                                            <Setter Property="Visibility" Value="Visible" />
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </TextBlock.Style>
-                                                        </TextBlock>
-                                                    </Grid>
-                                                </Border>
+                                </Border>
+                            </Expander>
+                            <ToggleButton x:Name="FullElementRenderButton"
+                                          Grid.Row="5"
+                                          Height="36"
+                                          Margin="0,0,0,6"
+                                          Padding="10,0"
+                                          HorizontalContentAlignment="Left"
+                                          IsChecked="True"
+                                          Click="FullElementRenderButton_Click"
+                                          Content="Full render"
+                                          ToolTip="Show the complete element without highlighting an individual asset">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="FullRenderChrome"
+                                                Padding="{TemplateBinding Padding}"
+                                                Background="Transparent"
+                                                BorderBrush="Transparent"
+                                                BorderThickness="1"
+                                                CornerRadius="6">
+                                            <ContentPresenter VerticalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="FullRenderChrome"
+                                                        Property="Background"
+                                                        Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="FullRenderChrome"
+                                                        Property="Background"
+                                                        Value="{DynamicResource Brush.CardSelectedBackground}" />
+                                                <Setter TargetName="FullRenderChrome"
+                                                        Property="BorderBrush"
+                                                        Value="{DynamicResource Brush.AccentPink}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ListBox x:Name="ElementList"
+                                     Grid.Row="6"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     Padding="0"
+                                     ScrollViewer.CanContentScroll="True"
+                                     VirtualizingPanel.IsVirtualizing="True"
+                                     VirtualizingPanel.VirtualizationMode="Recycling"
+                                     VirtualizingPanel.CacheLength="1"
+                                     VirtualizingPanel.CacheLengthUnit="Page"
+                                     SelectionMode="Extended"
+                                     AllowDrop="True"
+                                     SelectionChanged="ElementList_SelectionChanged"
+                                     PreviewMouseRightButtonDown="ElementList_PreviewMouseRightButtonDown"
+                                     KeyDown="ElementList_KeyDown"
+                                     DragOver="ElementList_DragOver"
+                                     Drop="ElementList_Drop"
+                                     AutomationProperties.Name="Skin elements">
+                                <ListBox.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Copy element(s)" InputGestureText="Ctrl+C" Click="CopyElements_Click" />
+                                        <MenuItem Header="Paste element(s)" InputGestureText="Ctrl+V" Click="PasteElements_Click" />
+                                        <MenuItem Header="Add selected element(s) to Extras..."
+                                                  Click="AddSelectedElementsToExtras_Click" />
+                                        <Separator />
+                                        <MenuItem Header="Import files…" Click="ImportFiles_Click" />
+                                    </ContextMenu>
+                                </ListBox.ContextMenu>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type skins:SkinElementEntry}">
+                                        <Grid Height="56">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="52" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="46"
+                                                    Height="46"
+                                                    Background="{DynamicResource Brush.ControlBackground}"
+                                                    CornerRadius="6"
+                                                    ClipToBounds="True"
+                                                    VerticalAlignment="Center">
+                                                <Grid>
+                                                    <Image Source="{Binding Thumbnail}"
+                                                           Margin="4"
+                                                           Stretch="Uniform"
+                                                           RenderOptions.BitmapScalingMode="LowQuality"
+                                                           Loaded="ElementThumbnail_Loaded" />
+                                                    <TextBlock Text="&#xE8D6;"
+                                                               FontFamily="Segoe Fluent Icons"
+                                                               FontSize="18"
+                                                               Foreground="{DynamicResource Brush.TextMuted}"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsAudio}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Grid>
+                                            </Border>
+                                            <StackPanel Grid.Column="1"
+                                                        Margin="7,0"
+                                                        VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding Filename}"
                                                            ToolTip="{Binding Filename}"
-                                                           FontSize="10"
-                                                           Margin="1,4,1,0"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="11"
                                                            TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Text="{Binding ResolutionVariantLabel}"
-                                                           ToolTip="Both the normal and @2x files are present; edits apply to both"
-                                                           Foreground="{DynamicResource Brush.TextMuted}"
-                                                           FontSize="9"
-                                                           TextTrimming="CharacterEllipsis">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding HasPairedResolution}" Value="True">
-                                                                    <Setter Property="Visibility" Value="Visible" />
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                                <TextBlock Text="{Binding EditState}"
-                                                           Foreground="{DynamicResource Brush.AccentPink}"
-                                                           FontSize="9" />
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding ResolutionVariantLabel}"
+                                                               Foreground="{DynamicResource Brush.TextMuted}"
+                                                               FontSize="9"
+                                                               TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding HasPairedResolution}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding EditState}"
+                                                               Margin="6,0,0,0"
+                                                               Foreground="{DynamicResource Brush.AccentPink}"
+                                                               FontSize="9" />
+                                                </StackPanel>
                                             </StackPanel>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
+                                            <Ellipse Grid.Column="2"
+                                                     Width="6"
+                                                     Height="6"
+                                                     Margin="4"
+                                                     Fill="{DynamicResource Brush.AccentPink}"
+                                                     VerticalAlignment="Center">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasEdits}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel x:Name="ElementEmptyState"
+                                        Grid.Row="6"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Margin="12"
+                                        Visibility="Collapsed">
+                                <TextBlock x:Name="ElementEmptyTitle"
+                                           Text="Nothing here yet"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock x:Name="ElementEmptyHint"
+                                           Text="Browse Extras or import files to fill this category."
+                                           FontSize="9"
+                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center"
+                                           Margin="0,3,0,8" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <Button Content="Browse Extras"
+                                            Style="{StaticResource Button.Primary}"
+                                            Height="28"
+                                            Padding="11,0"
+                                            Click="ReplaceFromExtras_Click" />
+                                    <Button Content="Import file"
+                                            Style="{StaticResource SkinCompactAction}"
+                                            Margin="6,0,0,0"
+                                            Click="ImportFiles_Click" />
+                                </StackPanel>
+                            </StackPanel>
+                            <Grid Grid.Row="7" Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0"
+                                        Content="Browse Extras"
+                                        Height="30"
+                                        Padding="12,0"
+                                        HorizontalAlignment="Stretch"
+                                        ToolTip="Browse your Extras library and add assets to this skin"
+                                        Style="{StaticResource Button.Primary}"
+                                        AutomationProperties.Name="Browse Extras library"
+                                        Click="ReplaceFromExtras_Click" />
+                                <Button Grid.Column="2"
+                                        Content="Import file"
+                                        Height="30"
+                                        Padding="9,0"
+                                        ToolTip="Import files into this skin"
+                                        Style="{StaticResource SkinAction}"
+                                        AutomationProperties.Name="Import skin files"
+                                        Click="ImportFiles_Click" />
+                            </Grid>
+                        </Grid>
+
+                        <Grid x:Name="IniNavigatorContent" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="SKIN.INI SECTIONS" Style="{StaticResource SkinLabel}" Margin="2,0,0,7" />
+                            <TextBlock Grid.Row="1"
+                                       Text="Choose a section, then edit its active settings in the workspace."
+                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       Margin="2,0,2,9" />
+                            <ListBox x:Name="IniSectionList"
+                                     Grid.Row="2"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     Padding="0"
+                                     SelectionChanged="IniSectionList_SelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid MinHeight="38">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <Border Grid.Column="1"
+                                                    Padding="6,2"
+                                                    CornerRadius="8"
+                                                    Background="{DynamicResource Brush.ControlBackground}"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding ActiveCount}"
+                                                           FontSize="9"
+                                                           Foreground="{DynamicResource Brush.TextMuted}" />
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="CenterPanel"
+                        Grid.Column="2"
+                        Style="{StaticResource SkinPanel}"
+                        ClipToBounds="True">
+                    <TabControl x:Name="WorkspaceTabs"
+                                Style="{StaticResource SkinWorkspaceHost}"
+                                SelectionChanged="WorkspaceTabs_SelectionChanged">
+                        <TabItem Header="Elements">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="46" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="10,6">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock x:Name="CanvasTitleText"
+                                                       Text="Element preview"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="The full element is composed here; the selected layer is highlighted."
+                                                       FontSize="9"
+                                                       Foreground="{DynamicResource Brush.TextMuted}" />
+                                        </StackPanel>
+                                        <Border HorizontalAlignment="Right"
+                                                Style="{StaticResource SkinSegmentGroup}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <ToggleButton x:Name="AssetCanvasButton"
+                                                              Content="Asset"
+                                                              Tag="Asset"
+                                                              Style="{StaticResource SkinSegment}"
+                                                              Click="ElementCenterMode_Click"
+                                                              IsChecked="True" />
+                                                <ToggleButton x:Name="GameplayCanvasButton"
+                                                              Content="Gameplay"
+                                                              Tag="Gameplay"
+                                                              Style="{StaticResource SkinSegment}"
+                                                              Click="ElementCenterMode_Click" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+
+                                <Grid Grid.Row="1">
+                                    <Grid x:Name="AssetCanvasPanel"
+                                          Margin="12">
+                                        <Border Background="{StaticResource TransparencyGridBrush}"
+                                                BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                ClipToBounds="True">
+                                            <Grid>
+                                                <Viewbox Margin="28"
+                                                         Stretch="Uniform">
+                                                    <Canvas x:Name="ElementCompositionCanvas"
+                                                            Width="640"
+                                                            Height="480"
+                                                            ClipToBounds="False">
+                                                        <Image x:Name="ElementPreview"
+                                                               Visibility="Collapsed"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    </Canvas>
+                                                </Viewbox>
+                                                <StackPanel x:Name="ElementPreviewHint"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center">
+                                                    <TextBlock x:Name="ElementPreviewHintText"
+                                                               Text="Select an image element"
+                                                               FontSize="14"
+                                                               HorizontalAlignment="Center"
+                                                               Foreground="{DynamicResource Brush.TextSecondary}" />
+                                                    <TextBlock Text="Its editable preview will appear here."
+                                                               Margin="0,4,0,0"
+                                                               FontSize="10"
+                                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                        <Border HorizontalAlignment="Center"
+                                                VerticalAlignment="Bottom"
+                                                Margin="0,0,0,12"
+                                                Padding="9,4"
+                                                CornerRadius="10"
+                                                Background="{DynamicResource Brush.OverlayBackground}">
+                                            <TextBlock Text="Hold Alt to compare the selected layer"
+                                                       FontSize="9"
+                                                       Foreground="{DynamicResource Brush.TextSecondary}" />
+                                        </Border>
+                                    </Grid>
+
+                                    <Grid x:Name="GameplayPreviewPanel"
+                                          Visibility="Collapsed"
+                                          Background="#FF000000">
+                                        <DockPanel x:Name="GameplayCanvas" Background="#FF000000">
+                                            <Border DockPanel.Dock="Top"
+                                                    Height="36"
+                                                    Background="{DynamicResource Brush.PanelBackground}"
+                                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                    BorderThickness="0,0,0,1"
+                                                    Padding="10,0">
+                                                <Grid>
+                                                    <TextBlock Text="LIVE GAMEPLAY"
+                                                               Style="{StaticResource SkinLabel}"
+                                                               Foreground="{DynamicResource Brush.AccentPink}"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBlock x:Name="GameplaySkinName"
+                                                               HorizontalAlignment="Right"
+                                                               VerticalAlignment="Center"
+                                                               FontSize="10"
+                                                               Foreground="{DynamicResource Brush.TextMuted}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                 </Grid>
+                                             </Border>
+                                            <ScrollViewer x:Name="GameplayPreviewScrollViewer"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Disabled"
+                                                          Background="{DynamicResource Brush.AppBackground}">
+                                                <StackPanel Margin="12,12,12,0">
+                                                    <Image x:Name="GameplayBackground" Visibility="Collapsed" />
+
+                                                    <Border x:Name="GameplayHudCard" Style="{StaticResource GameplayPreviewCard}">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="44" />
+                                                                <RowDefinition Height="132" />
+                                                            </Grid.RowDefinitions>
+                                                            <Grid Margin="12,0">
+                                                                <StackPanel VerticalAlignment="Center">
+                                                                    <TextBlock Text="HUD"
+                                                                               FontSize="13"
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock Text="scorebar-bg · scorebar-ki · score and combo counters"
+                                                                               FontSize="9"
+                                                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                            <Border Grid.Row="1" Background="#FF000000">
+                                                                <Viewbox Stretch="Uniform">
+                                                                    <Canvas Width="800" Height="120" Background="#FF000000">
+                                                                        <Image x:Name="GameplayScorebar" Width="300" Height="48" Canvas.Left="20" Canvas.Top="18" Stretch="Fill" />
+                                                                        <Image x:Name="GameplayScorebarMarker" Width="48" Height="48" Canvas.Left="292" Canvas.Top="18" />
+                                                                        <TextBlock Text="1,234,567,890"
+                                                                                   Canvas.Right="22"
+                                                                                   Canvas.Top="20"
+                                                                                   FontSize="25"
+                                                                                   FontFamily="Consolas"
+                                                                                   Foreground="#FFF0F0F5" />
+                                                                        <TextBlock Text="342x"
+                                                                                   Canvas.Left="24"
+                                                                                   Canvas.Bottom="13"
+                                                                                   FontSize="22"
+                                                                                   FontWeight="Bold"
+                                                                                   Foreground="#FFF0F0F5" />
+                                                                    </Canvas>
+                                                                </Viewbox>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+
+                                                    <Border x:Name="GameplayHitObjectCard" Style="{StaticResource GameplayPreviewCard}">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="44" />
+                                                                <RowDefinition Height="330" />
+                                                            </Grid.RowDefinitions>
+                                                            <Grid Margin="12,0">
+                                                                <StackPanel VerticalAlignment="Center">
+                                                                    <TextBlock Text="Hit objects &amp; combo colours"
+                                                                               FontSize="13"
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock Text="combo palette · hitcircle · hitcircleoverlay · approachcircle · default-1/2/3"
+                                                                               FontSize="9"
+                                                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                            <Border Grid.Row="1" Background="#FF000000">
+                                                                <Viewbox Stretch="Uniform">
+                                                                    <Canvas Width="800" Height="330" Background="#FF000000">
+                                                                        <TextBlock Text="COMBO PALETTE"
+                                                                                   Width="800"
+                                                                                   Canvas.Top="16"
+                                                                                   TextAlignment="Center"
+                                                                                   FontSize="11"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#DDF0F0F5" />
+                                                                        <Ellipse x:Name="GameplayComboSwatch1" Width="54" Height="54" Canvas.Left="213" Canvas.Top="42" />
+                                                                        <Ellipse x:Name="GameplayComboSwatch2" Width="54" Height="54" Canvas.Left="373" Canvas.Top="42" />
+                                                                        <Ellipse x:Name="GameplayComboSwatch3" Width="54" Height="54" Canvas.Left="533" Canvas.Top="42" />
+                                                                        <TextBlock Text="IN-GAME HITCIRCLES"
+                                                                                   Width="800"
+                                                                                   Canvas.Top="110"
+                                                                                   TextAlignment="Center"
+                                                                                   FontSize="11"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#DDF0F0F5" />
+                                                                        <Image x:Name="GameplayStandaloneApproach" Width="170" Height="170" Canvas.Left="155" Canvas.Top="132" />
+                                                                        <Image x:Name="GameplayComboCircle1" Width="120" Height="120" Canvas.Left="180" Canvas.Top="157" />
+                                                                        <Image x:Name="GameplayComboOverlay1" Width="120" Height="120" Canvas.Left="180" Canvas.Top="157" />
+                                                                        <Image x:Name="GameplayComboNumber1" Width="40" Height="54" Canvas.Left="220" Canvas.Top="190" />
+                                                                        <Image x:Name="GameplayComboCircle2" Width="120" Height="120" Canvas.Left="340" Canvas.Top="157" />
+                                                                        <Image x:Name="GameplayComboOverlay2" Width="120" Height="120" Canvas.Left="340" Canvas.Top="157" />
+                                                                        <Image x:Name="GameplayComboNumber2" Width="40" Height="54" Canvas.Left="380" Canvas.Top="190" />
+                                                                        <Image x:Name="GameplayComboCircle3" Width="120" Height="120" Canvas.Left="500" Canvas.Top="157" />
+                                                                        <Image x:Name="GameplayComboOverlay3" Width="120" Height="120" Canvas.Left="500" Canvas.Top="157" />
+                                                                        <Image x:Name="GameplayComboNumber3" Width="40" Height="54" Canvas.Left="540" Canvas.Top="190" />
+                                                                    </Canvas>
+                                                                </Viewbox>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+
+                                                    <Border x:Name="GameplaySliderCard" Style="{StaticResource GameplayPreviewCard}">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="44" />
+                                                                <RowDefinition Height="300" />
+                                                            </Grid.RowDefinitions>
+                                                            <Grid Margin="12,0">
+                                                                <StackPanel VerticalAlignment="Center">
+                                                                    <TextBlock Text="Slider"
+                                                                               FontSize="13"
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock Text="slider body · hitcircle head and tail · sliderb · sliderfollowcircle · reversearrow"
+                                                                               FontSize="9"
+                                                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                                                </StackPanel>
+                                                                <ToggleButton x:Name="SliderEndCircleToggle"
+                                                                              HorizontalAlignment="Right"
+                                                                              VerticalAlignment="Center"
+                                                                              Content="End circle"
+                                                                              IsChecked="True"
+                                                                              Style="{StaticResource SkinSegment}"
+                                                                              Click="SliderEndCircleToggle_Click"
+                                                                              AutomationProperties.Name="Show slider end circle" />
+                                                            </Grid>
+                                                            <Border Grid.Row="1" Background="#FF000000">
+                                                                <Viewbox Stretch="Uniform">
+                                                                    <Canvas Width="800" Height="300" Background="#FF000000">
+                                                                        <Image x:Name="GameplaySliderBody"
+                                                                               Width="800"
+                                                                               Height="300"
+                                                                               RenderOptions.BitmapScalingMode="Fant" />
+                                                                        <Image x:Name="GameplayApproach" Width="154" Height="154" Canvas.Left="50" Canvas.Top="100" />
+                                                                        <Image x:Name="GameplayHitcircle" Width="92" Height="92" Canvas.Left="81" Canvas.Top="131" />
+                                                                        <Image x:Name="GameplayOverlay" Width="92" Height="92" Canvas.Left="81" Canvas.Top="131" />
+                                                                        <Image x:Name="GameplayNumber" Width="35" Height="46" Canvas.Left="110" Canvas.Top="154" />
+                                                                        <Image x:Name="GameplayTailCircle" Width="92" Height="92" Canvas.Left="630" Canvas.Top="56" />
+                                                                        <Image x:Name="GameplayTailOverlay" Width="92" Height="92" Canvas.Left="630" Canvas.Top="56" />
+                                                                        <Image x:Name="GameplayReverseArrow" Width="92" Height="92" Canvas.Left="630" Canvas.Top="56" />
+                                                                        <Image x:Name="GameplayFollowCircle" Width="154" Height="154" Canvas.Left="354" Canvas.Top="68" />
+                                                                        <Image x:Name="GameplaySliderBall" Width="104" Height="104" Canvas.Left="379" Canvas.Top="93" />
+                                                                    </Canvas>
+                                                                </Viewbox>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+
+                                                    <Border x:Name="GameplaySpinnerCard" Style="{StaticResource GameplayPreviewCard}">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="52" />
+                                                                <RowDefinition Height="480" />
+                                                            </Grid.RowDefinitions>
+                                                            <Grid Margin="12,0">
+                                                                <StackPanel VerticalAlignment="Center">
+                                                                    <TextBlock Text="Spinner"
+                                                                               FontSize="13"
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock x:Name="GameplaySpinnerModeText"
+                                                                               Text="Detecting legacy spinner style…"
+                                                                               FontSize="9"
+                                                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                                                </StackPanel>
+                                                                <Border HorizontalAlignment="Right"
+                                                                        VerticalAlignment="Center"
+                                                                        Padding="8,3"
+                                                                        CornerRadius="8"
+                                                                        Background="{DynamicResource Brush.ControlBackground}">
+                                                                    <TextBlock Text="stable window-space · 640 × 480"
+                                                                               FontSize="9"
+                                                                               Foreground="{DynamicResource Brush.TextSecondary}" />
+                                                                </Border>
+                                                            </Grid>
+                                                            <Border Grid.Row="1" Background="#FF000000">
+                                                                <Viewbox Stretch="Uniform">
+                                                                    <Canvas x:Name="GameplaySpinnerScene"
+                                                                            Width="640"
+                                                                            Height="480"
+                                                                            Background="#FF000000">
+                                                                        <Canvas x:Name="GameplaySpinnerFallbackLayers" Width="640" Height="480">
+                                                                            <Ellipse Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Fill="#FF12151E" Stroke="#FF34394A" StrokeThickness="3" />
+                                                                            <Ellipse x:Name="GameplaySpinnerFallbackFill" Width="310" Height="310" Canvas.Left="165" Canvas.Top="93" Fill="#40262F44" />
+                                                                            <Ellipse x:Name="GameplaySpinnerFallbackRing" Width="310" Height="310" Canvas.Left="165" Canvas.Top="93" Stroke="#FF7B8DAE" StrokeThickness="5" />
+                                                                        </Canvas>
+
+                                                                        <Canvas x:Name="GameplayOldSpinnerLayers" Width="640" Height="480">
+                                                                            <Image x:Name="GameplaySpinnerBackground" Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Stretch="Uniform" />
+                                                                            <Image x:Name="GameplaySpinnerCircle" Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Stretch="Uniform" />
+                                                                            <Image x:Name="GameplaySpinnerMetre" Width="400" Height="433" Canvas.Left="0" Canvas.Top="29" Stretch="Fill" />
+                                                                        </Canvas>
+
+                                                                        <Canvas x:Name="GameplayNewSpinnerLayers" Width="640" Height="480">
+                                                                            <Image x:Name="GameplaySpinnerGlow" Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Stretch="Uniform" />
+                                                                            <Image x:Name="GameplaySpinnerBottom" Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Stretch="Uniform" />
+                                                                            <Image x:Name="GameplaySpinnerTop" Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Stretch="Uniform" />
+                                                                            <Image x:Name="GameplaySpinnerMiddle2" Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Stretch="Uniform" />
+                                                                            <Image x:Name="GameplaySpinnerMiddle" Width="400" Height="400" Canvas.Left="120" Canvas.Top="48" Stretch="Uniform" />
+                                                                        </Canvas>
+
+                                                                        <Image x:Name="GameplaySpinnerApproach" Width="465" Height="465" Canvas.Left="87.5" Canvas.Top="15.5" Stretch="Uniform" />
+                                                                        <TextBlock x:Name="GameplaySpinnerBonus"
+                                                                                   Text="1000"
+                                                                                   Width="160"
+                                                                                   Canvas.Left="240"
+                                                                                   Canvas.Top="318"
+                                                                                   Visibility="Collapsed"
+                                                                                   TextAlignment="Center"
+                                                                                   FontSize="24"
+                                                                                   FontFamily="Consolas"
+                                                                                   Foreground="#FFF0F0F5" />
+                                                                        <Image x:Name="GameplaySpinnerClear" Width="250" Height="64" Canvas.Left="195" Canvas.Top="112" Stretch="Uniform" Visibility="Collapsed" />
+                                                                        <TextBlock x:Name="GameplaySpinnerClearFallback"
+                                                                                   Text="CLEAR"
+                                                                                   Width="180"
+                                                                                   Canvas.Left="230"
+                                                                                   Canvas.Top="132"
+                                                                                   Visibility="Collapsed"
+                                                                                   TextAlignment="Center"
+                                                                                   FontSize="18"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#CCF0F0F5" />
+                                                                        <Image x:Name="GameplaySpinnerSpin" Width="250" Height="64" Canvas.Left="195" Canvas.Top="332" Stretch="Uniform" />
+                                                                        <TextBlock x:Name="GameplaySpinnerSpinFallback"
+                                                                                   Text="SPIN"
+                                                                                   Width="180"
+                                                                                   Canvas.Left="230"
+                                                                                   Canvas.Top="352"
+                                                                                   TextAlignment="Center"
+                                                                                   FontSize="18"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#CCF0F0F5" />
+                                                                        <Image x:Name="GameplaySpinnerRpm" Width="110" Height="30" Canvas.Left="233" Canvas.Top="430" Stretch="Uniform" />
+                                                                        <Canvas x:Name="GameplaySpinnerSpmDigits" Width="640" Height="480">
+                                                                            <Image x:Name="GameplaySpinnerSpmDigit2" Stretch="Fill" />
+                                                                            <Image x:Name="GameplaySpinnerSpmDigit6" Stretch="Fill" />
+                                                                            <Image x:Name="GameplaySpinnerSpmDigit7" Stretch="Fill" />
+                                                                        </Canvas>
+                                                                        <TextBlock x:Name="GameplaySpinnerSpmFallbackText"
+                                                                                   Text="267"
+                                                                                   Width="60"
+                                                                                   Canvas.Left="340"
+                                                                                   Canvas.Top="433"
+                                                                                   TextAlignment="Right"
+                                                                                   FontSize="18"
+                                                                                   FontFamily="Consolas"
+                                                                                   Foreground="#FFF0F0F5" />
+                                                                    </Canvas>
+                                                                </Viewbox>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+
+                                                    <Border x:Name="GameplayCursorCard" Style="{StaticResource GameplayPreviewCard}">
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="44" />
+                                                                <RowDefinition Height="210" />
+                                                            </Grid.RowDefinitions>
+                                                            <Grid Margin="12,0">
+                                                                <StackPanel VerticalAlignment="Center">
+                                                                    <TextBlock Text="Cursor"
+                                                                               FontSize="13"
+                                                                               FontWeight="SemiBold" />
+                                                                    <TextBlock Text="cursor · cursormiddle · cursortrail"
+                                                                               FontSize="9"
+                                                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                            <Border Grid.Row="1" Background="#FF000000">
+                                                                <Viewbox Stretch="Uniform">
+                                                                    <Canvas Width="800" Height="210" Background="#FF000000">
+                                                                        <Image x:Name="GameplayCursorTrailFar"
+                                                                               Width="82"
+                                                                               Height="82"
+                                                                               Canvas.Left="285"
+                                                                               Canvas.Top="82"
+                                                                               Opacity="0.3" />
+                                                                        <Image x:Name="GameplayCursorTrail"
+                                                                               Width="90"
+                                                                               Height="90"
+                                                                               Canvas.Left="340"
+                                                                               Canvas.Top="65"
+                                                                               Opacity="0.6" />
+                                                                        <Image x:Name="GameplayCursorMiddle"
+                                                                               Width="96"
+                                                                               Height="96"
+                                                                               Canvas.Left="388"
+                                                                               Canvas.Top="46" />
+                                                                        <Image x:Name="GameplayCursor"
+                                                                               Width="108"
+                                                                               Height="108"
+                                                                               Canvas.Left="382"
+                                                                               Canvas.Top="38" />
+                                                                    </Canvas>
+                                                                </Viewbox>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </DockPanel>
+                                    </Grid>
+                                </Grid>
                             </Grid>
                         </TabItem>
 
                         <TabItem Header="skin.ini">
-                            <Grid Margin="10">
+                            <Grid>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="46" />
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel x:Name="ComboStrip" Orientation="Horizontal" />
-                                    <Button x:Name="SaveIniButton"
-                                            Grid.Column="1"
-                                            Content="Save skin.ini"
-                                            Style="{StaticResource Button.Primary}"
-                                            Height="30"
-                                            Padding="12,0"
-                                            IsEnabled="False"
-                                            Click="SaveIni_Click" />
-                                </Grid>
+                                <Border BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="10,6">
+                                    <Grid>
+                                        <StackPanel x:Name="ComboStrip"
+                                                    Orientation="Horizontal"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="Collapsed" />
+                                        <StackPanel VerticalAlignment="Center"
+                                                    Margin="0,0,170,0">
+                                            <TextBlock x:Name="IniWorkspaceSectionTitle"
+                                                       Text="Settings"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="Enable only the keys this skin should override."
+                                                       FontSize="9"
+                                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <Border HorizontalAlignment="Right" Style="{StaticResource SkinSegmentGroup}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <ToggleButton x:Name="IniFormModeButton"
+                                                              Content="Form"
+                                                              Tag="Form"
+                                                              Style="{StaticResource SkinSegment}"
+                                                              Click="IniCenterMode_Click"
+                                                              IsChecked="True" />
+                                                <ToggleButton x:Name="IniRawModeButton"
+                                                              Content="Raw"
+                                                              Tag="Raw"
+                                                              Style="{StaticResource SkinSegment}"
+                                                              Click="IniCenterMode_Click" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Border>
                                 <TabControl x:Name="IniModeTabs"
                                             Grid.Row="1"
-                                            Margin="0,8,0,0"
-                                            Style="{StaticResource SkinTabControl}"
-                                            BorderThickness="1"
+                                            Style="{StaticResource SkinWorkspaceHost}"
                                             SelectionChanged="IniModeTabs_SelectionChanged">
                                     <TabItem Header="Form">
-                                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                            <StackPanel x:Name="IniFormPanel" Margin="4" />
+                                        <ScrollViewer x:Name="IniFormScroll"
+                                                      VerticalScrollBarVisibility="Auto">
+                                            <StackPanel x:Name="IniFormPanel" Margin="12" />
                                         </ScrollViewer>
                                     </TabItem>
                                     <TabItem Header="Raw">
                                         <TextBox x:Name="RawIniText"
+                                                 Margin="12"
                                                  AcceptsReturn="True"
                                                  AcceptsTab="True"
                                                  TextWrapping="NoWrap"
@@ -377,208 +1179,503 @@
                                 </TabControl>
                             </Grid>
                         </TabItem>
-                        <TabItem x:Name="CompactEditorTab" Header="Editor" Visibility="Collapsed">
-                            <ContentControl x:Name="CompactInspectorHost"
-                                            HorizontalContentAlignment="Stretch"
-                                            VerticalContentAlignment="Stretch" />
-                        </TabItem>
                     </TabControl>
                 </Border>
 
-                <GridSplitter Grid.Row="1"
-                              Height="6"
-                              HorizontalAlignment="Stretch"
-                              Background="{DynamicResource Brush.SubtleBorder}" />
-
-                <Border Grid.Row="2" Style="{StaticResource SkinPanel}" ClipToBounds="True">
-                    <DockPanel x:Name="GameplayCanvas" Background="#FF09090D">
-                        <Grid DockPanel.Dock="Top" Height="32" Margin="10,0">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="GAMEPLAY PREVIEW"
-                                           Style="{StaticResource SkinLabel}"
-                                           Foreground="{DynamicResource Brush.AccentPink}" />
-                                <TextBlock x:Name="GameplaySkinName"
-                                           Margin="10,0,0,0"
-                                           VerticalAlignment="Center"
-                                           FontSize="10"
-                                           Foreground="{DynamicResource Brush.TextMuted}"
-                                           TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <RadioButton x:Name="SkinBackgroundToggle"
-                                         Content="Skin bg"
-                                         GroupName="GameplayBackground"
-                                         IsChecked="True"
-                                         Checked="GameplayBackground_Checked" />
-                            <RadioButton Content="Black bg"
-                                         GroupName="GameplayBackground"
-                                         Margin="10,0,0,0"
-                                         Checked="GameplayBackground_Checked" />
-                            </StackPanel>
-                        </Grid>
-                        <Border Margin="8,0,8,8" ClipToBounds="True" Background="#FF0E0F18">
-                            <Viewbox Stretch="Uniform">
-                                <Canvas Width="880" Height="505" Background="#FF0E0F18">
-                                    <Image x:Name="GameplayBackground"
-                                           Width="880"
-                                           Height="505"
-                                           Stretch="UniformToFill"
-                                           Opacity="0.3" />
-                                    <Rectangle Width="880" Height="505" Fill="#7A000000" />
-
-                                    <Image x:Name="GameplaySliderBody"
-                                           Width="880"
-                                           Height="505"
-                                           RenderOptions.BitmapScalingMode="HighQuality" />
-
-                                    <Image x:Name="GameplayTailCircle" Width="100" Height="100" Canvas.Left="620" Canvas.Top="130" />
-                                    <Image x:Name="GameplayTailOverlay" Width="100" Height="100" Canvas.Left="620" Canvas.Top="130" />
-                                    <Image x:Name="GameplayReverseArrow" Width="100" Height="100" Canvas.Left="620" Canvas.Top="130" />
-
-                                    <Image x:Name="GameplayFollowCircle" Width="150" Height="150" Canvas.Left="365" Canvas.Top="145" />
-                                    <Image x:Name="GameplaySliderBall" Width="100" Height="100" Canvas.Left="390" Canvas.Top="170" />
-
-                                    <Image x:Name="GameplayApproach" Width="150" Height="150" Canvas.Left="115" Canvas.Top="235" />
-                                    <Image x:Name="GameplayHitcircle" Width="100" Height="100" Canvas.Left="140" Canvas.Top="260" />
-                                    <Image x:Name="GameplayOverlay" Width="100" Height="100" Canvas.Left="140" Canvas.Top="260" />
-                                    <Image x:Name="GameplayNumber" Width="34" Height="44" Canvas.Left="173" Canvas.Top="288" />
-
-                                    <Image x:Name="GameplayScorebar" Width="230" Height="36" Canvas.Left="14" Canvas.Top="12" Stretch="Fill" />
-                                    <Image x:Name="GameplayScorebarMarker" Width="36" Height="36" Canvas.Left="222" Canvas.Top="12" />
-                                    <TextBlock Text="08,472,190"
-                                               Canvas.Right="18"
-                                               Canvas.Top="10"
-                                               FontSize="26"
-                                               FontFamily="Consolas"
-                                               Foreground="#FFF0F0F5" />
-                                    <TextBlock Text="342x"
-                                               Canvas.Left="18"
-                                               Canvas.Bottom="12"
-                                               FontSize="30"
-                                               FontWeight="Bold"
-                                               Foreground="#FFF0F0F5" />
-
-                                    <Image x:Name="GameplayCursorTrail"
-                                           Width="64"
-                                           Height="64"
-                                           Canvas.Left="480"
-                                           Canvas.Top="330"
-                                           Opacity="0.65" />
-                                    <Image x:Name="GameplayCursor"
-                                           Width="72"
-                                           Height="72"
-                                           Canvas.Left="500"
-                                           Canvas.Top="315" />
-                                </Canvas>
-                            </Viewbox>
+                <Border x:Name="InspectorPanel"
+                        Grid.Column="4"
+                        Style="{StaticResource SkinPanel}"
+                        ClipToBounds="True">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="46" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                BorderThickness="0,0,0,1"
+                                Padding="12,0">
+                            <Grid>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="InspectorTitleText"
+                                               Text="Properties"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock x:Name="InspectorSubtitleText"
+                                               Text="Select an element to edit it."
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.TextMuted}"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <Button x:Name="ReviewCloseButton"
+                                        HorizontalAlignment="Right"
+                                        Content="Back"
+                                        Style="{StaticResource SkinAction}"
+                                        Click="ReviewClose_Click"
+                                        Visibility="Collapsed" />
+                            </Grid>
                         </Border>
-                    </DockPanel>
+
+                        <Grid x:Name="ContextInspectorContent" Grid.Row="1">
+                            <Grid x:Name="ElementInspectorContent">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              Padding="12,10,12,4">
+                                    <StackPanel>
+                                        <TextBlock x:Name="SelectedElementName"
+                                                   FontSize="14"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock x:Name="SelectedElementMeta"
+                                                   Margin="0,3,0,0"
+                                                   Foreground="{DynamicResource Brush.TextMuted}"
+                                                   FontSize="10"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock x:Name="SelectedElementUsage"
+                                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                                   FontSize="10"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,5,0,0" />
+                                        <Button x:Name="OpenElementIniLinkButton"
+                                                Content="Open related skin.ini settings"
+                                                Style="{StaticResource SkinAction}"
+                                                HorizontalAlignment="Left"
+                                                Margin="0,9,0,0"
+                                                Click="OpenElementIniLink_Click"
+                                                Visibility="Collapsed" />
+
+                                        <StackPanel x:Name="GameplayLocalPreviewPanel"
+                                                    Margin="0,10,0,0"
+                                                    Visibility="Collapsed">
+                                            <Grid Margin="0,0,0,5">
+                                                <TextBlock Text="CURRENT ASSET"
+                                                           Style="{StaticResource SkinLabel}"
+                                                           VerticalAlignment="Center" />
+                                                <TextBlock Text="Live local edits"
+                                                           HorizontalAlignment="Right"
+                                                           FontSize="9"
+                                                           Foreground="{DynamicResource Brush.TextMuted}" />
+                                            </Grid>
+                                            <Border Height="128"
+                                                    Background="{StaticResource TransparencyGridBrush}"
+                                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="7"
+                                                    Padding="8">
+                                                <Image x:Name="GameplayLocalAssetPreview"
+                                                       Stretch="Uniform"
+                                                       RenderOptions.BitmapScalingMode="Fant" />
+                                            </Border>
+                                        </StackPanel>
+
+                                        <StackPanel x:Name="ImageEditorControls"
+                                                    Margin="0,10,0,0"
+                                                    IsEnabled="False">
+                                            <TextBlock Text="RECOLOUR MODE" Style="{StaticResource SkinLabel}" Margin="0,4,0,5" />
+                                            <ComboBox x:Name="RecolorModePicker"
+                                                      SelectionChanged="RecolorModePicker_SelectionChanged">
+                                                <ComboBoxItem Content="Colorize" Tag="Colorize" />
+                                                <ComboBoxItem Content="Tint" Tag="Tint" />
+                                                <ComboBoxItem Content="Hue / Saturation" Tag="HueSaturation" />
+                                            </ComboBox>
+                                            <TextBlock Text="EDIT SCOPE" Style="{StaticResource SkinLabel}" Margin="0,12,0,5" />
+                                            <ComboBox x:Name="EditScopePicker" SelectedIndex="0">
+                                                <ComboBoxItem Content="Current element" />
+                                                <ComboBoxItem Content="Selected image elements" />
+                                            </ComboBox>
+
+                                            <StackPanel x:Name="TargetColorPanel">
+                                                <TextBlock Text="TARGET COLOUR" Style="{StaticResource SkinLabel}" Margin="0,12,0,5" />
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="36" />
+                                                        <ColumnDefinition Width="7" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="7" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border x:Name="CurrentColorSwatch"
+                                                            Width="36"
+                                                            Height="30"
+                                                            BorderBrush="{DynamicResource Brush.SubtleBorder}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="5"
+                                                            Background="White" />
+                                                    <TextBox x:Name="HexColorBox"
+                                                             Grid.Column="2"
+                                                             VerticalContentAlignment="Center"
+                                                             TextChanged="HexColorBox_TextChanged" />
+                                                    <Button Grid.Column="4"
+                                                            Content="Pick…"
+                                                            Style="{StaticResource SkinAction}"
+                                                            Click="PickColor_Click" />
+                                                </Grid>
+                                                <Grid Margin="0,10,0,4">
+                                                    <TextBlock Text="SWATCHES"
+                                                               Style="{StaticResource SkinLabel}"
+                                                               VerticalAlignment="Center" />
+                                                    <Button Content="+ Save"
+                                                            HorizontalAlignment="Right"
+                                                            Style="{StaticResource SkinAction}"
+                                                            Click="SaveSwatch_Click" />
+                                                </Grid>
+                                                <WrapPanel x:Name="SwatchPanel" />
+                                            </StackPanel>
+
+                                            <StackPanel x:Name="HueShiftPanel" Visibility="Collapsed">
+                                                <TextBlock Text="HUE SHIFT" Style="{StaticResource SkinLabel}" Margin="0,12,0,0" />
+                                                <Slider x:Name="HueShiftSlider" Minimum="-180" Maximum="180" ValueChanged="HueShift_Changed" />
+                                                <TextBlock Text="SATURATION" Style="{StaticResource SkinLabel}" />
+                                                <Slider x:Name="SaturationShiftSlider" Minimum="0" Maximum="2" Value="1" ValueChanged="HueShift_Changed" />
+                                                <TextBlock Text="LIGHTNESS" Style="{StaticResource SkinLabel}" />
+                                                <Slider x:Name="LightnessShiftSlider" Minimum="0" Maximum="2" Value="1" ValueChanged="HueShift_Changed" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </ScrollViewer>
+
+                                <Border x:Name="ElementActionFooter"
+                                        Grid.Row="1"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="0,1,0,0"
+                                        Padding="12,10">
+                                    <StackPanel>
+                                        <Button x:Name="SaveElementButton"
+                                                Content="Add to changes"
+                                                Style="{StaticResource Button.Primary}"
+                                                Height="32"
+                                                Click="SaveElement_Click" />
+                                        <Grid Margin="0,7,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="7" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button x:Name="ResetElementButton"
+                                                    Content="Reset"
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource SkinAction}"
+                                                    Click="ResetElement_Click" />
+                                            <Button x:Name="ExportElementButton"
+                                                    Content="Export PNG"
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource SkinAction}"
+                                                    Click="ExportElement_Click" />
+                                        </Grid>
+                                        <Button x:Name="OpenExternallyButton"
+                                                Content="Open externally (stage on save)"
+                                                Style="{StaticResource SkinAction}"
+                                                Margin="0,7,0,0"
+                                                Click="OpenExternally_Click" />
+                                        <Button x:Name="DeleteElementButton"
+                                                Content="Delete element…"
+                                                Style="{StaticResource SkinAction}"
+                                                Foreground="{DynamicResource Brush.Danger}"
+                                                Margin="0,7,0,0"
+                                                ToolTip="Stage deletion of this element and its paired resolution files"
+                                                Click="DeleteElement_Click" />
+                                        <TextBlock x:Name="ElementBackupHint"
+                                                   Text="Original files are backed up automatically before staging."
+                                                   Margin="2,7,2,0"
+                                                   FontSize="9"
+                                                   Foreground="{DynamicResource Brush.TextMuted}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel x:Name="NoElementInspectorHint"
+                                            Grid.RowSpan="2"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Margin="20">
+                                    <TextBlock Text="Select an asset"
+                                               FontSize="13"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="Its properties and editing tools will appear here."
+                                               Margin="0,4,0,0"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource Brush.TextMuted}"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid x:Name="IniInspectorContent" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              Padding="12">
+                                    <StackPanel>
+                                        <Border x:Name="IniContextVisual"
+                                                 Height="180"
+                                                 Background="#FF000000"
+                                                 CornerRadius="7"
+                                                 ClipToBounds="True">
+                                            <Grid>
+                                                <Viewbox x:Name="IniContextHitObjectStage"
+                                                         Stretch="Uniform"
+                                                         Visibility="Collapsed">
+                                                    <Canvas Width="260" Height="170" Background="#FF000000">
+                                                        <Ellipse x:Name="IniContextHitSwatch"
+                                                                 Width="28"
+                                                                 Height="28"
+                                                                 Canvas.Left="218"
+                                                                 Canvas.Top="12"
+                                                                 Fill="{DynamicResource Brush.AccentPink}" />
+                                                        <Image x:Name="IniContextHitApproach" Width="154" Height="154" Canvas.Left="53" Canvas.Top="8" />
+                                                        <Image x:Name="IniContextHitCircle" Width="104" Height="104" Canvas.Left="78" Canvas.Top="33" />
+                                                        <Image x:Name="IniContextHitOverlayBelow" Width="104" Height="104" Canvas.Left="78" Canvas.Top="33" />
+                                                        <Image x:Name="IniContextHitNumber" Width="35" Height="46" Canvas.Left="112.5" Canvas.Top="62" />
+                                                        <Image x:Name="IniContextHitOverlayAbove" Width="104" Height="104" Canvas.Left="78" Canvas.Top="33" />
+                                                    </Canvas>
+                                                </Viewbox>
+                                                <Viewbox x:Name="IniContextSliderStage"
+                                                         Stretch="Uniform"
+                                                         Visibility="Collapsed">
+                                                    <Canvas Width="800" Height="300" Background="#FF000000">
+                                                        <Image x:Name="IniContextSlider" Width="800" Height="300" Stretch="Fill" RenderOptions.BitmapScalingMode="Fant" />
+                                                        <Image x:Name="IniContextSliderHead" Width="92" Height="92" Canvas.Left="81" Canvas.Top="131" />
+                                                        <Image x:Name="IniContextSliderHeadOverlay" Width="92" Height="92" Canvas.Left="81" Canvas.Top="131" />
+                                                        <Image x:Name="IniContextSliderNumber" Width="35" Height="46" Canvas.Left="110" Canvas.Top="154" />
+                                                        <Image x:Name="IniContextSliderTail" Width="92" Height="92" Canvas.Left="630" Canvas.Top="56" />
+                                                        <Image x:Name="IniContextSliderTailOverlay" Width="92" Height="92" Canvas.Left="630" Canvas.Top="56" />
+                                                        <Image x:Name="IniContextSliderBall" Width="104" Height="104" Canvas.Left="379" Canvas.Top="93" />
+                                                    </Canvas>
+                                                </Viewbox>
+                                                <Ellipse x:Name="IniContextColour"
+                                                         Width="54"
+                                                         Height="54"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"
+                                                         Fill="{DynamicResource Brush.AccentPink}"
+                                                         Visibility="Collapsed" />
+                                                <Image x:Name="IniContextAsset"
+                                                       Width="84"
+                                                       Height="84"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Stretch="Uniform" />
+                                                <TextBlock x:Name="IniContextFallback"
+                                                           Text="&#xE713;"
+                                                           FontFamily="Segoe Fluent Icons"
+                                                           FontSize="30"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource Brush.TextMuted}" />
+                                            </Grid>
+                                        </Border>
+                                        <TextBlock x:Name="IniContextTitle"
+                                                   Text="Rich skin.ini editor"
+                                                   FontSize="14"
+                                                   FontWeight="SemiBold"
+                                                   Margin="0,12,0,0" />
+                                        <TextBlock x:Name="IniContextHelp"
+                                                   Text="Select a setting to see what it affects."
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,9" />
+                                        <TextBlock Text="AFFECTS" Style="{StaticResource SkinLabel}" Margin="0,0,0,5" />
+                                        <WrapPanel x:Name="IniContextAffects" />
+                                        <Border Margin="0,14,0,0"
+                                                Padding="9"
+                                                Background="{DynamicResource Brush.ControlBackground}"
+                                                CornerRadius="6">
+                                            <TextBlock Text="Form mode covers supported osu! skin settings. Use Raw for repeated Mania sections, comments, and future keys."
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                                       TextWrapping="Wrap" />
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                                <Border Grid.Row="1"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="0,1,0,0"
+                                        Padding="12,10">
+                                    <Button x:Name="SaveIniButton"
+                                            Content="Add skin.ini to changes"
+                                            Style="{StaticResource Button.Primary}"
+                                            Height="32"
+                                            IsEnabled="False"
+                                            Click="SaveIni_Click" />
+                                </Border>
+                            </Grid>
+                        </Grid>
+
+                        <Grid x:Name="ReviewInspectorContent"
+                              Grid.Row="1"
+                              Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid Margin="12,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="DraftChangesLabel"
+                                               Text="No changes waiting"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Text="Review exactly what will be written to osu!lazer."
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.TextMuted}" />
+                                </StackPanel>
+                                <Button x:Name="UndoDraftButton"
+                                        Grid.Column="1"
+                                        Content="Undo"
+                                        Style="{StaticResource SkinAction}"
+                                        Margin="6,0,0,0"
+                                        Click="UndoDraft_Click"
+                                        IsEnabled="False" />
+                                <Button x:Name="RedoDraftButton"
+                                        Grid.Column="2"
+                                        Content="Redo"
+                                        Style="{StaticResource SkinAction}"
+                                        Margin="6,0,0,0"
+                                        Click="RedoDraft_Click"
+                                        IsEnabled="False" />
+                                <Button x:Name="DiscardAllDraftButton"
+                                        Grid.Column="3"
+                                        Content="Discard all"
+                                        Style="{StaticResource SkinAction}"
+                                        Margin="6,0,0,0"
+                                        Click="DiscardAllDraftChanges_Click"
+                                        IsEnabled="False" />
+                            </Grid>
+                            <ListBox x:Name="DraftChangesList"
+                                     Grid.Row="1"
+                                     Margin="12,0"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     Padding="0"
+                                     HorizontalContentAlignment="Stretch">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type skins:SkinDraftChange}">
+                                        <Grid MinHeight="44">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Description}"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding Filename}" />
+                                                <TextBlock Text="{Binding Filename}"
+                                                           FontSize="9"
+                                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1"
+                                                    Content="Discard"
+                                                    Tag="{Binding}"
+                                                    Click="DiscardDraftChange_Click"
+                                                    Style="{StaticResource SkinAction}"
+                                                    Margin="7,0,0,0" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel x:Name="DraftEmptyState"
+                                        Grid.Row="1"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Margin="18">
+                                <TextBlock Text="No changes waiting to be saved"
+                                           FontWeight="SemiBold"
+                                           TextAlignment="Center" />
+                                <TextBlock Text="Edit an element or skin.ini setting, then choose Add to changes."
+                                           Margin="0,4,0,0"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="Center" />
+                            </StackPanel>
+                            <Border Grid.Row="2"
+                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                    BorderThickness="0,1,0,0"
+                                    Padding="12,10">
+                                <StackPanel>
+                                    <TextBlock Text="Nothing changes in osu!lazer until you save. Kumori creates a restore point first."
+                                               Margin="1,0,1,7"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.TextMuted}"
+                                               TextWrapping="Wrap" />
+                                    <Button x:Name="ReviewApplyButton"
+                                            Content="Save to osu!lazer"
+                                            Style="{StaticResource Button.Primary}"
+                                            Height="32"
+                                            IsEnabled="False"
+                                            Click="SaveAll_Click" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
                 </Border>
             </Grid>
 
-            <Border x:Name="InspectorPanel" Grid.Column="4" Style="{StaticResource SkinPanel}" Padding="12">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <Border x:Name="WelcomePanel"
+                    Grid.Row="1"
+                    Panel.ZIndex="50"
+                    Margin="10"
+                    Background="{DynamicResource Brush.AppBackground}"
+                    Visibility="Collapsed">
+                <Border Width="620"
+                        MaxWidth="620"
+                        Padding="28"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource SkinPanel}">
                     <StackPanel>
-                        <TextBlock Text="ELEMENT EDITOR" Style="{StaticResource SkinLabel}" />
-                        <Border Height="180"
-                                Margin="0,9,0,0"
-                                Background="{DynamicResource Brush.CardBackground}"
-                                BorderBrush="{DynamicResource Brush.SubtleBorder}"
-                                BorderThickness="1"
-                                CornerRadius="7">
-                            <Grid>
-                                <Image x:Name="ElementPreview"
-                                       Margin="9"
-                                       Stretch="Uniform"
-                                       RenderOptions.BitmapScalingMode="HighQuality" />
-                                <TextBlock x:Name="ElementPreviewHint"
-                                           Text="Select an image element"
-                                           Foreground="{DynamicResource Brush.TextMuted}"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" />
-                            </Grid>
-                        </Border>
-                        <TextBlock x:Name="SelectedElementName"
-                                   Margin="0,7,0,0"
+                        <TextBlock Text="Start in Skin Studio"
+                                   FontSize="24"
                                    FontWeight="SemiBold"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="SelectedElementMeta"
-                                   Foreground="{DynamicResource Brush.TextMuted}"
-                                   FontSize="10" />
-
-                        <StackPanel x:Name="ImageEditorControls" IsEnabled="False">
-                            <TextBlock Text="RECOLOUR MODE" Style="{StaticResource SkinLabel}" Margin="0,14,0,5" />
-                            <ComboBox x:Name="RecolorModePicker"
-                                      SelectionChanged="RecolorModePicker_SelectionChanged">
-                                <ComboBoxItem Content="Colorize" Tag="Colorize" />
-                                <ComboBoxItem Content="Tint" Tag="Tint" />
-                                <ComboBoxItem Content="Hue / Saturation" Tag="HueSaturation" />
-                            </ComboBox>
-
-                            <StackPanel x:Name="TargetColorPanel">
-                                <TextBlock Text="TARGET COLOUR" Style="{StaticResource SkinLabel}" Margin="0,12,0,5" />
-                                <DockPanel>
-                                    <Border x:Name="CurrentColorSwatch"
-                                            Width="36"
-                                            Height="28"
-                                            BorderBrush="{DynamicResource Brush.SubtleBorder}"
-                                            BorderThickness="1"
-                                            CornerRadius="5"
-                                            Background="White"
-                                            DockPanel.Dock="Left" />
-                                    <Button Content="Pick…"
-                                            DockPanel.Dock="Right"
-                                            Style="{StaticResource SkinAction}"
-                                            Margin="6,0,0,0"
-                                            Click="PickColor_Click" />
-                                    <TextBox x:Name="HexColorBox"
-                                             Margin="7,0,0,0"
-                                             VerticalContentAlignment="Center"
-                                             TextChanged="HexColorBox_TextChanged" />
-                                </DockPanel>
-                                <DockPanel Margin="0,8,0,3">
-                                    <Button Content="+ Save colour"
-                                            DockPanel.Dock="Right"
-                                            Style="{StaticResource SkinAction}"
-                                            Margin="0"
-                                            Click="SaveSwatch_Click" />
-                                    <TextBlock Text="SWATCHES" Style="{StaticResource SkinLabel}" VerticalAlignment="Center" />
-                                </DockPanel>
-                                <WrapPanel x:Name="SwatchPanel" />
-                            </StackPanel>
-
-                            <StackPanel x:Name="HueShiftPanel" Visibility="Collapsed">
-                                <TextBlock Text="Hue shift" Style="{StaticResource SkinLabel}" Margin="0,12,0,0" />
-                                <Slider x:Name="HueShiftSlider" Minimum="-180" Maximum="180" ValueChanged="HueShift_Changed" />
-                                <TextBlock Text="Saturation" Style="{StaticResource SkinLabel}" />
-                                <Slider x:Name="SaturationShiftSlider" Minimum="0" Maximum="2" Value="1" ValueChanged="HueShift_Changed" />
-                                <TextBlock Text="Lightness" Style="{StaticResource SkinLabel}" />
-                                <Slider x:Name="LightnessShiftSlider" Minimum="0" Maximum="2" Value="1" ValueChanged="HueShift_Changed" />
-                            </StackPanel>
-
-                            <Button x:Name="SaveElementButton"
-                                    Content="Save to skin"
-                                    Style="{StaticResource Button.Primary}"
-                                    Height="32"
-                                    Margin="0,14,0,0"
-                                    Click="SaveElement_Click" />
-                            <Grid Margin="0,7,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="7" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Button x:Name="ResetElementButton" Content="Reset" Grid.Column="0" Style="{StaticResource SkinAction}" Margin="0" Click="ResetElement_Click" />
-                                <Button x:Name="ExportElementButton" Content="Export PNG" Grid.Column="2" Style="{StaticResource SkinAction}" Margin="0" Click="ExportElement_Click" />
-                            </Grid>
-                            <Button x:Name="OpenExternallyButton"
-                                    Content="Open externally (auto-sync)"
-                                    Style="{StaticResource SkinAction}"
-                                    Margin="0,7,0,0"
-                                    Click="OpenExternally_Click" />
-                        </StackPanel>
+                                   HorizontalAlignment="Center" />
+                        <TextBlock Text="Choose an existing lazer skin, build a new one from reusable Extras, or begin completely blank."
+                                   Margin="20,7,20,20"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   TextWrapping="Wrap"
+                                   TextAlignment="Center" />
+                        <Button Content="Choose an existing skin"
+                                Style="{StaticResource Button.Primary}"
+                                Height="38"
+                                Click="ChooseExistingSkin_Click" />
+                        <Button Content="Build a new skin from Extras"
+                                Style="{StaticResource SkinAction}"
+                                Height="36"
+                                Margin="0,8,0,0"
+                                Click="CreateSkinFromExtras_Click" />
+                        <Button Content="Create a blank skin"
+                                Style="{StaticResource SkinAction}"
+                                Height="36"
+                                Margin="0,8,0,0"
+                                Click="CreateBlankSkin_Click" />
+                        <Button Content="Import an .osk into Extras"
+                                Style="{StaticResource SkinAction}"
+                                Height="36"
+                                Margin="0,8,0,0"
+                                Click="ImportSkinToExtras_Click" />
+                        <Border Margin="0,18,0,0"
+                                Padding="10,8"
+                                Background="{DynamicResource Brush.ControlBackground}"
+                                CornerRadius="6">
+                            <TextBlock Text="Safe editing: previews and Changes stay inside Kumori until you explicitly save to osu!lazer. A restore point is created before every write."
+                                       FontSize="10"
+                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                       TextWrapping="Wrap"
+                                       TextAlignment="Center" />
+                        </Border>
                     </StackPanel>
-                </ScrollViewer>
+                </Border>
             </Border>
         </Grid>
 
@@ -586,12 +1683,20 @@
                 Background="{DynamicResource Brush.PanelBackground}"
                 BorderBrush="{DynamicResource Brush.BorderSubtle}"
                 BorderThickness="0,1,0,0"
-                Padding="10,4">
+                Padding="10,3">
             <TextBlock x:Name="StatusText"
                        Text="Ready."
                        Foreground="{DynamicResource Brush.TextSecondary}"
                        FontSize="10"
                        TextTrimming="CharacterEllipsis" />
+        </Border>
+
+        <Border x:Name="ExtrasWorkspace"
+                Grid.RowSpan="3"
+                Panel.ZIndex="700"
+                Background="{DynamicResource Brush.AppBackground}"
+                Visibility="Collapsed">
+            <ContentControl x:Name="ExtrasHost" />
         </Border>
 
         <Border x:Name="BusyInputShield"

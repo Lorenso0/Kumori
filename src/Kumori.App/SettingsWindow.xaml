@@ -403,6 +403,27 @@
 
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
+                        <TextBlock Text="Skin Studio" Style="{StaticResource SettingsTitle}" />
+                        <TextBlock Text="Standard osu! and interface Extras are always shown. Enable mode-specific libraries only when you use them."
+                                   Style="{StaticResource SettingsHint}" />
+                        <CheckBox x:Name="OnlyShowLazerExtras"
+                                  Content="Lazer-used Extras only"
+                                  IsChecked="True"
+                                  AutomationProperties.HelpText="Hide Stable-only and unverified assets while browsing, extracting, and applying Extras" />
+                        <CheckBox x:Name="ShowCatchExtras"
+                                  Content="Show Catch Extras"
+                                  AutomationProperties.HelpText="Show Catch element families in the Extras browser and extractor" />
+                        <CheckBox x:Name="ShowTaikoExtras"
+                                  Content="Show Taiko Extras"
+                                  AutomationProperties.HelpText="Show Taiko element families in the Extras browser and extractor" />
+                        <CheckBox x:Name="ShowManiaExtras"
+                                  Content="Show Mania Extras"
+                                  AutomationProperties.HelpText="Show Mania key-mode families in the Extras browser and extractor" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
                         <TextBlock Text="Companion Automation" Style="{StaticResource SettingsTitle}" />
                         <TextBlock Text="Controls optional helpers managed by Kumori." Style="{StaticResource SettingsHint}" />
 

@@ -31,6 +31,8 @@ public static class AppDataOrganizer
             Path.Combine(root, "cache", "beatmaps", "covers"),
             Path.Combine(root, "cache", "beatmaps", "files"),
             Path.Combine(root, "assets", "skins"),
+            Path.Combine(root, "skins", "Extras", "osu"),
+            Path.Combine(root, "skins", "backup"),
             Path.Combine(root, "runtime", "status"),
             Path.Combine(root, "runtime", "viewer-contracts"),
             Path.Combine(root, "runtime", "fixtures"),
@@ -91,7 +93,8 @@ public static class AppDataOrganizer
         MoveRootDirectory(root, "beatmap-media", Path.Combine(root, "cache", "beatmaps", "media"));
         MoveRootDirectory(root, "beatmap-covers", Path.Combine(root, "cache", "beatmaps", "covers"));
         MoveRootDirectory(root, "beatmap-files", Path.Combine(root, "cache", "beatmaps", "files"));
-        MoveRootDirectory(root, "skins", Path.Combine(root, "assets", "skins"));
+        MoveLegacyExtrasLibrary(root);
+        MoveLegacySkinLibrary(root);
         MoveRootDirectory(root, "fixtures", Path.Combine(root, "runtime", "fixtures"));
         MoveRootDirectory(root, "viewer-contracts", Path.Combine(root, "runtime", "viewer-contracts"));
         MoveRootDirectory(root, "tosu", Path.Combine(root, "tools", "tosu"));
@@ -194,6 +197,80 @@ public static class AppDataOrganizer
 
         MergeDirectory(source, destination);
         TryDeleteDirectory(source);
+    }
+
+    private static void MoveLegacySkinLibrary(string root)
+    {
+        var source = Path.Combine(root, "skins");
+        if (!Directory.Exists(source))
+        {
+            return;
+        }
+
+        var destination = Path.Combine(root, "assets", "skins");
+        Directory.CreateDirectory(destination);
+
+        // Skin Studio owns these persistent folders. They must never be fed
+        // through the old imported-skin migration on subsequent launches.
+        var protectedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Extras",
+            "backup",
+        };
+
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.TopDirectoryOnly).ToArray())
+        {
+            MoveIfMissing(file, Path.Combine(destination, Path.GetFileName(file)));
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(source).ToArray())
+        {
+            var name = Path.GetFileName(directory);
+            if (protectedNames.Contains(name))
+            {
+                continue;
+            }
+
+            MergeDirectory(directory, Path.Combine(destination, name));
+            TryDeleteDirectory(directory);
+        }
+    }
+
+    private static void MoveLegacyExtrasLibrary(string root)
+    {
+        var container = Path.Combine(root, "skins", "Extras");
+        if (!Directory.Exists(container))
+        {
+            return;
+        }
+
+        var destination = Path.Combine(container, "osu");
+        Directory.CreateDirectory(destination);
+
+        foreach (var file in Directory.EnumerateFiles(
+                     container,
+                     "*",
+                     SearchOption.TopDirectoryOnly).ToArray())
+        {
+            MoveIfMissing(file, Path.Combine(destination, Path.GetFileName(file)));
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(container).ToArray())
+        {
+            var name = Path.GetFileName(directory);
+            if (name.Equals("osu", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // The former osu! area is redundant now that the canonical root is
+            // already Extras\osu. Keep Interface/Audio/other modes grouped.
+            var target = name.Equals("osu!", StringComparison.OrdinalIgnoreCase)
+                ? destination
+                : Path.Combine(destination, name);
+            MergeDirectory(directory, target);
+            TryDeleteDirectory(directory);
+        }
     }
 
     private static void MergeDirectory(string source, string destination)

@@ -56,13 +56,75 @@ The advanced analyzer focuses the replay on review events. Its event browser and
 
 The analyzer explains what the captured information suggests, but it cannot always know the exact reason for a mistake. Results may be less precise when a replay capture is incomplete. Replay capture for osu! is experimental and may need updates when the game changes.
 
+## Skin Extras library
+
+Skin Studio can extract reusable element families from an installed osu!lazer
+skin, a stable skin folder, or an `.osk` archive. The Extras library groups
+packs by gameplay area and family, including cursors, hit objects, sliders,
+number fonts, judgements, HUD/interface elements, spinners, menu assets,
+hitsound sample sets, combobreak, and other gameplay audio. Catch, Taiko, and
+Mania groups stay hidden unless they are enabled in Settings.
+
+The **Lazer-used only** filter is enabled by default in both the library and
+the extraction review. It is audited against official osu! `2026.702.0`
+(`b7774fe8d16a96690bef65b4f9562e3df393d5e4`) and classifies individual files,
+not whole folders. It controls previews, extraction, and application; applying
+a filtered mixed pack cannot replace or delete stable-only target assets.
+Turning it off restores every stored file and labels incompatible files as
+**Stable only** or **Unverified**. The physical pack, fingerprint, names, tags,
+favorites, and history are never rewritten by filtering.
+
+Extracted packs use the display name `<Skin name> — <Author>`. On disk they are
+stored as `<Area>\<Family>\<Variant>\<Pack name>`; `Variant` is omitted when it
+does not apply. Invalid Windows filename characters are replaced, reserved
+device names are prefixed with `_`, and a short fingerprint suffix is added
+only when a different pack would otherwise use the same folder.
+
+Each pack has an `extras.json` manifest that records its family, logical files,
+content fingerprints, and only the `skin.ini` values owned by that family.
+Number-font packs always carry their prefix and overlap settings so custom
+hitcircle, score, and combo digits work after mixing. Repeated Mania sections
+are addressed by key count. Identity fields such as the skin name and author
+are never copied into another skin.
+
+The library blocks exact pack duplicates before extraction, stores identical
+file bytes once in its internal object store, and fingerprints images plus WAV,
+MP3, and OGG audio by decoded content where supported. Search, tags, favorites,
+recently used ordering, pack health checks, repair, and portable `.kextra`
+import/export are available from the Extras window. The library name can be
+chosen during extraction or import and changed later with **Rename…** without
+changing the pack's duplicate identity, tags, or favorites.
+
+Extras packs are staged by logical element rather than as an all-or-nothing
+skin replacement. Individual layers can be checked, unchecked, or isolated;
+animation frames and matching 1x/2x files stay together. **Compare** previews
+the current family beside the exact mixed result, including preserved
+current-skin layers and earlier staged changes, before the selected elements are
+added to Changes. Cursor packs never import `cursormiddle` assets; the optional
+**Smooth Trail** setting instead stages a transparent 1x1 `cursormiddle.png`
+placeholder and removes every other cursor-middle variant.
+
+Skin Studio also maintains a complete local copy of the signed public
+[Kumori Extras catalog](https://github.com/Lorenso0/Kumori-Extras). Opening
+Skin Studio starts a non-blocking conditional update check, and **Check for
+updates** is available from both the Actions menu and Extras header. New,
+updated, missing, or unhealthy catalog packs are always transferred as complete
+`.kextra` archives inside two verified catalog bundles. Each changed bundle is
+downloaded once and supplies every complete pack it contains; healthy unchanged
+bundles and packs are skipped. Failed or offline
+checks leave the installed library usable. Revisions are staged and verified
+before atomically replacing the active pack, with three local recovery backups.
+Withdrawn catalog packs remain installed and are labeled instead of deleted.
+
 ## Your data stays yours
 
 Kumori stores its settings, history, replay data, skins, backups, and logs locally in:
 
 `%APPDATA%\Kumori\`
 
-Kumori does **not** upload your play history. It only uses the internet when it needs to check for updates, download its local tracking helper, or fetch optional beatmap artwork and map files.
+Kumori does **not** upload your play history. It uses the internet to check for
+application and Extras catalog updates, download its local tracking helper, and
+fetch optional beatmap artwork and map files.
 
 Automatic backups are enabled by default and can be managed in Settings. For protection against a failed or lost drive, copy important backups somewhere else too.
 
@@ -88,14 +150,25 @@ OpenTabletDriver and LG Dual Mode support are optional. LG Dual Mode only works 
 
 This section is for developers. On Windows, install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), clone the repository, and run one of these commands from the repository folder:
 
+The build script obtains the official osu! `2026.726.0-lazer` source at its
+exact release commit under the ignored `third_party\osu` directory. This
+source pin is used because matching `ppy.osu.Game` NuGet packages have not
+been published for that release.
+
 ```bat
 build-app.cmd
 ```
 
-Build, test, and launch Kumori:
+Build and launch Kumori without running tests:
 
 ```bat
-build-app.cmd run
+run.bat
+```
+
+For a quick developer build without test and utility projects:
+
+```bat
+dotnet build Kumori.Dev.slnf
 ```
 
 Create a self-contained release at `dist\app\Kumori.exe`:

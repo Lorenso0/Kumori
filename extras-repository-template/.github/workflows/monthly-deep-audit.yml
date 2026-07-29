@@ -1,0 +1,35 @@
+name: Monthly package deep audit
+
+on:
+  schedule:
+    - cron: '43 5 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Download latest catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir .integrity
+          gh release download --repo "$GITHUB_REPOSITORY" --dir .integrity \
+            --pattern catalog-v1.json
+          cp .integrity/catalog-v1.json catalog-v1.json
+      - name: Download and hash every active package and preview sequentially
+        run: python scripts/audit_catalog.py --download
+      - name: Open failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "Monthly Extras deep audit failed" --body "Scheduled run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed."

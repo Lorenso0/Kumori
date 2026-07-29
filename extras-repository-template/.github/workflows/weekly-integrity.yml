@@ -1,0 +1,42 @@
+name: Weekly catalog integrity
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Download latest signed catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir .integrity
+          gh release download --repo "$GITHUB_REPOSITORY" --dir .integrity \
+            --pattern catalog-v1.json --pattern catalog-v1.sig \
+            --pattern catalog-v1.json.sha256
+      - name: Verify catalog signature and checksum
+        run: |
+          jq -r '.signature' .integrity/catalog-v1.sig | base64 -d > .integrity/signature.bin
+          openssl dgst -sha256 -verify keys/kumori-extras-2026-01.pem \
+            -signature .integrity/signature.bin .integrity/catalog-v1.json
+          test "$(cat .integrity/catalog-v1.json.sha256)" = \
+            "$(sha256sum .integrity/catalog-v1.json | awk '{print $1}')"
+          cp .integrity/catalog-v1.json catalog-v1.json
+      - name: Verify every referenced asset is available
+        run: python scripts/audit_catalog.py
+      - name: Open failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "Weekly Extras integrity check failed" --body "Scheduled run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID failed."

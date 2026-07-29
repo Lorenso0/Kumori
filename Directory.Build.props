@@ -2,9 +2,19 @@
   <PropertyGroup>
     <!-- Keep every first-party assembly aligned for local, CI, and IDE builds.
          A command-line Version (for example, a release tag) still takes precedence. -->
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <TreatWarningsAsErrors Condition="'$(CI)' == 'true'">true</TreatWarningsAsErrors>
+    <!-- Keep edit/build/run responsive locally. Release and CI builds retain
+         the full analyzer pass used for final verification. -->
+    <RunAnalyzers Condition="'$(Configuration)' == 'Debug' and '$(CI)' != 'true'">false</RunAnalyzers>
+    <UseSharedCompilation Condition="'$(Configuration)' == 'Debug'">false</UseSharedCompilation>
+    <!-- First-party class libraries can receive osu.Game through project
+         references. Keep its transitive assemblies beside every copied output
+         so the fail-closed AutoMapper compatibility patch can resolve and
+         rewrite a clean build just as it does an executable or publish. -->
+    <_KumoriIsUpstreamOsuProject>$([System.String]::Copy('$(MSBuildProjectDirectory)').Replace('\', '/').Contains('/third_party/osu'))</_KumoriIsUpstreamOsuProject>
+    <CopyLocalLockFileAssemblies Condition="'$(_KumoriIsUpstreamOsuProject)' != 'True'">true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 </Project>

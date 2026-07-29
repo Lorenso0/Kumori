@@ -3,7 +3,10 @@ using osu.Framework.Graphics;
 using osu.Framework.Graphics.Sprites;
 using osu.Framework.Logging;
 using osu.Framework.Testing;
+using osu.Game.Rulesets;
 using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Osu;
+using osu.Game.Rulesets.Osu.Configuration;
 using osu.Game.Rulesets.Osu.UI;
 using osu.Game.Rulesets.Osu.Objects;
 using osu.Game.Rulesets.Scoring;
@@ -20,6 +23,9 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
 {
     private readonly Score sourceScore;
     private KumoriSelectedClickMarker? selectedClickMarker;
+
+    [Resolved]
+    private IRulesetConfigCache RulesetConfigCache { get; set; } = null!;
 
     /// <summary>
     /// The seek bar to attach and feed judgement markers into. Assigned by
@@ -266,12 +272,20 @@ internal partial class KumoriReplayPlayer : ReplayPlayer
 
     protected virtual void ConfigureReplaySidebar()
     {
+        // ReplayViewerGame.LoadComplete runs before OsuGameBase's child
+        // RulesetConfigCache has completed loading. By the time this player's
+        // LoadComplete runs, DrawableRuleset has already consumed that cache,
+        // so retrieving the same config here is lifecycle-safe.
+        var rulesetConfig = (OsuRulesetConfigManager?)RulesetConfigCache.GetConfigFor(new OsuRuleset())
+                            ?? throw new InvalidOperationException("The osu! ruleset configuration is unavailable.");
+
         ReplayOverlay.Settings.RemoveAll(d => d is VisualSettings || d is AudioSettings || d is ReplayAnalysisSettings, true);
         ReplayOverlay.Settings.Add(new KumoriSeekBarSettings(
             ViewerConfig!, RequestReload, SeekBar, OpenMissAnalyzer, OpenComparisonMenu));
+        ReplayOverlay.Settings.Add(new KumoriGameplaySettings(ViewerConfig!, rulesetConfig));
         ReplayOverlay.Settings.Add(new KumoriAudioSettings(ViewerConfig!));
         ReplayOverlay.Settings.Add(new KumoriBackgroundSettings(ViewerConfig!));
-        Logger.Log("Kumori: seek bar, comparison controls, audio, and background settings groups added to replay side menu.");
+        Logger.Log("Kumori: seek bar, comparison controls, gameplay, audio, and background settings groups added to replay side menu.");
     }
 
     public void PauseGameplay()

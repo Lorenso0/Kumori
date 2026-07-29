@@ -13,4 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kumori.App\Kumori.App.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures\skin-compatibility-corpus.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

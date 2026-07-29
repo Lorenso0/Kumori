@@ -84,6 +84,12 @@ public sealed class KumoriSettings
         public string LazerRootOverride { get; set; } = "";
         public List<string> CustomSwatches { get; set; } = new();
         public bool HideEmptyElements { get; set; }
+        public bool AutoBackupElements { get; set; } = true;
+        public bool ShowCatchExtras { get; set; }
+        public bool ShowTaikoExtras { get; set; }
+        public bool ShowManiaExtras { get; set; }
+        public bool OnlyShowLazerExtras { get; set; } = true;
+        public bool HasSeenSkinStudioGuide { get; set; }
     }
 
 

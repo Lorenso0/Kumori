@@ -141,5 +141,5 @@ internal sealed record Arguments(bool Probe, string? ContractPath, string? Analy
 
 internal static class BuildInfo
 {
-    public const string LazerPackageVersion = "2026.621.0";
+    public const string LazerPackageVersion = "2026.726.0";
 }

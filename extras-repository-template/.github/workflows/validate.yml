@@ -1,0 +1,28 @@
+name: Validate catalog state
+
+on:
+  pull_request:
+    paths:
+      - catalog-v1.json
+      - state/**
+      - schemas/**
+      - scripts/**
+      - .github/workflows/**
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Validate identities, revisions, withdrawals, names, hashes, and limits
+        run: python scripts/validate_catalog.py
+      - name: Check JSON syntax
+        run: |
+          python -m json.tool schemas/catalog-v1.schema.json >/dev/null
+          python -m json.tool state/publication-summary.json >/dev/null

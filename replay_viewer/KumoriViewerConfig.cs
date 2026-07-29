@@ -10,6 +10,9 @@ public enum KumoriViewerSetting
     ShowMehMarkers,
     ShowOkMarkers,
     ShowSliderBreakMarkers,
+    SnakingInSliders,
+    SnakingOutSliders,
+    HitAnimations,
     DisableHidden,
     ContractSettingsSeeded,
     SkinPath,
@@ -67,6 +70,9 @@ public class KumoriViewerConfig : IniConfigManager<KumoriViewerSetting>
         SetDefault(KumoriViewerSetting.ShowMehMarkers, false);
         SetDefault(KumoriViewerSetting.ShowOkMarkers, false);
         SetDefault(KumoriViewerSetting.ShowSliderBreakMarkers, true);
+        SetDefault(KumoriViewerSetting.SnakingInSliders, true);
+        SetDefault(KumoriViewerSetting.SnakingOutSliders, true);
+        SetDefault(KumoriViewerSetting.HitAnimations, true);
         SetDefault(KumoriViewerSetting.DisableHidden, false);
         SetDefault(KumoriViewerSetting.ContractSettingsSeeded, false);
         SetDefault(KumoriViewerSetting.SkinPath, string.Empty);

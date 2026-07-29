@@ -167,7 +167,7 @@ public partial class SkinLibraryWindow : Window
                 : !item.IsImported ? "External"
                 : item.IsFolder ? "Folder" : ".osk";
             SizeText = item.IsBuiltIn || !item.IsAvailable
-                ? "—"
+                ? "â€”"
                 : $"{item.SizeBytes / 1_048_576.0:0.0} MB";
             CanDelete = item.IsImported && item.IsAvailable;
         }

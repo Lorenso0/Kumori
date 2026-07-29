@@ -21,8 +21,8 @@
     <PackageReference Include="Serilog" Version="4.1.0" />
     <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
-    <PackageReference Include="ppy.osu.Game" Version="2026.702.0" />
-    <PackageReference Include="ppy.osu.Game.Rulesets.Osu" Version="2026.702.0" />
+    <ProjectReference Include="..\..\third_party\osu\osu.Game\osu.Game.csproj" />
+    <ProjectReference Include="..\..\third_party\osu\osu.Game.Rulesets.Osu\osu.Game.Rulesets.Osu.csproj" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Kumori.Core\Kumori.Core.csproj" />

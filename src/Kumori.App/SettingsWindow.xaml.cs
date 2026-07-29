@@ -99,6 +99,10 @@ public partial class SettingsWindow : Window
         PrimaryMirror.Text = s.Media.PrimaryMirror;
         RunAtLogin.IsChecked = s.Startup.RunAtLogin;
         StartMinimized.IsChecked = s.Startup.StartMinimized;
+        OnlyShowLazerExtras.IsChecked = s.SkinEditor.OnlyShowLazerExtras;
+        ShowCatchExtras.IsChecked = s.SkinEditor.ShowCatchExtras;
+        ShowTaikoExtras.IsChecked = s.SkinEditor.ShowTaikoExtras;
+        ShowManiaExtras.IsChecked = s.SkinEditor.ShowManiaExtras;
         DualModeEnabled.IsChecked = s.Display.AutoSwitchDualMode;
         SuspendOsuDuringDualModeSwitch.IsChecked = s.Display.SuspendOsuDuringDualModeSwitch;
         AutomaticBackups.IsChecked = s.Backup.AutomaticEnabled;
@@ -166,6 +170,10 @@ public partial class SettingsWindow : Window
             s.Media.PrimaryMirror = PrimaryMirror.Text.Trim();
             s.Startup.RunAtLogin = RunAtLogin.IsChecked == true;
             s.Startup.StartMinimized = StartMinimized.IsChecked == true;
+            s.SkinEditor.OnlyShowLazerExtras = OnlyShowLazerExtras.IsChecked == true;
+            s.SkinEditor.ShowCatchExtras = ShowCatchExtras.IsChecked == true;
+            s.SkinEditor.ShowTaikoExtras = ShowTaikoExtras.IsChecked == true;
+            s.SkinEditor.ShowManiaExtras = ShowManiaExtras.IsChecked == true;
             s.Display.AutoSwitchDualMode = DualModeEnabled.IsChecked == true;
             s.Display.SuspendOsuDuringDualModeSwitch = SuspendOsuDuringDualModeSwitch.IsChecked == true;
             s.Appearance.ThemeId = SelectedThemeId;

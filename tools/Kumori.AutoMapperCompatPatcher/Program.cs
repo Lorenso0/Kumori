@@ -1,5 +1,6 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using System.Security.Cryptography;
 
 namespace Kumori.AutoMapperCompatPatcher;
 
@@ -19,13 +20,89 @@ internal static class Program
                 throw new ArgumentException("Usage: Kumori.AutoMapperCompatPatcher <osu.Game.dll>");
 
             string assemblyPath = Path.GetFullPath(args[0]);
-            Patch(assemblyPath);
+            PatchWithCache(assemblyPath);
             return 0;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"AutoMapper compatibility patch failed: {ex}");
             return 1;
+        }
+    }
+
+    private static void PatchWithCache(string assemblyPath)
+    {
+        if (!File.Exists(assemblyPath))
+            throw new FileNotFoundException("The osu! game assembly was not found.", assemblyPath);
+
+        string sourceHash = HashFile(assemblyPath);
+        string patcherHash = HashFile(typeof(Program).Assembly.Location);
+        string cacheDirectory = Path.Combine(
+            Path.GetDirectoryName(typeof(Program).Assembly.Location)!,
+            "patched-cache");
+        string cachePath = Path.Combine(
+            cacheDirectory,
+            $"{patcherHash[..16]}-{sourceHash}.dll");
+        string mutexName = $@"Local\Kumori.AutoMapperCompat.{patcherHash[..12]}.{sourceHash[..20]}";
+
+        using var mutex = new Mutex(false, mutexName);
+        var lockTaken = false;
+        try
+        {
+            try
+            {
+                lockTaken = mutex.WaitOne(TimeSpan.FromMinutes(2));
+            }
+            catch (AbandonedMutexException)
+            {
+                lockTaken = true;
+            }
+            if (!lockTaken)
+                throw new TimeoutException("Timed out waiting for the compatibility patch cache.");
+
+            if (File.Exists(cachePath))
+            {
+                CopyAtomically(cachePath, assemblyPath);
+                Console.WriteLine($"Used cached AutoMapper compatibility patch: {assemblyPath}");
+                return;
+            }
+
+            Patch(assemblyPath);
+            Directory.CreateDirectory(cacheDirectory);
+            CopyAtomically(assemblyPath, cachePath);
+        }
+        finally
+        {
+            if (lockTaken)
+                mutex.ReleaseMutex();
+        }
+    }
+
+    private static string HashFile(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    private static void CopyAtomically(string sourcePath, string destinationPath)
+    {
+        string temporaryPath = $"{destinationPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.Copy(sourcePath, temporaryPath, overwrite: true);
+            File.Move(temporaryPath, destinationPath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
+            catch
+            {
+                // Best effort only; a later build can safely ignore this unique file.
+            }
         }
     }
 

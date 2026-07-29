@@ -81,6 +81,36 @@ public class SettingsMigrationTests
     }
 
     [Fact]
+    public void ExistingSettingsWithoutLazerExtrasFilterDefaultToEnabled()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            var path = Path.Combine(dir.FullName, "settings.v2.json");
+            File.WriteAllText(path, """{"SkinEditor":{"ShowCatchExtras":true}}""");
+
+            var loaded = new SettingsService(
+                path,
+                Path.Combine(dir.FullName, "missing.json")).Load();
+
+            Assert.True(loaded.SkinEditor.OnlyShowLazerExtras);
+            Assert.True(loaded.SkinEditor.ShowCatchExtras);
+
+            var service = new SettingsService(path, Path.Combine(dir.FullName, "missing.json"));
+            service.Load();
+            service.Update(settings => settings.SkinEditor.OnlyShowLazerExtras = false);
+            Assert.False(new SettingsService(
+                path,
+                Path.Combine(dir.FullName, "missing.json")).Load()
+                .SkinEditor.OnlyShowLazerExtras);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void Load_ReplacesExplicitlyNullSettingsSectionsWithDefaults()
     {
         var dir = Directory.CreateTempSubdirectory();

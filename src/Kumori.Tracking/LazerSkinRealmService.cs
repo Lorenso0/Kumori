@@ -23,6 +23,7 @@ public enum LazerSkinWriteStatus
     Saved,
     Added,
     Replaced,
+    Deleted,
     Conflict,
     Missing,
 }
@@ -35,8 +36,21 @@ public sealed record LazerSkinWriteResult(
 {
     public bool Changed => Status is LazerSkinWriteStatus.Saved
         or LazerSkinWriteStatus.Added
-        or LazerSkinWriteStatus.Replaced;
+        or LazerSkinWriteStatus.Replaced
+        or LazerSkinWriteStatus.Deleted;
 }
+
+public sealed record LazerSkinBatchMutation(
+    string Filename,
+    byte[] Bytes,
+    string? ExpectedHash,
+    bool IsDeletion = false);
+
+public sealed record LazerSkinBatchWriteResult(
+    bool Succeeded,
+    IReadOnlyList<LazerSkinWriteResult> Results,
+    string? FailedFilename = null,
+    string? Message = null);
 
 /// <summary>
 /// Reads and writes osu!lazer skins through Realm's dynamic schema. Dynamic mode is deliberate:
@@ -45,6 +59,14 @@ public sealed record LazerSkinWriteResult(
 public interface ILazerSkinRealmService
 {
     LazerSkinCatalog LoadCatalog(string? rootOverride = null);
+    LazerSkinInfo CreateSkin(string rootPath, string name, string creator, byte[] skinIniContents);
+    LazerSkinWriteResult UpdateSkinIdentity(
+        string rootPath,
+        Guid skinId,
+        string name,
+        string creator,
+        byte[] skinIniContents,
+        string? expectedSkinIniHash);
     byte[] ReadFile(string rootPath, string hash);
     LazerSkinWriteResult CommitFile(
         string rootPath,
@@ -58,6 +80,15 @@ public interface ILazerSkinRealmService
         string filename,
         byte[] bytes,
         string? expectedHash);
+    LazerSkinWriteResult DeleteFile(
+        string rootPath,
+        Guid skinId,
+        string filename,
+        string expectedHash);
+    LazerSkinBatchWriteResult ApplyBatch(
+        string rootPath,
+        Guid skinId,
+        IReadOnlyList<LazerSkinBatchMutation> mutations);
     string CreateBackup(string rootPath, string destinationDirectory);
 }
 
@@ -93,6 +124,111 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
             return new LazerSkinCatalog(
                 root,
                 result.OrderBy(skin => skin.DisplayName, StringComparer.OrdinalIgnoreCase).ToArray());
+        }
+    }
+
+    /// <summary>
+    /// Creates an editable lazer skin with its initial skin.ini in one Realm transaction.
+    /// A skin without files is ignored by lazer's catalog, so the initial file is required.
+    /// </summary>
+    public LazerSkinInfo CreateSkin(string rootPath, string name, string creator, byte[] skinIniContents)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(skinIniContents);
+
+        lock (realmGate)
+        {
+            var root = ResolveRoot(rootPath);
+            var skinId = Guid.NewGuid();
+            var hash = ComputeHash(skinIniContents);
+            ImportBlob(root, hash, skinIniContents);
+
+            using var realm = OpenRealm(root, readOnly: false);
+            realm.Write(() =>
+            {
+                dynamic skin = realm.DynamicApi.CreateObject("Skin", skinId);
+                skin.Name = name.Trim();
+                skin.Creator = creator.Trim();
+                skin.DeletePending = false;
+
+                dynamic usage = realm.DynamicApi.AddEmbeddedObjectToList(skin.Files);
+                usage.File = FindOrCreateFile(realm, hash);
+                usage.Filename = "skin.ini";
+            });
+
+            return new LazerSkinInfo(
+                skinId,
+                name.Trim(),
+                creator.Trim(),
+                [new LazerSkinFileInfo("skin.ini", hash, skinIniContents.LongLength)]);
+        }
+    }
+
+    /// <summary>
+    /// Keeps the lazer catalog identity and the [General] identity in skin.ini
+    /// in lockstep. The catalog row and skin.ini usage change in one Realm
+    /// transaction after the current skin.ini hash has been checked.
+    /// </summary>
+    public LazerSkinWriteResult UpdateSkinIdentity(
+        string rootPath,
+        Guid skinId,
+        string name,
+        string creator,
+        byte[] skinIniContents,
+        string? expectedSkinIniHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(skinIniContents);
+        if (expectedSkinIniHash is not null)
+            ValidateHash(expectedSkinIniHash);
+
+        lock (realmGate)
+        {
+            var root = ResolveRoot(rootPath);
+            var newHash = ComputeHash(skinIniContents);
+            ImportBlob(root, newHash, skinIniContents);
+            using var realm = OpenRealm(root, readOnly: false);
+            var conflicted = false;
+            var missing = false;
+            string? currentHash = null;
+            var added = false;
+            realm.Write(() =>
+            {
+                dynamic? skin = realm.DynamicApi.Find("Skin", skinId);
+                if (skin is null)
+                {
+                    missing = true;
+                    return;
+                }
+
+                dynamic? usage = FindUsage(skin, "skin.ini");
+                currentHash = usage is null ? null : (string)usage.File.Hash;
+                if (expectedSkinIniHash is null ? usage is not null
+                    : !string.Equals(expectedSkinIniHash, currentHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    conflicted = true;
+                    return;
+                }
+
+                skin.Name = name.Trim();
+                skin.Creator = creator.Trim();
+                dynamic file = FindOrCreateFile(realm, newHash);
+                if (usage is null)
+                {
+                    usage = realm.DynamicApi.AddEmbeddedObjectToList(skin.Files);
+                    usage.Filename = "skin.ini";
+                    added = true;
+                }
+                usage.File = file;
+            });
+
+            if (missing)
+                return Missing(expectedSkinIniHash ?? "", "The selected skin no longer exists.");
+            if (conflicted)
+                return Conflict(expectedSkinIniHash ?? "", currentHash);
+            return new LazerSkinWriteResult(
+                added ? LazerSkinWriteStatus.Added : LazerSkinWriteStatus.Replaced,
+                newHash);
         }
     }
 
@@ -234,6 +370,201 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
             return new LazerSkinWriteResult(
                 added ? LazerSkinWriteStatus.Added : LazerSkinWriteStatus.Replaced,
                 newHash);
+        }
+    }
+
+    public LazerSkinWriteResult DeleteFile(
+        string rootPath,
+        Guid skinId,
+        string filename,
+        string expectedHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filename);
+        ValidateHash(expectedHash);
+
+        lock (realmGate)
+        {
+            var root = ResolveRoot(rootPath);
+            using var realm = OpenRealm(root, readOnly: false);
+            dynamic? skin = realm.DynamicApi.Find("Skin", skinId);
+            if (skin is null)
+                return Missing(expectedHash, "The selected skin no longer exists.");
+
+            dynamic? existing = FindUsage(skin, filename);
+            if (existing is null)
+                return Missing(expectedHash, $"'{filename}' no longer exists in this skin.");
+
+            string currentHash = (string)existing.File.Hash;
+            if (!string.Equals(expectedHash, currentHash, StringComparison.OrdinalIgnoreCase))
+                return Conflict(expectedHash, currentHash);
+
+            var conflicted = false;
+            var missing = false;
+            string? transactionCurrentHash = null;
+            realm.Write(() =>
+            {
+                dynamic? currentSkin = realm.DynamicApi.Find("Skin", skinId);
+                dynamic? currentUsage = currentSkin is null ? null : FindUsage(currentSkin, filename);
+                if (currentUsage is null)
+                {
+                    missing = true;
+                    return;
+                }
+
+                transactionCurrentHash = (string)currentUsage.File.Hash;
+                if (!string.Equals(expectedHash, transactionCurrentHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    conflicted = true;
+                    return;
+                }
+
+                currentSkin!.Files.Remove(currentUsage);
+            });
+
+            if (missing)
+                return Missing(expectedHash, $"'{filename}' no longer exists in this skin.");
+            return conflicted
+                ? Conflict(expectedHash, transactionCurrentHash)
+                : new LazerSkinWriteResult(LazerSkinWriteStatus.Deleted, expectedHash);
+        }
+    }
+
+    /// <summary>
+    /// Applies the complete Skin Studio draft in one Realm transaction. Blob
+    /// imports are content-addressed and may happen first, but no skin usage is
+    /// changed unless every optimistic-concurrency check succeeds.
+    /// </summary>
+    public LazerSkinBatchWriteResult ApplyBatch(
+        string rootPath,
+        Guid skinId,
+        IReadOnlyList<LazerSkinBatchMutation> mutations)
+    {
+        ArgumentNullException.ThrowIfNull(mutations);
+        if (mutations.Count == 0)
+            return new LazerSkinBatchWriteResult(true, []);
+        var duplicate = mutations.GroupBy(
+                mutation => mutation.Filename,
+                StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw new ArgumentException($"The batch contains duplicate filename '{duplicate.Key}'.");
+        foreach (var mutation in mutations)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(mutation.Filename);
+            if (mutation.IsDeletion && mutation.ExpectedHash is null)
+                throw new ArgumentException($"Deletion of '{mutation.Filename}' requires an expected hash.");
+            if (mutation.ExpectedHash is not null)
+                ValidateHash(mutation.ExpectedHash);
+        }
+
+        lock (realmGate)
+        {
+            var root = ResolveRoot(rootPath);
+            var newHashes = mutations.Select(mutation =>
+                    mutation.IsDeletion ? null : ComputeHash(mutation.Bytes))
+                .ToArray();
+            for (var index = 0; index < mutations.Count; index++)
+                if (newHashes[index] is not null)
+                    ImportBlob(root, newHashes[index]!, mutations[index].Bytes);
+
+            using var realm = OpenRealm(root, readOnly: false);
+            var results = new LazerSkinWriteResult[mutations.Count];
+            string? failedFilename = null;
+            LazerSkinWriteResult? failure = null;
+            try
+            {
+                realm.Write(() =>
+                {
+                    dynamic? skin = realm.DynamicApi.Find("Skin", skinId);
+                    if (skin is null)
+                    {
+                        failedFilename = mutations[0].Filename;
+                        failure = Missing(
+                            mutations[0].ExpectedHash ?? "",
+                            "The selected skin no longer exists.");
+                        throw new BatchPreflightException();
+                    }
+
+                    var usages = new dynamic?[mutations.Count];
+                    var currentHashes = new string?[mutations.Count];
+                    for (var index = 0; index < mutations.Count; index++)
+                    {
+                        var mutation = mutations[index];
+                        dynamic? usage = FindUsage(skin, mutation.Filename);
+                        usages[index] = usage;
+                        currentHashes[index] = usage is null ? null : (string)usage.File.Hash;
+                        var valid = mutation.IsDeletion
+                            ? usage is not null
+                              && string.Equals(
+                                  mutation.ExpectedHash,
+                                  currentHashes[index],
+                                  StringComparison.OrdinalIgnoreCase)
+                            : mutation.ExpectedHash is null
+                                ? usage is null
+                                : usage is not null
+                                  && string.Equals(
+                                      mutation.ExpectedHash,
+                                      currentHashes[index],
+                                      StringComparison.OrdinalIgnoreCase);
+                        if (valid) continue;
+                        failedFilename = mutation.Filename;
+                        failure = mutation.IsDeletion && usage is null
+                            ? Missing(mutation.ExpectedHash!, $"'{mutation.Filename}' no longer exists in this skin.")
+                            : Conflict(mutation.ExpectedHash ?? "", currentHashes[index]);
+                        throw new BatchPreflightException();
+                    }
+
+                    for (var index = 0; index < mutations.Count; index++)
+                    {
+                        var mutation = mutations[index];
+                        dynamic? usage = usages[index];
+                        var currentHash = currentHashes[index];
+                        if (mutation.IsDeletion)
+                        {
+                            skin.Files.Remove(usage!);
+                            results[index] = new LazerSkinWriteResult(
+                                LazerSkinWriteStatus.Deleted,
+                                mutation.ExpectedHash!);
+                            continue;
+                        }
+
+                        var newHash = newHashes[index]!;
+                        if (string.Equals(newHash, currentHash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            results[index] = new LazerSkinWriteResult(
+                                LazerSkinWriteStatus.Unchanged,
+                                newHash);
+                            continue;
+                        }
+                        dynamic fileRow = FindOrCreateFile(realm, newHash);
+                        if (usage is null)
+                        {
+                            dynamic newUsage = realm.DynamicApi.AddEmbeddedObjectToList(skin.Files);
+                            newUsage.File = fileRow;
+                            newUsage.Filename = mutation.Filename.Replace('\\', '/');
+                            results[index] = new LazerSkinWriteResult(
+                                LazerSkinWriteStatus.Added,
+                                newHash);
+                        }
+                        else
+                        {
+                            usage.File = fileRow;
+                            results[index] = new LazerSkinWriteResult(
+                                LazerSkinWriteStatus.Replaced,
+                                newHash);
+                        }
+                    }
+                });
+            }
+            catch (BatchPreflightException)
+            {
+                return new LazerSkinBatchWriteResult(
+                    false,
+                    failure is null ? [] : [failure],
+                    failedFilename,
+                    failure?.Message);
+            }
+            return new LazerSkinBatchWriteResult(true, results);
         }
     }
 
@@ -396,6 +727,8 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
 
     private static LazerSkinWriteResult Missing(string hash, string message) =>
         new(LazerSkinWriteStatus.Missing, hash, Message: message);
+
+    private sealed class BatchPreflightException : Exception;
 }
 
 [MapTo("Skin")]
