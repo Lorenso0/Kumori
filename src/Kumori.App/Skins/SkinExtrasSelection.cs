@@ -1,4 +1,6 @@
 using System.IO;
+using System.Globalization;
+using System.Numerics;
 using System.Text.RegularExpressions;
 using Kumori.Tracking;
 
@@ -59,6 +61,22 @@ internal static class SkinCursorMiddlePolicy
         SkinExtraLogicalGrouping.LogicalStem(filename).Equals(
             "cursormiddle",
             StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsOnePixelPlaceholder(
+        string filename,
+        int pixelWidth,
+        int pixelHeight) =>
+        IsCursorMiddle(filename)
+        && pixelWidth == 1
+        && pixelHeight == 1;
+
+    public static bool HasRenderablePixels(
+        string filename,
+        int pixelWidth,
+        int pixelHeight,
+        ReadOnlySpan<byte> bgra) =>
+        !IsOnePixelPlaceholder(filename, pixelWidth, pixelHeight)
+        && SkinImageTools.HasVisiblePixels(bgra);
 
     public static byte[] CreateSmoothTrailPng() =>
         SkinImageTools.Encode(
@@ -188,8 +206,75 @@ internal static partial class SkinExtraLogicalGrouping
             : stem;
     }
 
-    [GeneratedRegex(@"^(?<base>.+)-\d+$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?<base>.+)-[0-9]+$", RegexOptions.CultureInvariant)]
     private static partial Regex AnimationFrameSuffix();
+}
+
+internal sealed record SkinFollowpointSequenceProblem(
+    string Code,
+    string Message,
+    string? Filename = null);
+
+internal static class SkinFollowpointSequence
+{
+    private const string FramePrefix = "followpoint-";
+
+    public static SkinFollowpointSequenceProblem? Validate(IEnumerable<string> filenames)
+    {
+        var frames = filenames
+            .Select(filename => TryGetFrameIndex(filename, out var index)
+                ? (Filename: filename, Index: (BigInteger?)index)
+                : (Filename: filename, Index: null))
+            .Where(frame => frame.Index.HasValue)
+            .Select(frame => (frame.Filename, Index: frame.Index!.Value))
+            .OrderBy(frame => frame.Index)
+            .ToArray();
+        if (frames.Length == 0)
+            return null;
+
+        var distinct = frames
+            .GroupBy(frame => frame.Index)
+            .Select(group => group.First())
+            .ToArray();
+        if (distinct[0].Index != BigInteger.Zero)
+        {
+            return new SkinFollowpointSequenceProblem(
+                "followpoint-sequence-start",
+                $"Numbered followpoints start at frame {distinct[0].Index}; frame 0 is required.",
+                distinct[0].Filename);
+        }
+
+        for (var index = 1; index < distinct.Length; index++)
+        {
+            var expected = distinct[index - 1].Index + BigInteger.One;
+            if (distinct[index].Index == expected)
+                continue;
+            return new SkinFollowpointSequenceProblem(
+                "followpoint-sequence-gap",
+                $"Numbered followpoints are missing frame {expected}. "
+                + "Transparent timing frames must remain in the pack.",
+                distinct[index].Filename);
+        }
+
+        return null;
+    }
+
+    private static bool TryGetFrameIndex(string filename, out BigInteger index)
+    {
+        index = BigInteger.Zero;
+        var stem = SkinExtraLogicalGrouping.LogicalStem(filename);
+        if (!stem.StartsWith(FramePrefix, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var digits = stem.AsSpan(FramePrefix.Length);
+        if (digits.IsEmpty
+            || !digits.ToString().All(character => character is >= '0' and <= '9'))
+            return false;
+        return BigInteger.TryParse(
+            digits,
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out index);
+    }
 }
 
 internal static class SkinExtraLogicalSelectionPlanner

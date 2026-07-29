@@ -198,6 +198,57 @@ public sealed class SkinExtrasLibraryTests
     }
 
     [Fact]
+    public void Validator_rejects_followpoint_animations_that_start_late_or_have_gaps()
+    {
+        var root = TempDirectory();
+        try
+        {
+            SkinExtraHealthReport Validate(params string[] filenames)
+            {
+                var manifest = new SkinExtraPackManifest
+                {
+                    Id = "followpoints",
+                    DisplayName = "Followpoints",
+                    FamilyId = "osu.followpoints",
+                    Area = "osu!",
+                    FamilyName = "Followpoints",
+                    Fingerprint = "unused",
+                    Files = filenames.Select(filename => new SkinExtraManifestFile(
+                        filename,
+                        filename,
+                        filename,
+                        "unused",
+                        "unused")).ToList(),
+                };
+                return SkinExtraPackValidator.Validate(
+                    new SkinExtraPackDescriptor(root, manifest, false),
+                    verifyContent: false);
+            }
+
+            Assert.Contains(
+                Validate("followpoint-26.png", "followpoint-27@2x.png").Issues,
+                issue => issue.Code == "followpoint-sequence-start");
+            Assert.Contains(
+                Validate("followpoint-0.png", "followpoint-2.png").Issues,
+                issue => issue.Code == "followpoint-sequence-gap");
+            Assert.DoesNotContain(
+                Validate("followpoint.png").Issues,
+                issue => issue.Code.StartsWith(
+                    "followpoint-sequence",
+                    StringComparison.Ordinal));
+            Assert.DoesNotContain(
+                Validate(
+                    "followpoint-0.png",
+                    "followpoint-0@2x.png",
+                    "followpoint-1.png").Issues,
+                issue => issue.Code.StartsWith(
+                    "followpoint-sequence",
+                    StringComparison.Ordinal));
+        }
+        finally { Delete(root); }
+    }
+
+    [Fact]
     public void Repair_collapses_duplicate_manifest_targets_to_the_real_pack_files()
     {
         var root = TempDirectory();

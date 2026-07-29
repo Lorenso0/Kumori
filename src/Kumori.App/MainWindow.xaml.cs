@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _mainViewModel;
     private readonly ImportsViewModel? _importsViewModel;
     private readonly PlaySharePackageService? _playShare;
+    private readonly ILazerSkinReloadService? _lazerSkinReload;
     private readonly SemaphoreSlim _importGate = new(1, 1);
     private ResponsiveLayoutState _layoutState;
     private bool _compactInspectorOpen;
@@ -48,11 +49,24 @@ public partial class MainWindow : Window
         SettingsService settings,
         ImportsViewModel? importsViewModel = null,
         PlaySharePackageService? playShare = null)
+        : this(viewModel, settings, importsViewModel, playShare, gameplayWork: null)
+    {
+    }
+
+    internal MainWindow(
+        MainViewModel viewModel,
+        SettingsService settings,
+        ImportsViewModel? importsViewModel,
+        PlaySharePackageService? playShare,
+        GameplayWorkCoordinator? gameplayWork)
     {
         _settings = settings;
         _mainViewModel = viewModel;
         _importsViewModel = importsViewModel;
         _playShare = playShare;
+        _lazerSkinReload = gameplayWork is null
+            ? null
+            : new LazerSkinReloadService(gameplayWork, this);
         DataContext = viewModel;
         viewModel.WorkspaceWindowRequested += OpenWorkspaceTab;
         InitializeComponent();
@@ -74,6 +88,7 @@ public partial class MainWindow : Window
                 Hide();
             }
         };
+        Closed += (_, _) => (_lazerSkinReload as IDisposable)?.Dispose();
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -406,7 +421,10 @@ public partial class MainWindow : Window
         ShowPage("SkinEditor");
         if (_skinEditorPage is null)
         {
-            _skinEditorPage = new SkinEditorPage(_settings);
+            _skinEditorPage = new SkinEditorPage(
+                _settings,
+                realmService: null,
+                reloadService: _lazerSkinReload);
             SkinEditorHost.Content = _skinEditorPage;
             // Let WPF paint the themed page shell before Realm discovery and
             // preview decoding begin.

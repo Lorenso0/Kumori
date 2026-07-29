@@ -260,10 +260,6 @@ public sealed class SkinExtrasExtractionService
                                || SkinExtraLazerCompatibility.IsLazerUsed(
                                    file.Filename,
                                    family.Definition.Id))
-                .Where(file => !family.Definition.Id.Equals(
-                                   "osu.followpoints",
-                                   StringComparison.OrdinalIgnoreCase)
-                               || !SkinImageTools.IsFullyTransparentImage(file.Bytes))
                 .ToArray());
             var iniPatch = family.IniPatch
                 .Where(entry => !lazerUsedOnly

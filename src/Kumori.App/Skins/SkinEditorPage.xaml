@@ -273,6 +273,7 @@
                             <ContextMenu>
                                 <MenuItem Header="Change lazer folder…" Click="ChangeFolder_Click" />
                                 <MenuItem Header="Refresh skin library" Click="Refresh_Click" />
+                                <MenuItem Header="Duplicate skin&#x2026;" Click="DuplicateSkin_Click" />
                                 <MenuItem Header="Rename skin / author…" Click="EditSkinIdentity_Click" />
                                 <MenuItem Header="Reset current category" Click="ResetCurrentCategory_Click" />
                                 <Separator />
@@ -496,13 +497,13 @@
                                      Drop="ElementList_Drop"
                                      AutomationProperties.Name="Skin elements">
                                 <ListBox.ContextMenu>
-                                    <ContextMenu>
+                                    <ContextMenu Closed="ElementContextMenu_Closed">
                                         <MenuItem Header="Copy element(s)" InputGestureText="Ctrl+C" Click="CopyElements_Click" />
                                         <MenuItem Header="Paste element(s)" InputGestureText="Ctrl+V" Click="PasteElements_Click" />
                                         <MenuItem Header="Add selected element(s) to Extras..."
                                                   Click="AddSelectedElementsToExtras_Click" />
                                         <Separator />
-                                        <MenuItem Header="Import files…" Click="ImportFiles_Click" />
+                                        <MenuItem Header="Replace file…" Click="ReplaceFile_Click" />
                                     </ContextMenu>
                                 </ListBox.ContextMenu>
                                 <ListBox.ItemTemplate>
@@ -524,7 +525,18 @@
                                                            Margin="4"
                                                            Stretch="Uniform"
                                                            RenderOptions.BitmapScalingMode="LowQuality"
-                                                           Loaded="ElementThumbnail_Loaded" />
+                                                           Loaded="ElementThumbnail_Loaded">
+                                                        <Image.Style>
+                                                            <Style TargetType="Image">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding HasVisiblePixels}" Value="False">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Image.Style>
+                                                    </Image>
                                                     <TextBlock Text="&#xE8D6;"
                                                                FontFamily="Segoe Fluent Icons"
                                                                FontSize="18"

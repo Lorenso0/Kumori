@@ -227,7 +227,9 @@ public static class SkinExtraFamilyRegistry
         if (stem.EndsWith("@2x", StringComparison.Ordinal))
             stem = stem[..^3];
         var dash = stem.LastIndexOf('-');
-        if (dash > 0 && int.TryParse(stem[(dash + 1)..], out _))
+        if (dash > 0
+            && stem[(dash + 1)..] is { Length: > 0 } suffix
+            && suffix.All(character => character is >= '0' and <= '9'))
             stem = stem[..dash];
         return stem;
     }

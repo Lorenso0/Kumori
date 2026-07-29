@@ -6,6 +6,8 @@ namespace Kumori.Tracking;
 
 public sealed record LazerSkinFileInfo(string Filename, string Hash, long SizeBytes);
 
+public sealed record LazerSkinImportFile(string Filename, byte[] Bytes);
+
 public sealed record LazerSkinInfo(
     Guid Id,
     string Name,
@@ -59,7 +61,13 @@ public sealed record LazerSkinBatchWriteResult(
 public interface ILazerSkinRealmService
 {
     LazerSkinCatalog LoadCatalog(string? rootOverride = null);
+    IReadOnlyList<string> LoadGlobalKeyBindings(string rootPath, int action);
     LazerSkinInfo CreateSkin(string rootPath, string name, string creator, byte[] skinIniContents);
+    LazerSkinInfo ImportSkin(
+        string rootPath,
+        string name,
+        string creator,
+        IReadOnlyList<LazerSkinImportFile> files);
     LazerSkinWriteResult UpdateSkinIdentity(
         string rootPath,
         Guid skinId,
@@ -128,20 +136,98 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
     }
 
     /// <summary>
+    /// Reads the configured, non-ruleset key combinations for one lazer global action.
+    /// The strings use osu!framework's serialised KeyCombination format.
+    /// </summary>
+    public IReadOnlyList<string> LoadGlobalKeyBindings(string rootPath, int action)
+    {
+        lock (realmGate)
+        {
+            var root = ResolveRoot(rootPath);
+            using var realm = OpenRealm(root, readOnly: true);
+            var result = new List<string>();
+            foreach (dynamic binding in (IEnumerable<dynamic>)realm.DynamicApi.All("KeyBinding"))
+            {
+                string? rulesetName;
+                try { rulesetName = (string?)binding.RulesetName; }
+                catch { rulesetName = null; }
+                if (!string.IsNullOrEmpty(rulesetName))
+                    continue;
+
+                int bindingAction;
+                try { bindingAction = Convert.ToInt32(binding.Action); }
+                catch { continue; }
+                if (bindingAction != action)
+                    continue;
+
+                string? combination;
+                try { combination = (string?)binding.KeyCombination; }
+                catch { combination = null; }
+                if (!string.IsNullOrWhiteSpace(combination))
+                    result.Add(combination);
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
     /// Creates an editable lazer skin with its initial skin.ini in one Realm transaction.
     /// A skin without files is ignored by lazer's catalog, so the initial file is required.
     /// </summary>
     public LazerSkinInfo CreateSkin(string rootPath, string name, string creator, byte[] skinIniContents)
+        => ImportSkin(
+            rootPath,
+            name,
+            creator,
+            [new LazerSkinImportFile("skin.ini", skinIniContents)]);
+
+    /// <summary>
+    /// Imports a complete skin into lazer in one Realm transaction. Content
+    /// blobs are staged first, but the skin does not become visible until every
+    /// named file is ready and the single transaction commits.
+    /// </summary>
+    public LazerSkinInfo ImportSkin(
+        string rootPath,
+        string name,
+        string creator,
+        IReadOnlyList<LazerSkinImportFile> files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(skinIniContents);
+        ArgumentNullException.ThrowIfNull(files);
+        if (files.Count == 0)
+            throw new ArgumentException("A lazer skin must contain at least one file.", nameof(files));
+
+        var normalizedFiles = files.Select(file =>
+        {
+            ArgumentNullException.ThrowIfNull(file);
+            ArgumentException.ThrowIfNullOrWhiteSpace(file.Filename);
+            ArgumentNullException.ThrowIfNull(file.Bytes);
+            return new LazerSkinImportFile(
+                NormalizeImportFilename(file.Filename),
+                file.Bytes.ToArray());
+        }).ToArray();
+        var duplicate = normalizedFiles
+            .GroupBy(file => file.Filename, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw new ArgumentException(
+                $"The imported skin contains duplicate filename '{duplicate.Key}'.",
+                nameof(files));
 
         lock (realmGate)
         {
             var root = ResolveRoot(rootPath);
             var skinId = Guid.NewGuid();
-            var hash = ComputeHash(skinIniContents);
-            ImportBlob(root, hash, skinIniContents);
+            var imported = normalizedFiles
+                .Select(file => new
+                {
+                    file.Filename,
+                    file.Bytes,
+                    Hash = ComputeHash(file.Bytes),
+                })
+                .ToArray();
+            foreach (var file in imported)
+                ImportBlob(root, file.Hash, file.Bytes);
 
             using var realm = OpenRealm(root, readOnly: false);
             realm.Write(() =>
@@ -151,16 +237,25 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
                 skin.Creator = creator.Trim();
                 skin.DeletePending = false;
 
-                dynamic usage = realm.DynamicApi.AddEmbeddedObjectToList(skin.Files);
-                usage.File = FindOrCreateFile(realm, hash);
-                usage.Filename = "skin.ini";
+                foreach (var file in imported)
+                {
+                    dynamic usage = realm.DynamicApi.AddEmbeddedObjectToList(skin.Files);
+                    usage.File = FindOrCreateFile(realm, file.Hash);
+                    usage.Filename = file.Filename;
+                }
             });
 
             return new LazerSkinInfo(
                 skinId,
                 name.Trim(),
                 creator.Trim(),
-                [new LazerSkinFileInfo("skin.ini", hash, skinIniContents.LongLength)]);
+                imported
+                    .Select(file => new LazerSkinFileInfo(
+                        file.Filename,
+                        file.Hash,
+                        file.Bytes.LongLength))
+                    .OrderBy(file => file.Filename, StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
         }
     }
 
@@ -688,6 +783,19 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
     private static string ComputeHash(byte[] bytes) =>
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
+    private static string NormalizeImportFilename(string filename)
+    {
+        var normalized = filename.Replace('\\', '/').Trim('/');
+        if (normalized.Length == 0
+            || Path.IsPathRooted(normalized)
+            || normalized.Split('/').Any(segment => segment is "" or "." or ".."))
+        {
+            throw new InvalidDataException(
+                $"'{filename}' is not a safe relative skin filename.");
+        }
+        return normalized;
+    }
+
     private static void ValidateHash(string hash)
     {
         if (hash.Length != 64 || hash.Any(ch => !Uri.IsHexDigit(ch)))
@@ -749,4 +857,24 @@ internal partial class LazerSkin : RealmObject
 
     [MapTo("Files")]
     public IList<LazerNamedFileUsage> Files { get; } = null!;
+}
+
+[MapTo("KeyBinding")]
+internal partial class LazerKeyBinding : RealmObject
+{
+    [PrimaryKey]
+    [MapTo("ID")]
+    public Guid Id { get; set; }
+
+    [MapTo("RulesetName")]
+    public string? RulesetName { get; set; }
+
+    [MapTo("Variant")]
+    public int? Variant { get; set; }
+
+    [MapTo("Action")]
+    public int Action { get; set; }
+
+    [MapTo("KeyCombination")]
+    public string KeyCombination { get; set; } = "";
 }

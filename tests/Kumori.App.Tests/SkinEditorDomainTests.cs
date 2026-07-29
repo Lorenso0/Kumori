@@ -77,6 +77,22 @@ public sealed class SkinEditorDomainTests
     }
 
     [Fact]
+    public void File_replacement_keeps_the_target_source_filename()
+    {
+        var target = File("cursor.png");
+
+        var replacement = SkinFileReplacementPlanner.Build(
+            target,
+            @"C:\incoming\pink-glow.png",
+            [1, 2, 3]);
+
+        Assert.Equal("cursor.png", replacement.Filename);
+        Assert.Equal(target.Hash, replacement.ExpectedHash);
+        Assert.Equal([1, 2, 3], replacement.Bytes);
+        Assert.Contains("pink-glow.png", replacement.Description);
+    }
+
+    [Fact]
     public void Extras_cursor_pack_replaces_cursor_and_deletes_every_unsupplied_cursor_file()
     {
         var current = new[]
@@ -536,42 +552,228 @@ public sealed class SkinEditorDomainTests
     }
 
     [Fact]
-    public void Cursormiddle_preview_uses_a_denser_compact_trail()
+    public void Cursormiddle_preview_uses_the_shared_dense_trail_path()
     {
         var classic = SkinExtrasPickerWindow.BuildTrailPoints(continuous: false);
         var continuous = SkinExtrasPickerWindow.BuildTrailPoints(continuous: true);
 
-        Assert.Equal(9, classic.Count);
+        Assert.Equal(5, classic.Count);
         Assert.Equal(28, continuous.Count);
-        Assert.True(continuous[0].X > classic[0].X);
+        Assert.Equal(classic[0].X, continuous[0].X, precision: 6);
+        Assert.Equal(classic[0].Y, continuous[0].Y, precision: 6);
         Assert.Equal(classic[^1].X, continuous[^1].X, precision: 6);
         Assert.Equal(classic[^1].Y, continuous[^1].Y, precision: 6);
         Assert.True(continuous[1].X - continuous[0].X
                     < classic[1].X - classic[0].X);
     }
 
+    [Theory]
+    [InlineData("osu.hitcircles", 380, 210)]
+    [InlineData("osu.slider", 380, 210)]
+    [InlineData("interface.background", 380, 210)]
+    [InlineData("osu.cursor", 640, 480)]
+    public void Extras_preview_canvas_matches_the_family_coordinate_system(
+        string familyId,
+        double expectedWidth,
+        double expectedHeight)
+    {
+        var dimensions = SkinExtrasPickerWindow.PreviewCanvasDimensions(familyId);
+
+        Assert.Equal(expectedWidth, dimensions.Width);
+        Assert.Equal(expectedHeight, dimensions.Height);
+    }
+
+    [Fact]
+    public void Extras_library_scroll_accumulates_small_steps_without_runaway_queueing()
+    {
+        const double current = 300;
+        var target = ExtrasLibraryScrollPhysics.TargetOffset(
+            current,
+            current,
+            120,
+            1000);
+        Assert.Equal(248, target);
+
+        for (var index = 0; index < 10; index++)
+        {
+            target = ExtrasLibraryScrollPhysics.TargetOffset(
+                current,
+                target,
+                120,
+                1000);
+        }
+
+        Assert.Equal(80, target);
+        Assert.Equal(
+            0,
+            ExtrasLibraryScrollPhysics.TargetOffset(20, 20, 120, 1000));
+        Assert.Equal(
+            1000,
+            ExtrasLibraryScrollPhysics.TargetOffset(980, 980, -120, 1000));
+    }
+
+    [Fact]
+    public void Extras_library_scroll_moves_continuously_toward_its_target()
+    {
+        var firstFrame = ExtrasLibraryScrollPhysics.NextOffset(300, 200, 1d / 60);
+        var secondFrame = ExtrasLibraryScrollPhysics.NextOffset(firstFrame, 200, 1d / 60);
+
+        Assert.InRange(firstFrame, 200.01, 299.99);
+        Assert.InRange(secondFrame, 200.01, firstFrame - 0.01);
+        Assert.True(
+            ExtrasLibraryScrollPhysics.IsSettled(200.2, 200));
+        Assert.False(
+            ExtrasLibraryScrollPhysics.IsSettled(firstFrame, 200));
+    }
+
     [Fact]
     public void Cursor_compare_treats_missing_or_transparent_cursormiddle_as_absent()
     {
         var transparent = SkinImageTools.ToBitmap([0, 0, 0, 0], 1, 1, 4);
+        var legacyOpaquePlaceholder = SkinImageTools.ToBitmap(
+            [255, 255, 255, 255],
+            1,
+            1,
+            4);
         var alphaNoise = SkinImageTools.ToBitmap([255, 255, 255, 1], 1, 1, 4);
-        var visible = SkinImageTools.ToBitmap([255, 255, 255, 255], 1, 1, 4);
+        var visible = SkinImageTools.ToBitmap(
+            [
+                255, 255, 255, 255,
+                255, 255, 255, 255,
+            ],
+            2,
+            1,
+            8);
 
         Assert.False(SkinExtrasPickerWindow.HasVisibleCursorMiddle(null));
         Assert.False(SkinExtrasPickerWindow.HasVisibleCursorMiddle(transparent));
+        Assert.False(SkinExtrasPickerWindow.HasVisibleCursorMiddle(legacyOpaquePlaceholder));
         Assert.False(SkinExtrasPickerWindow.HasVisibleCursorMiddle(alphaNoise));
         Assert.True(SkinExtrasPickerWindow.HasVisibleCursorMiddle(visible));
+        Assert.False(SkinExtrasPickerWindow.UsesSmoothCursorTrail(null));
+        Assert.True(SkinExtrasPickerWindow.UsesSmoothCursorTrail(transparent));
+        Assert.True(SkinExtrasPickerWindow.UsesSmoothCursorTrail(legacyOpaquePlaceholder));
+        Assert.True(SkinExtrasPickerWindow.UsesSmoothCursorTrail(visible));
         Assert.True(SkinExtrasPickerWindow.IsSmoothTrailPlaceholder(transparent));
+        Assert.False(SkinExtrasPickerWindow.IsSmoothTrailPlaceholder(legacyOpaquePlaceholder));
         Assert.False(SkinExtrasPickerWindow.IsSmoothTrailPlaceholder(alphaNoise));
         Assert.False(SkinExtrasPickerWindow.IsSmoothTrailPlaceholder(visible));
         Assert.Equal(
-            9,
+            5,
             SkinExtrasPickerWindow.BuildTrailPoints(
-                SkinExtrasPickerWindow.HasVisibleCursorMiddle(transparent)).Count);
+                SkinExtrasPickerWindow.UsesSmoothCursorTrail(null)).Count);
         Assert.Equal(
             28,
             SkinExtrasPickerWindow.BuildTrailPoints(
-                SkinExtrasPickerWindow.HasVisibleCursorMiddle(visible)).Count);
+                SkinExtrasPickerWindow.UsesSmoothCursorTrail(transparent)).Count);
+        Assert.Equal(
+            28,
+            SkinExtrasPickerWindow.BuildTrailPoints(
+                SkinExtrasPickerWindow.UsesSmoothCursorTrail(
+                    legacyOpaquePlaceholder)).Count);
+    }
+
+    [Theory]
+    [InlineData("cursor.png", true)]
+    [InlineData("cursor@2x.png", true)]
+    [InlineData(@"Extras\Cursors\cursor.png", false)]
+    [InlineData("Extras/Cursors/cursortrail@2x.png", false)]
+    public void Compare_only_treats_root_skin_files_as_active_gameplay_assets(
+        string filename,
+        bool expected)
+    {
+        Assert.Equal(expected, SkinExtrasPickerWindow.IsRootSkinFile(filename));
+    }
+
+    [Fact]
+    public void Shared_cursor_resolver_ignores_nested_assets_and_prefers_root_2x()
+    {
+        var resolved = SkinCursorPreview.Resolve(
+        [
+            @"Extras\Cursors\cursor.png",
+            "cursor.png",
+            "cursor@2x.png",
+            @"archive\cursortrail@2x.png",
+            "cursortrail.png",
+            "cursormiddle.png",
+        ]);
+
+        Assert.Equal("cursor@2x.png", resolved.CursorFilename);
+        Assert.Equal("cursortrail.png", resolved.TrailFilename);
+        Assert.Equal("cursormiddle.png", resolved.MiddleFilename);
+        Assert.True(resolved.UsesSmoothTrail);
+    }
+
+    [Fact]
+    public void Shared_cursor_composition_is_the_complete_render_contract()
+    {
+        var classic = SkinCursorPreview.Compose(
+            hasCursor: true,
+            hasTrail: true,
+            hasMiddle: false,
+            renderMiddle: false);
+        var smooth = SkinCursorPreview.Compose(
+            hasCursor: true,
+            hasTrail: true,
+            hasMiddle: true,
+            renderMiddle: false);
+
+        Assert.Equal(6, classic.Count);
+        Assert.Equal(29, smooth.Count);
+        Assert.Equal(
+            SkinCursorPreviewLayerKind.Cursor,
+            Assert.Single(classic.Where(layer =>
+                layer.Kind == SkinCursorPreviewLayerKind.Cursor)).Kind);
+        Assert.All(
+            classic.Where(layer => layer.Kind == SkinCursorPreviewLayerKind.Trail),
+            layer => Assert.InRange(layer.MaxWidth, 92, 110));
+        Assert.All(
+            smooth.Where(layer => layer.Kind == SkinCursorPreviewLayerKind.Trail),
+            layer => Assert.Equal(52, layer.MaxWidth));
+    }
+
+    [Fact]
+    public void Duplicate_export_writes_a_complete_osk_with_relative_skin_paths()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"kumori-osk-{Guid.NewGuid():N}");
+        try
+        {
+            var path = SkinOskPackage.Export(
+                directory,
+                "Test: copy",
+                [
+                    new LazerSkinImportFile("skin.ini", [1, 2]),
+                    new LazerSkinImportFile(@"nested\cursor.png", [3, 4]),
+                ],
+                new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
+
+            Assert.Equal(".osk", Path.GetExtension(path));
+            using var archive = System.IO.Compression.ZipFile.OpenRead(path);
+            Assert.Equal(
+                new[] { "nested/cursor.png", "skin.ini" },
+                archive.Entries.Select(entry => entry.FullName).Order().ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Studio_cursor_preview_uses_dense_points_only_when_middle_exists()
+    {
+        var classic = SkinEditorPage.BuildCursorCompositionTrailPoints(smooth: false);
+        var smooth = SkinEditorPage.BuildCursorCompositionTrailPoints(smooth: true);
+
+        Assert.Equal(5, classic.Count);
+        Assert.Equal(28, smooth.Count);
+        Assert.Equal(classic[0], smooth[0]);
+        Assert.Equal(classic[^1], smooth[^1]);
+        Assert.True(smooth[1].X - smooth[0].X
+                    < classic[1].X - classic[0].X);
     }
 
     [Fact]
@@ -612,6 +814,26 @@ public sealed class SkinEditorDomainTests
             ]);
 
         Assert.Equal(["followpoint-2@2x.png"], replaced);
+    }
+
+    [Fact]
+    public void Followpoint_replacement_has_no_frame_number_ceiling()
+    {
+        var veryHighFrame = "followpoint-" + new string('9', 100) + ".png";
+        var replaced = SkinExtraLogicalSelectionPlanner.FindReplacedCurrentFiles(
+            "osu.followpoints",
+            [
+                "followpoint-0.png",
+                "followpoint-48.png",
+                veryHighFrame,
+                "hitcircle.png",
+            ],
+            ["followpoint-0.png"]);
+
+        Assert.Equal(
+            ["followpoint-48.png", veryHighFrame],
+            replaced,
+            StringComparer.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -685,12 +907,64 @@ public sealed class SkinEditorDomainTests
     [Fact]
     public void Smooth_trail_is_a_transparent_one_pixel_png()
     {
-        var image = SkinImageTools.Decode(SkinCursorMiddlePolicy.CreateSmoothTrailPng());
+        var bytes = SkinCursorMiddlePolicy.CreateSmoothTrailPng();
+        var image = SkinImageTools.Decode(bytes);
+        var pixels = SkinImageTools.Pixels(image, out var stride);
 
         Assert.Equal(1, image.PixelWidth);
         Assert.Equal(1, image.PixelHeight);
+        Assert.Equal(4, stride);
+        Assert.Equal([0, 0, 0, 0], pixels);
+        Assert.True(SkinImageTools.IsFullyTransparentImage(bytes));
         Assert.True(SkinExtrasPickerWindow.IsSmoothTrailPlaceholder(image));
         Assert.False(SkinExtrasPickerWindow.HasVisibleCursorMiddle(image));
+    }
+
+    [Fact]
+    public void Fully_transparent_images_are_omitted_from_composed_previews()
+    {
+        var transparent = new SkinElementEntry(File("cursormiddle.png"))
+        {
+            HasVisiblePixels = false,
+        };
+        var visible = new SkinElementEntry(File("cursor.png"))
+        {
+            HasVisiblePixels = true,
+        };
+        var legacyOpaquePlaceholder = new SkinElementEntry(File("cursormiddle.png"))
+        {
+            HasVisiblePixels = true,
+            PixelWidth = 1,
+            PixelHeight = 1,
+        };
+
+        Assert.False(SkinEditorPage.ShouldRenderPreviewImage(transparent));
+        Assert.False(SkinEditorPage.ShouldRenderPreviewImage(legacyOpaquePlaceholder));
+        Assert.True(SkinEditorPage.ShouldRenderPreviewImage(visible));
+        Assert.True(SkinEditorPage.ShouldRenderPreviewImage(null));
+    }
+
+    [Fact]
+    public void One_pixel_cursor_middle_is_not_preview_artwork()
+    {
+        Assert.False(SkinCursorMiddlePolicy.HasRenderablePixels(
+            "cursormiddle.png",
+            1,
+            1,
+            [255, 255, 255, 255]));
+        Assert.True(SkinCursorMiddlePolicy.HasRenderablePixels(
+            "cursormiddle.png",
+            2,
+            1,
+            [
+                255, 255, 255, 255,
+                255, 255, 255, 255,
+            ]));
+        Assert.True(SkinCursorMiddlePolicy.HasRenderablePixels(
+            "cursor.png",
+            1,
+            1,
+            [255, 255, 255, 255]));
     }
 
     [Fact]
@@ -1714,6 +1988,46 @@ public sealed class SkinEditorDomainTests
         Assert.Equal(2, followpoints.Files.Count);
         Assert.All(followpoints.Files, file =>
             Assert.StartsWith("followpoint", file.Filename, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Extractor_preserves_transparent_followpoint_timing_frames()
+    {
+        var extras = Path.Combine(Path.GetTempPath(), $"kumori-extras-{Guid.NewGuid():N}");
+        try
+        {
+            var service = new SkinExtrasExtractionService();
+            var transparent = SkinImageTools.Encode(
+                SkinImageTools.ToBitmap([0, 0, 0, 0], 1, 1, 4),
+                "followpoint-0.png");
+            var visible = SkinImageTools.Encode(
+                SkinImageTools.ToBitmap([255, 255, 255, 255], 1, 1, 4),
+                "followpoint-1.png");
+            var source = service.BuildSource(
+                "Skin",
+                "memory",
+                [
+                    new SkinExtractionFile("followpoint-0.png", transparent),
+                    new SkinExtractionFile("followpoint-1.png", visible),
+                ]);
+            var family = Assert.Single(service.Analyze(source).Where(item =>
+                item.Definition.Id == "osu.followpoints"));
+
+            var result = Assert.Single(service.Extract(source, [family], extras));
+            var manifest = SkinExtraManifestSerializer.TryRead(result.DirectoryPath!);
+
+            Assert.NotNull(manifest);
+            Assert.Contains(manifest.Files, file => file.TargetFilename == "followpoint-0.png");
+            Assert.Contains(manifest.Files, file => file.TargetFilename == "followpoint-1.png");
+            Assert.True(System.IO.File.Exists(
+                Path.Combine(result.DirectoryPath!, "followpoint-0.png")));
+            Assert.True(SkinExtraPackValidator.Validate(
+                new SkinExtraPackDescriptor(result.DirectoryPath!, manifest, false)).IsHealthy);
+        }
+        finally
+        {
+            if (Directory.Exists(extras)) Directory.Delete(extras, recursive: true);
+        }
     }
 
     [Fact]

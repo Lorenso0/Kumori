@@ -32,6 +32,38 @@ public sealed class LazerSkinRealmServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Import_skin_adds_every_file_as_one_immediately_visible_skin()
+    {
+        await Task.Run(() =>
+        {
+            Directory.CreateDirectory(Path.Combine(root, "files"));
+            using (Realm.GetInstance(Configuration())) { }
+            var service = new LazerSkinRealmService();
+            var ini = System.Text.Encoding.UTF8.GetBytes("[General]\nName: Copy\n");
+            var cursor = System.Text.Encoding.UTF8.GetBytes("cursor-art");
+
+            var imported = service.ImportSkin(
+                root,
+                "Copy",
+                "Kumori",
+                [
+                    new("skin.ini", ini),
+                    new(@"nested\cursor.png", cursor),
+                ]);
+
+            Assert.Equal("Copy (Kumori)", imported.DisplayName);
+            Assert.Equal(2, imported.Files.Count);
+            var persisted = Assert.Single(service.LoadCatalog(root).Skins);
+            Assert.Equal(imported.Id, persisted.Id);
+            Assert.Contains(persisted.Files, file => file.Filename == "skin.ini");
+            var cursorFile = Assert.Single(
+                persisted.Files,
+                file => file.Filename == "nested/cursor.png");
+            Assert.Equal(cursor, service.ReadFile(root, cursorFile.Hash));
+        });
+    }
+
+    [Fact]
     public async Task Updating_identity_changes_the_catalog_and_skin_ini_together()
     {
         await Task.Run(() =>
@@ -194,9 +226,53 @@ public sealed class LazerSkinRealmServiceTests : IDisposable
         });
     }
 
+    [Fact]
+    public async Task Global_key_bindings_return_only_the_requested_non_ruleset_action()
+    {
+        await Task.Run(() =>
+        {
+            Directory.CreateDirectory(Path.Combine(root, "files"));
+            using (var realm = Realm.GetInstance(Configuration()))
+            {
+                realm.Write(() =>
+                {
+                    realm.Add(new LazerKeyBinding
+                    {
+                        Id = Guid.NewGuid(),
+                        Action = 42,
+                        KeyCombination = "Control+Shift+T",
+                    });
+                    realm.Add(new LazerKeyBinding
+                    {
+                        Id = Guid.NewGuid(),
+                        Action = 42,
+                        KeyCombination = "Alt+T",
+                        RulesetName = "osu",
+                    });
+                    realm.Add(new LazerKeyBinding
+                    {
+                        Id = Guid.NewGuid(),
+                        Action = 43,
+                        KeyCombination = "Control+Shift+E",
+                    });
+                });
+            }
+
+            var bindings = new LazerSkinRealmService().LoadGlobalKeyBindings(root, 42);
+
+            Assert.Equal(["Control+Shift+T"], bindings);
+        });
+    }
+
     private RealmConfiguration Configuration() => new(Path.Combine(root, "client.realm"))
     {
-        Schema = new[] { typeof(LazerSkin), typeof(LazerNamedFileUsage), typeof(LazerRealmFile) },
+        Schema = new[]
+        {
+            typeof(LazerSkin),
+            typeof(LazerNamedFileUsage),
+            typeof(LazerRealmFile),
+            typeof(LazerKeyBinding),
+        },
     };
 
     private (string Hash, string Path) Store(string contents)

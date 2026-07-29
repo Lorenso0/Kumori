@@ -229,7 +229,12 @@ public partial class App : Application
             playShare);
 
         // Shell first — no data work before first paint.
-        _mainWindow = new MainWindow(viewModel, settings, importsViewModel, playShare);
+        _mainWindow = new MainWindow(
+            viewModel,
+            settings,
+            importsViewModel,
+            playShare,
+            gameplayWork);
         _mainWindow.StateChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         _mainWindow.IsVisibleChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         if (startMinimizedToTray)

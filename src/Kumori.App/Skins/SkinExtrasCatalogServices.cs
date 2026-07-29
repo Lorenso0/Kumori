@@ -899,7 +899,8 @@ internal sealed record SkinExtrasSyncProgress(
     int CompletedPacks = 0,
     int TotalPacks = 0,
     long BytesReceived = 0,
-    long TotalBytes = 0);
+    long TotalBytes = 0,
+    bool IsManual = false);
 
 internal sealed record SkinExtrasSyncResult(
     int Installed,
@@ -919,6 +920,7 @@ internal sealed class SkinExtrasCatalogSyncService
     private readonly SkinExtrasPackageDownloader downloader;
     private Task<SkinExtrasSyncResult>? activeRun;
     private CancellationTokenSource? activeRunCancellation;
+    private bool activeRunIsManual;
 
     public static SkinExtrasCatalogSyncService Shared => SharedLazy.Value;
 
@@ -945,6 +947,7 @@ internal sealed class SkinExtrasCatalogSyncService
             activeRunCancellation?.Dispose();
             activeRunCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken);
+            activeRunIsManual = manual;
             activeRun = SynchronizeWithTerminalStateAsync(
                 manual,
                 activeRunCancellation.Token);
@@ -1485,7 +1488,8 @@ internal sealed class SkinExtrasCatalogSyncService
             completedPacks,
             totalPacks,
             bytesReceived,
-            totalBytes);
+            totalBytes,
+            activeRunIsManual);
         ProgressChanged?.Invoke(this, CurrentProgress);
     }
 

@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.6.1",
+    "date": "2026-07-29",
+    "features": [
+      "Added skin duplication with complete .osk export and automatic osu!lazer import and reload for edited copies that are not already installed"
+    ],
+    "improvements": [
+      "Made Extras Studio open faster with background catalog loading, lazy previews, non-blocking automatic updates, and smooth virtualized library scrolling",
+      "Made cursor previews match osu! asset resolution and cursormiddle trail behavior consistently across Skin Studio, pack previews, and comparisons"
+    ],
+    "fixes": [
+      "Kept Extras navigation and previews stable during background refreshes, preserved the correct scale for non-cursor elements, and stopped stale reloads from switching element families",
+      "Preserved and validated complete followpoint sequences, including transparent placeholder frames"
+    ]
+  },
+  {
     "version": "0.6.0",
     "date": "2026-07-29",
     "major": [

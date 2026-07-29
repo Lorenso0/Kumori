@@ -531,6 +531,16 @@ public static class SkinExtraPackValidator
                     issues.Add(Error("missing-digit", $"Number font is missing digit {digit}."));
         }
 
+        if (manifest.FamilyId.Equals("osu.followpoints", StringComparison.OrdinalIgnoreCase)
+            && SkinFollowpointSequence.Validate(
+                manifest.Files.Select(file => file.TargetFilename)) is { } sequenceProblem)
+        {
+            issues.Add(Error(
+                sequenceProblem.Code,
+                sequenceProblem.Message,
+                sequenceProblem.Filename));
+        }
+
         if (manifest.FamilyId.StartsWith("audio.hitsounds.", StringComparison.OrdinalIgnoreCase))
         {
             var stems = manifest.Files.Select(file =>

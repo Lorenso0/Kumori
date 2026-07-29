@@ -182,6 +182,25 @@ public enum SkinDraftOperation
     Delete,
 }
 
+internal static class SkinFileReplacementPlanner
+{
+    public static SkinDraftChange Build(
+        LazerSkinFileInfo target,
+        string sourcePath,
+        byte[] sourceBytes)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        ArgumentNullException.ThrowIfNull(sourceBytes);
+
+        return new SkinDraftChange(
+            target.Filename,
+            target.Hash,
+            sourceBytes,
+            $"{target.Filename} (replacement from {Path.GetFileName(sourcePath)})");
+    }
+}
+
 internal static class SkinDraftProjection
 {
     public static IReadOnlyList<LazerSkinFileInfo> EffectiveFiles(

@@ -625,6 +625,26 @@ public sealed class ResponsiveWindowLayoutTests
                     sliderEndToggle.IsChecked = true;
                     sliderEndToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     Assert.Equal(Visibility.Visible, Assert.IsType<Image>(skinEditor.FindName("GameplayTailCircle")).Visibility);
+                    Assert.IsType<ToggleButton>(skinEditor.FindName("IniRawModeButton"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    var relatedIniButton = Assert.IsType<Button>(
+                        skinEditor.FindName("OpenElementIniLinkButton"));
+                    relatedIniButton.Tag = ("General", "CursorCentre");
+                    relatedIniButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    skinWindow.UpdateLayout();
+                    Assert.Equal(1, Assert.IsType<TabControl>(
+                        skinEditor.FindName("WorkspaceTabs")).SelectedIndex);
+                    Assert.Equal(0, Assert.IsType<TabControl>(
+                        skinEditor.FindName("IniModeTabs")).SelectedIndex);
+                    var firstOpenForm = Assert.IsType<StackPanel>(
+                        skinEditor.FindName("IniFormPanel"));
+                    var firstOpenSection = Assert.Single(
+                        firstOpenForm.Children.OfType<StackPanel>());
+                    Assert.NotEmpty(
+                        Assert.IsType<StackPanel>(firstOpenSection.Children[0]).Children);
+                    Assert.Equal(
+                        "Cursor origin at centre",
+                        Assert.IsType<TextBlock>(skinEditor.FindName("IniContextTitle")).Text);
                     if (Environment.GetEnvironmentVariable("KUMORI_SKIN_EDITOR_SNAPSHOT_DIR") is { Length: > 0 } gameplaySnapshotDirectory)
                     {
                         SaveSnapshot(

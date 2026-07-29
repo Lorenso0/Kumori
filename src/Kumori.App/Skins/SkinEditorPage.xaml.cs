@@ -73,6 +73,7 @@ public partial class SkinEditorPage : UserControl
 
     private readonly SettingsService settings;
     private readonly ILazerSkinRealmService realmService;
+    private readonly ILazerSkinReloadService? reloadService;
     private readonly List<FileSystemWatcher> externalWatchers = [];
     private readonly Dictionary<(string Section, string Key), IniRow> iniRows = [];
     private readonly Dictionary<string, FrameworkElement> iniSectionPanels =
@@ -102,7 +103,9 @@ public partial class SkinEditorPage : UserControl
     private IReadOnlyList<SkinElementCategory> categories = [];
     private LazerSkinCatalog? catalog;
     private LazerSkinInfo? currentSkin;
+    private PendingSkinDuplicate? pendingDuplicate;
     private SkinElementEntry? selectedEntry;
+    private SkinElementEntry? contextMenuEntry;
     private LazerSkinFileInfo? iniFile;
     private SkinIniDocument? iniDocument;
     private SkinDraftSession? draft;
@@ -156,10 +159,21 @@ public partial class SkinEditorPage : UserControl
     private ResponsiveLayoutState responsiveState =
         ResponsiveLayoutResolver.Resolve(1280, 800);
 
-    public SkinEditorPage(SettingsService settings, ILazerSkinRealmService? realmService = null)
+    public SkinEditorPage(
+        SettingsService settings,
+        ILazerSkinRealmService? realmService = null)
+        : this(settings, realmService, reloadService: null)
+    {
+    }
+
+    internal SkinEditorPage(
+        SettingsService settings,
+        ILazerSkinRealmService? realmService,
+        ILazerSkinReloadService? reloadService)
     {
         this.settings = settings;
         this.realmService = realmService ?? new LazerSkinRealmService();
+        this.reloadService = reloadService;
         extrasSyncService = SkinExtrasCatalogSyncService.Shared;
         extrasSyncService.ProgressChanged += ExtrasSyncService_ProgressChanged;
         extrasSyncService.LibraryChanged += ExtrasSyncService_LibraryChanged;
@@ -576,14 +590,23 @@ public partial class SkinEditorPage : UserControl
             && row.Definition.Section.Equals(initialSection.Name, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private void RefreshIniFormAfterLayout(SkinIniDocument document)
+    private void RefreshIniFormAfterLayout(
+        SkinIniDocument document,
+        (string Section, string Key)? focusTarget = null)
     {
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
-        {
-            if (!ReferenceEquals(iniDocument, document) || IniModeTabs.SelectedIndex != 0)
-                return;
-            BuildIniForm();
-        }));
+        if (!ReferenceEquals(iniDocument, document)
+            || workspaceMode != SkinEditorWorkspaceMode.SkinIni
+            || WorkspaceTabs.SelectedIndex != 1
+            || IniModeTabs.SelectedIndex != 0)
+            return;
+
+        // Rebuild only after the workspace TabItem is selected. This makes the
+        // first form visible immediately and prevents navigation from retaining
+        // TextBoxes that belonged to a previous, detached section tree.
+        BuildIniForm();
+        IniFormScroll.UpdateLayout();
+        if (focusTarget is { } target)
+            FocusIniRow(target.Section, target.Key);
     }
 
     private void ShowIniContext(IniRow? row)
@@ -810,7 +833,8 @@ public partial class SkinEditorPage : UserControl
             rawDirty = false;
             InvalidateIniCompositionCache();
         }
-        BuildIniForm();
+        if (workspaceMode == SkinEditorWorkspaceMode.SkinIni)
+            RefreshIniFormAfterLayout(iniDocument);
         UpdateComboStrip();
         _ = RefreshGameplayPreviewAsync();
         _ = RefreshRichPreviewsAsync();
@@ -970,10 +994,11 @@ public partial class SkinEditorPage : UserControl
             return;
         var root = catalog.RootPath;
         var hash = entry.Hash;
+        var loadKey = $"{entry.Filename}\0{hash}";
         Task<LoadedSkinImage> loadTask;
         lock (imageLoadGate)
         {
-            if (imageLoadTasks.TryGetValue(hash, out var existingLoad))
+            if (imageLoadTasks.TryGetValue(loadKey, out var existingLoad))
             {
                 loadTask = existingLoad;
             }
@@ -996,10 +1021,14 @@ public partial class SkinEditorPage : UserControl
                         stride,
                         bitmap.PixelWidth,
                         bitmap.PixelHeight,
-                        SkinImageTools.HasVisiblePixels(pixels),
+                        SkinCursorMiddlePolicy.HasRenderablePixels(
+                            entry.Filename,
+                            bitmap.PixelWidth,
+                            bitmap.PixelHeight,
+                            pixels),
                         thumbnail);
                 });
-                imageLoadTasks[hash] = loadTask;
+                imageLoadTasks[loadKey] = loadTask;
             }
         }
         LoadedSkinImage loaded;
@@ -1010,8 +1039,8 @@ public partial class SkinEditorPage : UserControl
         finally
         {
             lock (imageLoadGate)
-                if (imageLoadTasks.GetValueOrDefault(hash) == loadTask)
-                    imageLoadTasks.Remove(hash);
+                if (imageLoadTasks.GetValueOrDefault(loadKey) == loadTask)
+                    imageLoadTasks.Remove(loadKey);
         }
         if (entry.OriginalPixels is not null)
             return;
@@ -1020,7 +1049,7 @@ public partial class SkinEditorPage : UserControl
         entry.OriginalPixels = loaded.Pixels;
         entry.HasVisiblePixels = loaded.HasVisiblePixels;
         lock (imageLoadGate)
-            imageVisibilityCache[hash] = loaded.HasVisiblePixels;
+            imageVisibilityCache[loadKey] = loaded.HasVisiblePixels;
         entry.Stride = loaded.Stride;
         entry.PixelWidth = loaded.Width;
         entry.PixelHeight = loaded.Height;
@@ -1034,22 +1063,28 @@ public partial class SkinEditorPage : UserControl
 
         var root = catalog.RootPath;
         var hash = entry.Hash;
+        var loadKey = $"{entry.Filename}\0{hash}";
         Task<bool> loadTask;
         lock (imageLoadGate)
         {
-            if (imageVisibilityCache.TryGetValue(hash, out var cached))
+            if (imageVisibilityCache.TryGetValue(loadKey, out var cached))
             {
                 entry.HasVisiblePixels = cached;
                 return;
             }
-            if (!imageVisibilityLoadTasks.TryGetValue(hash, out loadTask!))
+            if (!imageVisibilityLoadTasks.TryGetValue(loadKey, out loadTask!))
             {
                 loadTask = Task.Run(() =>
                 {
                     var bytes = realmService.ReadFile(root, hash);
-                    return !SkinImageTools.IsFullyTransparentImage(bytes);
+                    var bitmap = SkinImageTools.Decode(bytes);
+                    return SkinCursorMiddlePolicy.HasRenderablePixels(
+                        entry.Filename,
+                        bitmap.PixelWidth,
+                        bitmap.PixelHeight,
+                        SkinImageTools.Pixels(bitmap, out _));
                 });
-                imageVisibilityLoadTasks[hash] = loadTask;
+                imageVisibilityLoadTasks[loadKey] = loadTask;
             }
         }
 
@@ -1061,12 +1096,12 @@ public partial class SkinEditorPage : UserControl
         finally
         {
             lock (imageLoadGate)
-                if (imageVisibilityLoadTasks.GetValueOrDefault(hash) == loadTask)
-                    imageVisibilityLoadTasks.Remove(hash);
+                if (imageVisibilityLoadTasks.GetValueOrDefault(loadKey) == loadTask)
+                    imageVisibilityLoadTasks.Remove(loadKey);
         }
 
         lock (imageLoadGate)
-            imageVisibilityCache[hash] = hasVisiblePixels;
+            imageVisibilityCache[loadKey] = hasVisiblePixels;
         entry.HasVisiblePixels = hasVisiblePixels;
     }
 
@@ -1186,9 +1221,10 @@ public partial class SkinEditorPage : UserControl
     private void OpenElementIniLink_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: ValueTuple<string, string> target }) return;
-        SetWorkspaceMode(SkinEditorWorkspaceMode.SkinIni);
         SetIniCenterMode(SkinEditorCenterMode.IniForm);
-        Dispatcher.BeginInvoke(() => FocusIniRow(target.Item1, target.Item2));
+        SetWorkspaceMode(SkinEditorWorkspaceMode.SkinIni);
+        if (iniDocument is { } document)
+            RefreshIniFormAfterLayout(document, target);
     }
 
     private void FocusIniRow(string section, string key)
@@ -1201,8 +1237,7 @@ public partial class SkinEditorPage : UserControl
         ShowIniSection(section);
         ShowIniContext(row);
         row.Value.Focus();
-        var point = row.Value.TransformToAncestor(IniFormScroll).Transform(new System.Windows.Point(0, 0));
-        IniFormScroll.ScrollToVerticalOffset(Math.Max(0, IniFormScroll.VerticalOffset + point.Y - 20));
+        row.Value.BringIntoView();
     }
 
     private void RenderSelectedEntry(
@@ -1498,20 +1533,51 @@ public partial class SkinEditorPage : UserControl
 
     private async Task<IReadOnlyList<ElementLayerSpec>> BuildCursorCompositionAsync()
     {
+        if (currentSkin is null)
+            return [];
+        var assets = SkinCursorPreview.Resolve(
+            SkinDraftProjection.EffectiveFiles(
+                    currentSkin.Files,
+                    draft?.Changes ?? [])
+                .Select(file => file.Filename));
         var entries = await Task.WhenAll(
-            FindAndLoadAsync("cursortrail"),
-            FindAndLoadAsync("cursormiddle"),
-            FindAndLoadAsync("cursor"));
-        return CompactLayers(
-        [
-            Layer(entries[0], 155, 322, 92, 92, contextOpacity: 0.2, highlightEligible: false),
-            Layer(entries[0], 230, 280, 98, 98, contextOpacity: 0.3, highlightEligible: false),
-            Layer(entries[0], 305, 238, 104, 104, contextOpacity: 0.42, highlightEligible: false),
-            Layer(entries[0], 380, 196, 110, 110),
-            Layer(entries[1], 455, 154, 116, 116),
-            Layer(entries[2], 455, 154, 132, 132),
-        ]);
+            FindAndLoadEffectiveFileAsync(assets.TrailFilename),
+            FindAndLoadEffectiveFileAsync(assets.MiddleFilename),
+            FindAndLoadEffectiveFileAsync(assets.CursorFilename));
+        var composition = SkinCursorPreview.Compose(
+            entries[2] is not null,
+            entries[0] is not null,
+            assets.UsesSmoothTrail,
+            ShouldRenderPreviewImage(entries[1]));
+        var layers = new List<ElementLayerSpec>(composition.Count);
+        foreach (var layer in composition)
+        {
+            var entry = layer.Kind switch
+            {
+                SkinCursorPreviewLayerKind.Trail => entries[0],
+                SkinCursorPreviewLayerKind.Middle => entries[1],
+                SkinCursorPreviewLayerKind.Cursor => entries[2],
+                _ => null,
+            };
+            layers.Add(Layer(
+                entry,
+                layer.CentreX,
+                layer.CentreY,
+                layer.MaxWidth,
+                layer.MaxHeight,
+                contextOpacity: layer.Opacity,
+                highlightEligible: layer.Kind != SkinCursorPreviewLayerKind.Trail
+                                   || layer.Equals(composition.Last(candidate =>
+                                       candidate.Kind == SkinCursorPreviewLayerKind.Trail))));
+        }
+        return CompactLayers(layers);
     }
+
+    internal static IReadOnlyList<System.Windows.Point> BuildCursorCompositionTrailPoints(
+        bool smooth)
+        => SkinCursorPreview.TrailPoints(smooth)
+            .Select(point => new System.Windows.Point(point.X, point.Y))
+            .ToArray();
 
     private async Task<IReadOnlyList<ElementLayerSpec>> BuildSpinnerCompositionAsync()
     {
@@ -1723,7 +1789,10 @@ public partial class SkinEditorPage : UserControl
         SkinElementCompositionKind compositionKind)
     {
         ClearElementComposition();
-        var layers = requestedLayers.Where(layer => layer.Source is not null).ToList();
+        var layers = requestedLayers
+            .Where(layer => layer.Source is not null
+                            && ShouldRenderPreviewImage(layer.Entry))
+            .ToList();
         var selectedStem = LogicalStem(selected.Filename);
         var hasSelected = layers.Any(layer =>
             layer.HighlightEligible
@@ -1731,7 +1800,9 @@ public partial class SkinEditorPage : UserControl
             && LogicalStem(layer.Entry.Filename).Equals(
                 selectedStem,
                 StringComparison.OrdinalIgnoreCase));
-        if (!showFullElementRender && !hasSelected)
+        if (!showFullElementRender
+            && ShouldRenderPreviewImage(selected)
+            && !hasSelected)
             layers.Add(Layer(selected, 320, 240, 300, 300));
 
         foreach (var layer in layers)
@@ -1749,6 +1820,7 @@ public partial class SkinEditorPage : UserControl
             return false;
         var selectedStem = LogicalStem(selected.Filename);
         if (!showFullElementRender
+            && ShouldRenderPreviewImage(selected)
             && !elementCompositionVisuals.Any(visual =>
                 IsSelectedCompositionLayer(visual.Layer, selectedStem)))
             return false;
@@ -1952,6 +2024,14 @@ public partial class SkinEditorPage : UserControl
             selectedStem,
             StringComparison.OrdinalIgnoreCase);
 
+    internal static bool ShouldRenderPreviewImage(SkinElementEntry? entry) =>
+        entry?.HasVisiblePixels != false
+        && (entry is null
+            || !SkinCursorMiddlePolicy.IsOnePixelPlaceholder(
+                entry.Filename,
+                entry.PixelWidth,
+                entry.PixelHeight));
+
     private static ElementLayerSpec Layer(
         SkinElementEntry? entry,
         double centreX,
@@ -1975,7 +2055,9 @@ public partial class SkinEditorPage : UserControl
 
     private static IReadOnlyList<ElementLayerSpec> CompactLayers(
         IEnumerable<ElementLayerSpec> layers) =>
-        layers.Where(layer => layer.Source is not null).ToArray();
+        layers.Where(layer => layer.Source is not null
+                              && ShouldRenderPreviewImage(layer.Entry))
+            .ToArray();
 
     private sealed record ElementLayerSpec(
         SkinElementEntry? Entry,
@@ -2047,7 +2129,15 @@ public partial class SkinEditorPage : UserControl
 
     private async Task<bool> SaveAllAsync(bool confirm = true)
     {
-        if (catalog is null || currentSkin is null || draft is null || draft.Count == 0) return true;
+        if (catalog is null || currentSkin is null || draft is null)
+            return true;
+        if (pendingDuplicate is { } duplicate
+            && duplicate.WorkingSkinId == currentSkin.Id)
+        {
+            return await ExportAndImportDuplicateAsync(duplicate, confirm);
+        }
+        if (draft.Count == 0)
+            return true;
         var pending = draft.Changes.ToArray();
         var added = pending.Count(change => !change.IsDeletion && change.ExpectedHash is null);
         var replaced = pending.Count(change => !change.IsDeletion && change.ExpectedHash is not null);
@@ -2165,13 +2255,167 @@ public partial class SkinEditorPage : UserControl
                 refreshedSkin,
                 selectedCategoryName,
                 selectedFilename);
-            StatusText.Text = $"Saved to osu!lazer: {added} added, {replaced} replaced, {deleted} deleted. Restore point created.";
+            var savedStatus =
+                $"Saved to osu!lazer: {added} added, {replaced} replaced, {deleted} deleted. Restore point created.";
+            if (reloadService is null)
+            {
+                StatusText.Text = savedStatus;
+            }
+            else
+            {
+                StatusText.Text = $"{savedStatus} Lazer reload queued.";
+                var savedSkinId = refreshedSkin.Id;
+                reloadService.RequestReload(
+                    latest.RootPath,
+                    savedSkinId,
+                    result =>
+                    {
+                        if (currentSkin?.Id != savedSkinId || (draft?.Count ?? 0) != 0)
+                            return;
+                        StatusText.Text = $"{savedStatus} {result.Message}";
+                    });
+            }
             UpdateDirtyState();
             return true;
         }
         catch (Exception ex)
         {
             StatusText.Text = $"Could not save all changes: {ex.Message}";
+            return false;
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async Task<bool> ExportAndImportDuplicateAsync(
+        PendingSkinDuplicate duplicate,
+        bool confirm)
+    {
+        if (catalog is null || currentSkin is null || draft is null)
+            return false;
+
+        var changes = draft.Changes.ToArray();
+        if (confirm && KumoriDialog.Show(
+                Window.GetWindow(this),
+                $"Finish the duplicate “{duplicate.Name}”?\n\n"
+                + $"Kumori will export a complete .osk, import it into osu!lazer, "
+                + "and switch this editor to the imported copy.",
+                "Export and import duplicate",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.Yes) != MessageBoxResult.Yes)
+            return false;
+
+        string? exportedPath = null;
+        SetBusy(true, "Preparing duplicate skin package…");
+        try
+        {
+            var latest = await Task.Run(() => realmService.LoadCatalog(catalog.RootPath));
+            var source = latest.Skins.FirstOrDefault(skin =>
+                skin.Id == duplicate.SourceSkinId);
+            if (source is null)
+            {
+                StatusText.Text =
+                    "Import blocked: the source skin no longer exists in osu!lazer. The duplicate draft was kept.";
+                return false;
+            }
+
+            var currentFiles = source.Files.ToDictionary(
+                file => file.Filename,
+                StringComparer.OrdinalIgnoreCase);
+            var conflicts = changes.Where(change =>
+            {
+                var exists = currentFiles.TryGetValue(change.Filename, out var file);
+                return change.ExpectedHash is null
+                    ? exists
+                    : !exists
+                      || !string.Equals(
+                          file!.Hash,
+                          change.ExpectedHash,
+                          StringComparison.OrdinalIgnoreCase);
+            }).ToArray();
+            if (conflicts.Length > 0)
+            {
+                StatusText.Text =
+                    $"Import blocked: {conflicts.Length} source file(s) changed in osu!lazer. "
+                    + "The duplicate draft was kept; refresh it before exporting.";
+                return false;
+            }
+
+            StatusText.Text = "Reading the source skin and applying the duplicate draft…";
+            var files = await Task.Run(() => source.Files.ToDictionary(
+                file => file.Filename,
+                file => new LazerSkinImportFile(
+                    file.Filename,
+                    realmService.ReadFile(latest.RootPath, file.Hash)),
+                StringComparer.OrdinalIgnoreCase));
+            foreach (var change in changes)
+            {
+                if (change.IsDeletion)
+                    files.Remove(change.Filename);
+                else
+                    files[change.Filename] = new LazerSkinImportFile(
+                        change.Filename,
+                        change.Bytes.ToArray());
+            }
+            if (files.Count == 0)
+            {
+                StatusText.Text =
+                    "Import blocked: a skin package cannot be empty. The duplicate draft was kept.";
+                return false;
+            }
+
+            var importFiles = files.Values
+                .OrderBy(file => file.Filename, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            StatusText.Text = "Exporting the finished duplicate as .osk…";
+            exportedPath = await Task.Run(() => SkinOskPackage.Export(
+                AppPaths.SkinEditorExportsDir,
+                duplicate.Name,
+                importFiles));
+
+            if (!await EnsureBackupAsync())
+                return false;
+            StatusText.Text = "Auto-importing the .osk into osu!lazer…";
+            var imported = await Task.Run(() => realmService.ImportSkin(
+                latest.RootPath,
+                duplicate.Name,
+                duplicate.Creator,
+                importFiles));
+
+            var workingId = duplicate.WorkingSkinId;
+            draft.AcceptApplied();
+            await Task.Run(() => SkinDraftRecovery.Clear(workingId));
+            pendingDuplicate = null;
+            currentSkin = null;
+            await LoadCatalogAsync(imported.Id, forceReloadSelectedSkin: true);
+
+            var savedStatus =
+                $"Imported {imported.DisplayName} into osu!lazer. Exported OSK: {exportedPath}";
+            StatusText.Text = reloadService is null
+                ? savedStatus
+                : $"{savedStatus} Lazer reload queued.";
+            if (reloadService is not null)
+            {
+                reloadService.RequestReload(
+                    latest.RootPath,
+                    imported.Id,
+                    result =>
+                    {
+                        if (currentSkin?.Id == imported.Id)
+                            StatusText.Text = $"{savedStatus} {result.Message}";
+                    });
+            }
+            UpdateDirtyState();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = exportedPath is null
+                ? $"Could not finish the duplicate: {ex.Message}"
+                : $"The OSK was exported to {exportedPath}, but auto-import failed: {ex.Message}";
             return false;
         }
         finally
@@ -2320,9 +2564,15 @@ public partial class SkinEditorPage : UserControl
     private async Task<bool> ResolveDirtyStateAsync()
     {
         if (!HasDirtyChanges) return true;
+        var isDuplicateDraft = pendingDuplicate is { } duplicate
+                               && duplicate.WorkingSkinId == currentSkin?.Id;
         var result = KumoriDialog.Show(
             Window.GetWindow(this),
-            "This skin has unsaved changes.\n\nYes: save all\nNo: discard them\nCancel: stay on this skin",
+            isDuplicateDraft
+                ? "This duplicate has not been imported yet.\n\n"
+                  + "Yes: export and import it\nNo: discard the duplicate\nCancel: keep editing"
+                : "This skin has unsaved changes.\n\n"
+                  + "Yes: save all\nNo: discard them\nCancel: stay on this skin",
             "Unsaved skin changes",
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Warning,
@@ -2337,6 +2587,8 @@ public partial class SkinEditorPage : UserControl
             return await SaveAllAsync(confirm: false);
         }
         DiscardAllChanges();
+        if (isDuplicateDraft)
+            AbandonPendingDuplicate();
         return true;
     }
 
@@ -2357,18 +2609,26 @@ public partial class SkinEditorPage : UserControl
     }
 
     private bool HasDirtyChanges =>
-        (draft?.Count ?? 0) > 0
+        (pendingDuplicate is { } duplicate
+         && duplicate.WorkingSkinId == currentSkin?.Id)
+        || (draft?.Count ?? 0) > 0
         || iniDirty
         || categories.SelectMany(category => category.Files).Any(entry => entry.HasEdits);
 
     private void UpdateDirtyState()
     {
         var stagedCount = draft?.Count ?? 0;
+        var isDuplicateDraft = pendingDuplicate is { } duplicate
+                               && duplicate.WorkingSkinId == currentSkin?.Id;
         var unstagedCount = categories.SelectMany(category => category.Files).Count(entry => entry.HasEdits)
             + (iniDirty ? 1 : 0);
-        SaveAllButton.IsEnabled = stagedCount > 0 && !busy;
-        SaveAllButton.Content = stagedCount > 0 ? $"Save {stagedCount} to osu!lazer" : "Save to osu!lazer";
-        ReviewApplyButton.IsEnabled = stagedCount > 0 && !busy;
+        SaveAllButton.IsEnabled = (stagedCount > 0 || isDuplicateDraft) && !busy;
+        SaveAllButton.Content = isDuplicateDraft
+            ? "Export & import duplicate"
+            : stagedCount > 0
+                ? $"Save {stagedCount} to osu!lazer"
+                : "Save to osu!lazer";
+        ReviewApplyButton.IsEnabled = (stagedCount > 0 || isDuplicateDraft) && !busy;
         ReviewApplyButton.Content = SaveAllButton.Content;
         DraftReviewButton.Content = stagedCount > 0 ? $"Changes  {stagedCount}" : "Changes";
         DraftChangesLabel.Text = stagedCount == 0
@@ -2789,6 +3049,29 @@ public partial class SkinEditorPage : UserControl
         return entry;
     }
 
+    private async Task<SkinElementEntry?> FindAndLoadEffectiveFileAsync(string? filename)
+    {
+        if (filename is null)
+            return null;
+        EnsureDraftPreviewIndex();
+        var staged = draft?.Changes.FirstOrDefault(change =>
+            change.Filename.Equals(filename, StringComparison.OrdinalIgnoreCase));
+        if (staged is not null)
+            return staged.IsDeletion || !SkinElementCategorizer.IsImage(staged.Filename)
+                ? null
+                : GetOrCreateDraftPreviewEntry(staged);
+
+        var entry = categories
+            .SelectMany(category => category.Files)
+            .SelectMany(file => file.PhysicalEntries)
+            .FirstOrDefault(file => file.Filename.Equals(
+                filename,
+                StringComparison.OrdinalIgnoreCase));
+        if (entry is not null && entry.IsImage)
+            await EnsureEntryLoadedAsync(entry);
+        return entry;
+    }
+
     private void EnsureDraftPreviewIndex()
     {
         var revision = draft?.Revision ?? -1;
@@ -2830,7 +3113,11 @@ public partial class SkinEditorPage : UserControl
         var bitmap = SkinImageTools.Decode(change.Bytes);
         entry.OriginalBytes = change.Bytes;
         entry.OriginalPixels = SkinImageTools.Pixels(bitmap, out var stride);
-        entry.HasVisiblePixels = SkinImageTools.HasVisiblePixels(entry.OriginalPixels);
+        entry.HasVisiblePixels = SkinCursorMiddlePolicy.HasRenderablePixels(
+            entry.Filename,
+            bitmap.PixelWidth,
+            bitmap.PixelHeight,
+            entry.OriginalPixels);
         entry.Stride = stride;
         entry.PixelWidth = bitmap.PixelWidth;
         entry.PixelHeight = bitmap.PixelHeight;
@@ -2856,7 +3143,10 @@ public partial class SkinEditorPage : UserControl
         double centreY,
         double opacity)
     {
-        if (entry?.Thumbnail is null || entry.PixelWidth <= 0 || entry.PixelHeight <= 0)
+        if (entry?.Thumbnail is null
+            || !ShouldRenderPreviewImage(entry)
+            || entry.PixelWidth <= 0
+            || entry.PixelHeight <= 0)
         {
             image.Visibility = Visibility.Collapsed;
             return;
@@ -3151,13 +3441,13 @@ public partial class SkinEditorPage : UserControl
     private void SetWorkspaceMode(SkinEditorWorkspaceMode mode)
     {
         workspaceMode = mode;
+        UpdateStudioState();
         if (mode == SkinEditorWorkspaceMode.SkinIni)
         {
             UpdateComboStrip();
             if (iniDocument is not null)
                 RefreshIniFormAfterLayout(iniDocument);
         }
-        UpdateStudioState();
     }
 
     private void SetElementCenterMode(SkinEditorCenterMode mode)
@@ -3306,6 +3596,18 @@ public partial class SkinEditorPage : UserControl
     private void RestoreSkinSelection()
     {
         SetSkinPickerSelection(currentSkin);
+    }
+
+    private void AbandonPendingDuplicate()
+    {
+        if (pendingDuplicate is not { } duplicate)
+            return;
+        pendingDuplicate = null;
+        allSkins = allSkins
+            .Where(skin => skin.Id != duplicate.WorkingSkinId)
+            .ToArray();
+        CompactSkinPicker.ItemsSource = allSkins;
+        _ = Task.Run(() => SkinDraftRecovery.Clear(duplicate.WorkingSkinId));
     }
 
     private void SetSkinPickerSelection(LazerSkinInfo? skin)
@@ -3566,6 +3868,89 @@ public partial class SkinEditorPage : UserControl
     private async void CreateSkinFromExtras_Click(object sender, RoutedEventArgs e) =>
         await CreateBlankSkinAsync(openExtrasAfterCreate: true);
 
+    private async void DuplicateSkin_Click(object sender, RoutedEventArgs e)
+    {
+        if (catalog is null || currentSkin is null || !await ResolveDirtyStateAsync())
+            return;
+
+        var source = currentSkin;
+        var requested = KumoriDialog.Input(
+                Window.GetWindow(this),
+                "Create an editable copy. It stays staged in Kumori until Save exports "
+                + "the complete OSK and auto-imports it into osu!lazer.",
+                "Duplicate skin",
+                $"{source.Name} copy")
+            .Trim();
+        if (string.IsNullOrWhiteSpace(requested))
+            return;
+        if (requested.IndexOfAny(['\r', '\n']) >= 0)
+        {
+            KumoriDialog.Show(
+                Window.GetWindow(this),
+                "A skin name cannot contain a line break.",
+                "Duplicate skin",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var existingNames = allSkins
+            .Select(skin => skin.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var name = requested;
+        var suffix = 2;
+        while (!existingNames.Add(name))
+            name = $"{requested} ({suffix++})";
+
+        var working = source with
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+        };
+        pendingDuplicate = new PendingSkinDuplicate(
+            working.Id,
+            source.Id,
+            name,
+            source.Creator);
+        allSkins = allSkins
+            .Append(working)
+            .OrderBy(skin => skin.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        CompactSkinPicker.ItemsSource = allSkins;
+        await SelectSkinAsync(
+            working,
+            forceReload: true,
+            restoreRecoveredDraft: false);
+
+        if (iniDocument is null || draft is null)
+        {
+            AbandonPendingDuplicate();
+            await SelectSkinAsync(
+                source,
+                forceReload: true,
+                restoreRecoveredDraft: false);
+            StatusText.Text =
+                "Could not prepare the duplicate because its skin.ini could not be loaded.";
+            return;
+        }
+
+        iniDocument.SetValue("General", "Name", name);
+        iniDocument.SetValue("General", "Author", source.Creator);
+        SetRawText(iniDocument.ToText());
+        BuildIniForm();
+        draft.Stage(
+            "skin.ini",
+            iniFile?.Hash,
+            iniDocument.ToBytes(),
+            "skin.ini (duplicate identity)");
+        ActiveSkinLabel.Text = "DUPLICATE DRAFT";
+        GameplaySkinName.Text = working.DisplayName;
+        InspectorSubtitleText.Text = working.DisplayName;
+        StatusText.Text =
+            $"Editing staged duplicate {working.DisplayName}. Save will export its OSK and auto-import it into osu!lazer.";
+        UpdateDirtyState();
+    }
+
     private async Task CreateBlankSkinAsync(bool openExtrasAfterCreate)
     {
         if (catalog is null || !await ResolveDirtyStateAsync()) return;
@@ -3622,7 +4007,12 @@ public partial class SkinEditorPage : UserControl
 
     private async void EditSkinIdentity_Click(object sender, RoutedEventArgs e)
     {
-        if (catalog is null || currentSkin is null || !await ResolveDirtyStateAsync()) return;
+        if (catalog is null || currentSkin is null)
+            return;
+        var editingDuplicate = pendingDuplicate is { } duplicate
+                               && duplicate.WorkingSkinId == currentSkin.Id;
+        if (!editingDuplicate && !await ResolveDirtyStateAsync())
+            return;
         var owner = Window.GetWindow(this);
         var name = KumoriDialog.Input(
             owner,
@@ -3642,6 +4032,35 @@ public partial class SkinEditorPage : UserControl
             : iniDocument ?? SkinIniDocument.Create(name, creator);
         document.SetValue("General", "Name", name);
         document.SetValue("General", "Author", creator);
+        if (editingDuplicate && pendingDuplicate is { } pending && draft is not null)
+        {
+            iniDocument = document;
+            rawDirty = false;
+            iniDirty = false;
+            draft.Stage(
+                "skin.ini",
+                iniFile?.Hash,
+                document.ToBytes(),
+                "skin.ini (duplicate identity)");
+            currentSkin = currentSkin with { Name = name, Creator = creator };
+            pendingDuplicate = pending with { Name = name, Creator = creator };
+            allSkins = allSkins
+                .Select(skin => skin.Id == currentSkin.Id ? currentSkin : skin)
+                .OrderBy(skin => skin.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            CompactSkinPicker.ItemsSource = allSkins;
+            SetSkinPickerSelection(currentSkin);
+            ActiveSkinLabel.Text = "DUPLICATE DRAFT";
+            GameplaySkinName.Text = currentSkin.DisplayName;
+            InspectorSubtitleText.Text = currentSkin.DisplayName;
+            SetRawText(document.ToText());
+            BuildIniForm();
+            StatusText.Text =
+                $"Updated the staged duplicate identity to {currentSkin.DisplayName}.";
+            UpdateDirtyState();
+            return;
+        }
+
         SetBusy(true, "Saving skin identity…");
         try
         {
@@ -4232,6 +4651,50 @@ public partial class SkinEditorPage : UserControl
             _ = ImportPathsAsync(dialog.FileNames);
     }
 
+    private async void ReplaceFile_Click(object sender, RoutedEventArgs e)
+    {
+        var entry = contextMenuEntry
+                    ?? ElementList.SelectedItem as SkinElementEntry
+                    ?? selectedEntry;
+        contextMenuEntry = null;
+        if (entry is null || draft is null)
+        {
+            StatusText.Text = "Select an element to replace.";
+            return;
+        }
+
+        var target = entry.File;
+        var extension = Path.GetExtension(target.Filename);
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Replace {target.Filename}",
+            Multiselect = false,
+            Filter = string.IsNullOrWhiteSpace(extension)
+                ? "All files|*.*"
+                : $"{extension.TrimStart('.').ToUpperInvariant()} files|*{extension}",
+        };
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true)
+            return;
+
+        try
+        {
+            if (settings.Current.SkinEditor.AutoBackupElements
+                && !await BackupElementFilesAsync([target]))
+                return;
+
+            var sourceBytes = await File.ReadAllBytesAsync(dialog.FileName);
+            var change = SkinFileReplacementPlanner.Build(target, dialog.FileName, sourceBytes);
+            draft.StageRange([change]);
+            StatusText.Text =
+                $"Added replacement for {target.Filename} to Changes. Save to osu!lazer when ready.";
+            UpdateDirtyState();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Could not replace {target.Filename}: {ex.Message}";
+        }
+    }
+
     private static void EnsureExtrasDirectories()
     {
         Directory.CreateDirectory(AppPaths.SkinExtrasDir);
@@ -4614,6 +5077,24 @@ public partial class SkinEditorPage : UserControl
                     change.Filename.Equals(filename, StringComparison.OrdinalIgnoreCase));
                 if (staged is not null)
                     return staged.IsDeletion ? null : staged.Bytes.ToArray();
+                var logicalEntry = categories
+                    .SelectMany(category => category.Files)
+                    .FirstOrDefault(entry => entry.PhysicalEntries.Any(physical =>
+                        physical.Filename.Equals(
+                            filename,
+                            StringComparison.OrdinalIgnoreCase)));
+                if (logicalEntry?.HasEdits == true)
+                {
+                    logicalEntry.SynchronizeEditsToVariants();
+                    var physical = logicalEntry.PhysicalEntries.First(entry =>
+                        entry.Filename.Equals(
+                            filename,
+                            StringComparison.OrdinalIgnoreCase));
+                    await EnsureEntryLoadedAsync(physical);
+                    return SkinImageTools.Encode(
+                        SkinImageTools.Render(physical),
+                        physical.Filename);
+                }
                 var current = currentSkin.Files.FirstOrDefault(file =>
                     file.Filename.Equals(filename, StringComparison.OrdinalIgnoreCase));
                 if (current is null)
@@ -4826,11 +5307,15 @@ public partial class SkinEditorPage : UserControl
             return;
         if (ItemsControl.ContainerFromElement(ElementList, source) is not ListBoxItem { DataContext: SkinElementEntry entry })
             return;
+        contextMenuEntry = entry;
         if (ElementList.SelectedItems.Contains(entry))
             return;
         ElementList.SelectedItems.Clear();
         ElementList.SelectedItem = entry;
     }
+
+    private void ElementContextMenu_Closed(object sender, RoutedEventArgs e) =>
+        contextMenuEntry = null;
 
     private void ElementList_KeyDown(object sender, KeyEventArgs e)
     {
@@ -4862,8 +5347,10 @@ public partial class SkinEditorPage : UserControl
 
     private void WorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ReferenceEquals(e.Source, WorkspaceTabs) && WorkspaceTabs.SelectedIndex == 1)
-            UpdateComboStrip();
+        if (!ReferenceEquals(e.Source, WorkspaceTabs) || WorkspaceTabs.SelectedIndex != 1)
+            return;
+
+        UpdateComboStrip();
     }
 
     private void CompactActions_Click(object sender, RoutedEventArgs e)
@@ -4889,6 +5376,12 @@ public partial class SkinEditorPage : UserControl
         string Label,
         string ExtrasHint,
         bool IsReady);
+
+    private sealed record PendingSkinDuplicate(
+        Guid WorkingSkinId,
+        Guid SourceSkinId,
+        string Name,
+        string Creator);
 
     private sealed record IniRow(
         SkinIniKeyDefinition Definition,

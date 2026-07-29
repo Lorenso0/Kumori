@@ -50,6 +50,8 @@ public static class AppPaths
 
     public static string SkinEditorBackupsDir => Path.Combine(SkinEditorDataDir, "backup");
 
+    public static string SkinEditorExportsDir => Path.Combine(SkinEditorDataDir, "exports");
+
     public static string SkinExtrasContainerDir => Path.Combine(SkinEditorDataDir, "Extras");
 
     public static string SkinExtrasDir => Path.Combine(SkinExtrasContainerDir, "osu");
