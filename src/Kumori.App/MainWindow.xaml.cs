@@ -11,9 +11,11 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using Kumori.App.ViewModels;
 using Kumori.App.Skins;
+using Kumori.App.FarmFinder;
 using Kumori.Core.Settings;
 using Kumori.Native;
 using Kumori.Storage;
+using Serilog;
 
 namespace Kumori.App;
 
@@ -38,6 +40,8 @@ public partial class MainWindow : Window
     private WelcomeWindow? _onboardingWindow;
     private SkinLibraryWindow? _onboardingToolWindow;
     private SkinEditorPage? _skinEditorPage;
+    private FarmFinderPage? _farmFinderPage;
+    private readonly Func<FarmFinderPage>? _farmFinderPageFactory;
     private IInputElement? _focusBeforeOnboarding;
     private long? _expandedTechnicalDetailsAttemptId;
 
@@ -49,7 +53,7 @@ public partial class MainWindow : Window
         SettingsService settings,
         ImportsViewModel? importsViewModel = null,
         PlaySharePackageService? playShare = null)
-        : this(viewModel, settings, importsViewModel, playShare, gameplayWork: null)
+        : this(viewModel, settings, importsViewModel, playShare, gameplayWork: null, farmFinderPageFactory: null)
     {
     }
 
@@ -58,12 +62,14 @@ public partial class MainWindow : Window
         SettingsService settings,
         ImportsViewModel? importsViewModel,
         PlaySharePackageService? playShare,
-        GameplayWorkCoordinator? gameplayWork)
+        GameplayWorkCoordinator? gameplayWork,
+        Func<FarmFinderPage>? farmFinderPageFactory = null)
     {
         _settings = settings;
         _mainViewModel = viewModel;
         _importsViewModel = importsViewModel;
         _playShare = playShare;
+        _farmFinderPageFactory = farmFinderPageFactory;
         _lazerSkinReload = new LazerSkinReloadService(this);
         DataContext = viewModel;
         viewModel.WorkspaceWindowRequested += OpenWorkspaceTab;
@@ -86,7 +92,11 @@ public partial class MainWindow : Window
                 Hide();
             }
         };
-        Closed += (_, _) => (_lazerSkinReload as IDisposable)?.Dispose();
+        Closed += (_, _) =>
+        {
+            (_farmFinderPage?.DataContext as IDisposable)?.Dispose();
+            (_lazerSkinReload as IDisposable)?.Dispose();
+        };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -430,6 +440,77 @@ public partial class MainWindow : Window
         }
         await _skinEditorPage.EnsureLoadedAsync();
     }
+    private void FarmFinderNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        ShowPage("FarmFinder");
+        EnsureFarmFinderPage();
+    }
+
+    private void EnsureFarmFinderPage()
+    {
+        if (_farmFinderPage is not null || _farmFinderPageFactory is null)
+            return;
+
+        try
+        {
+            _farmFinderPage = _farmFinderPageFactory();
+            FarmFinderHost.Content = _farmFinderPage;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Farm Finder page initialization failed");
+            FarmFinderHost.Content = CreateFarmFinderLoadError();
+        }
+    }
+
+    private FrameworkElement CreateFarmFinderLoadError()
+    {
+        var title = new TextBlock
+        {
+            Text = "Farm Finder could not open",
+            FontSize = 20,
+            FontWeight = FontWeights.SemiBold,
+        };
+        title.SetResourceReference(TextBlock.ForegroundProperty, "Brush.TextPrimary");
+
+        var explanation = new TextBlock
+        {
+            Text = "Kumori kept running and recorded the error. Try opening the page again; if it still fails, include the latest Kumori log in a bug report.",
+            Margin = new Thickness(0, 7, 0, 14),
+            MaxWidth = 560,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        explanation.SetResourceReference(TextBlock.ForegroundProperty, "Brush.TextSecondary");
+
+        var retry = new Button
+        {
+            Content = "Try again",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(14, 6, 14, 6),
+        };
+        retry.SetResourceReference(StyleProperty, "Button.Chrome");
+        retry.Click += (_, _) => EnsureFarmFinderPage();
+
+        var content = new StackPanel();
+        content.Children.Add(title);
+        content.Children.Add(explanation);
+        content.Children.Add(retry);
+
+        var panel = new Border
+        {
+            Margin = new Thickness(20, 16, 20, 16),
+            Padding = new Thickness(24),
+            CornerRadius = new CornerRadius(8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = content,
+        };
+        panel.SetResourceReference(Border.BackgroundProperty, "Brush.PanelBackground");
+        panel.SetResourceReference(Border.BorderBrushProperty, "Brush.BorderSubtle");
+        panel.BorderThickness = new Thickness(1);
+        return panel;
+    }
+
     private void ChangelogNavigation_Click(object sender, RoutedEventArgs e) =>
         OpenWorkspaceTab(new ChangelogWindow(), "Changelog");
     private void DiscordNavigation_Click(object sender, RoutedEventArgs e)
@@ -470,6 +551,7 @@ public partial class MainWindow : Window
         PerformancePage.Visibility = page == "Performance" ? Visibility.Visible : Visibility.Collapsed;
         MapsPage.Visibility = page == "Maps" ? Visibility.Visible : Visibility.Collapsed;
         SkinEditorPage.Visibility = page == "SkinEditor" ? Visibility.Visible : Visibility.Collapsed;
+        FarmFinderPage.Visibility = page == "FarmFinder" ? Visibility.Visible : Visibility.Collapsed;
         WorkspacePage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;
         ApplyResponsiveLayout();
     }

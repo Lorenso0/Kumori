@@ -11,6 +11,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Kumori.FarmFinder\Kumori.FarmFinder.csproj" />
     <ProjectReference Include="..\..\src\Kumori.Storage\Kumori.Storage.csproj" />
     <ProjectReference Include="..\..\src\Kumori.Tracking\Kumori.Tracking.csproj" />
   </ItemGroup>

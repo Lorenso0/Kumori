@@ -146,6 +146,8 @@ public sealed class SettingsService
         settings.Appearance ??= new KumoriSettings.AppearanceSettings();
         settings.Backup ??= new KumoriSettings.BackupSettings();
         settings.Developer ??= new KumoriSettings.DeveloperSettings();
+        settings.FarmFinder ??= new KumoriSettings.FarmFinderSettings();
+        settings.FarmFinder.ModRequirements ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         settings.Appearance.CustomTheme ??= new CustomThemeSettings();
         settings.Appearance.CustomTheme.Colors ??= CustomThemePalette.CreateDefaultColors();
         settings.Media.FallbackMirrors ??= [];

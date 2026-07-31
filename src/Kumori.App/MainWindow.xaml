@@ -701,6 +701,7 @@
                                          MapsRequested="MapsNavigation_Click"
                                          ImportsRequested="ImportsNavigation_Click"
                                          SkinEditorRequested="SkinEditorNavigation_Click"
+                                         FarmFinderRequested="FarmFinderNavigation_Click"
                                          ChangelogRequested="ChangelogNavigation_Click"
                                          DiscordRequested="DiscordNavigation_Click"
                                          SettingsRequested="SettingsNavigation_Click"
@@ -2826,6 +2827,16 @@
                             Background="{DynamicResource Brush.AppBackground}"
                             HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Stretch" />
+        </Grid>
+
+        <Grid x:Name="FarmFinderPage"
+              Grid.Row="1"
+              Grid.Column="1"
+              Background="{DynamicResource Brush.AppBackground}"
+              Visibility="Collapsed">
+            <ContentControl x:Name="FarmFinderHost"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch"/>
         </Grid>
 
         <Grid x:Name="OnboardingOverlay"

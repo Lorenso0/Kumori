@@ -9,24 +9,24 @@ $PinnedRelease = "2026.726.0-lazer"
 
 if (-not (Test-Path (Join-Path $Checkout ".git"))) {
     New-Item -ItemType Directory -Path $Checkout -Force | Out-Null
-    git -C $Checkout init
+    git -c "safe.directory=$Checkout" -C $Checkout init
     if ($LASTEXITCODE -ne 0) {
         throw "Could not initialise the osu! source checkout at $Checkout."
     }
-    git -C $Checkout remote add origin https://github.com/ppy/osu.git
+    git -c "safe.directory=$Checkout" -C $Checkout remote add origin https://github.com/ppy/osu.git
     if ($LASTEXITCODE -ne 0) {
         throw "Could not configure the osu! source remote at $Checkout."
     }
 }
 
-$headOutput = git -C $Checkout rev-parse --verify --quiet 'HEAD^{commit}' 2>$null
+$headOutput = git -c "safe.directory=$Checkout" -C $Checkout rev-parse --verify --quiet 'HEAD^{commit}' 2>$null
 $head = if ($LASTEXITCODE -eq 0 -and $null -ne $headOutput) {
     ([string]$headOutput).Trim()
 } else {
     ""
 }
 if (-not [string]::Equals($head, $PinnedCommit, [StringComparison]::OrdinalIgnoreCase)) {
-    $changes = @(git -C $Checkout status --porcelain --untracked-files=no)
+    $changes = @(git -c "safe.directory=$Checkout" -C $Checkout status --porcelain --untracked-files=no)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect the osu! source checkout at $Checkout."
     }
@@ -34,15 +34,15 @@ if (-not [string]::Equals($head, $PinnedCommit, [StringComparison]::OrdinalIgnor
         throw "The osu! source checkout has tracked changes. Preserve or discard them before switching to $PinnedRelease."
     }
 
-    git -C $Checkout fetch --depth 1 origin "refs/tags/$PinnedRelease"
+    git -c "safe.directory=$Checkout" -C $Checkout fetch --depth 1 origin "refs/tags/$PinnedRelease"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not fetch osu! $PinnedRelease ($PinnedCommit)."
     }
-    git -C $Checkout checkout --detach FETCH_HEAD
+    git -c "safe.directory=$Checkout" -C $Checkout checkout --detach FETCH_HEAD
     if ($LASTEXITCODE -ne 0) {
         throw "Could not check out osu! $PinnedRelease ($PinnedCommit)."
     }
-    $head = ([string](git -C $Checkout rev-parse HEAD)).Trim()
+    $head = ([string](git -c "safe.directory=$Checkout" -C $Checkout rev-parse HEAD)).Trim()
 }
 
 if (-not [string]::Equals($head, $PinnedCommit, [StringComparison]::OrdinalIgnoreCase)) {

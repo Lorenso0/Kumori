@@ -92,6 +92,15 @@ public static class AppPaths
     /// <summary>Tracking database written by the Python tracker (and later by .NET).</summary>
     public static string TrackingDatabase => Path.Combine(TrackingDataDir, "osu_tracking.sqlite3");
 
+    public static string FarmFinderDataDir => Path.Combine(DataDir, "farm-finder");
+
+    public static string FarmFinderDatabase => Path.Combine(FarmFinderDataDir, "farm_finder.sqlite3");
+
+    public static string FarmFinderBeatmapFilesDir =>
+        Path.Combine(CacheDir, "farm-finder", "beatmaps");
+
+    public static string FarmFinderCredentialsFile => Path.Combine(ConfigDir, "farm-finder.credentials");
+
     public static string LogDir => Path.Combine(AppDataDir, "logs");
 
     public static string CacheActivityLog => Path.Combine(LogDir, "cache-additions.jsonl");

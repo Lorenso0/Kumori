@@ -1,0 +1,1238 @@
+<UserControl x:Class="Kumori.App.FarmFinder.FarmFinderPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Kumori.App.ViewModels"
+             xmlns:ff="clr-namespace:Kumori.FarmFinder;assembly=Kumori.FarmFinder"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
+    <UserControl.Resources>
+        <Style x:Key="FarmLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="1,0,0,5"/>
+        </Style>
+        <Style x:Key="FarmInput"
+               TargetType="TextBox"
+               BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="MinWidth" Value="82"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="8,3"/>
+            <Setter Property="FontSize" Value="11"/>
+        </Style>
+        <Style x:Key="FarmCompactInput"
+               TargetType="TextBox"
+               BasedOn="{StaticResource FarmInput}">
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="Width" Value="88"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="FarmFilterGroup" TargetType="Border">
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="Padding" Value="10,9"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="7"/>
+        </Style>
+        <Style x:Key="FarmGroupTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="FarmGroupHint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}"/>
+            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="Margin" Value="0,2,0,6"/>
+        </Style>
+        <Style x:Key="FarmFieldLabel"
+               TargetType="TextBlock"
+               BasedOn="{StaticResource FarmLabel}">
+            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}"/>
+            <Setter Property="Margin" Value="1,0,0,4"/>
+        </Style>
+        <Style x:Key="FarmSelect"
+               TargetType="ComboBox"
+               BasedOn="{StaticResource {x:Type ComboBox}}">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="FontSize" Value="11"/>
+        </Style>
+        <Style x:Key="FarmButton" TargetType="Button" BasedOn="{StaticResource Button.Chrome}">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="13,0"/>
+            <Setter Property="Margin" Value="0,0,7,0"/>
+        </Style>
+        <Style x:Key="FarmPrimaryButton" TargetType="Button" BasedOn="{StaticResource FarmButton}">
+            <Setter Property="Background" Value="{DynamicResource Brush.AccentPink}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.AppBackground}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="FarmAccentButton" TargetType="Button" BasedOn="{StaticResource FarmButton}">
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="FarmMoreButton" TargetType="Button" BasedOn="{StaticResource Button.Icon}">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+        </Style>
+        <Style x:Key="FarmEyebrow" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.AccentPink}"/>
+            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+        <Style x:Key="FarmPanel" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Brush.PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource Radius.ThemeCard}"/>
+            <Setter Property="Padding" Value="12"/>
+        </Style>
+        <Style x:Key="FarmSectionToggle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="2,4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter VerticalAlignment="Center"/>
+                                <Path x:Name="Chevron"
+                                      Grid.Column="1"
+                                      Width="9"
+                                      Height="5"
+                                      Margin="10,0,3,0"
+                                      Data="M 0 0 L 4.5 4 L 9 0"
+                                      Stroke="{DynamicResource Brush.TextSecondary}"
+                                      StrokeThickness="1.5"
+                                      Stretch="Fill"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource Brush.ControlHoverBackground}"/>
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter TargetName="Chevron" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <RotateTransform Angle="-90" CenterX="4.5" CenterY="2.5"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FarmModButton" TargetType="Button">
+            <Setter Property="Width" Value="54"/>
+            <Setter Property="Height" Value="68"/>
+            <Setter Property="Margin" Value="0,0,6,6"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.ControlBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="4,4,4,3">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="27"/>
+                                    <RowDefinition Height="16"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Grid Width="30" Height="24" HorizontalAlignment="Center">
+                                    <Polygon Points="2,10.5 7,1 20,1 25,10.5 20,20 7,20"
+                                             Stretch="Fill"
+                                             Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}"/>
+                                    <Rectangle x:Name="ModIcon"
+                                               Width="15"
+                                               Height="15"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Fill="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"
+                                               RenderOptions.BitmapScalingMode="HighQuality">
+                                        <Rectangle.OpacityMask>
+                                            <ImageBrush Stretch="Uniform"
+                                                        ImageSource="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}"/>
+                                        </Rectangle.OpacityMask>
+                                    </Rectangle>
+                                    <TextBlock x:Name="IconFallback"
+                                               Text="{Binding Acronym}"
+                                               Visibility="Collapsed"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               FontSize="8"
+                                               FontWeight="Bold"
+                                               Foreground="{Binding Acronym, Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"/>
+                                </Grid>
+                                <TextBlock Grid.Row="1"
+                                           Text="{Binding Acronym}"
+                                           HorizontalAlignment="Center"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           Foreground="{TemplateBinding Foreground}"/>
+                                <Border x:Name="StatePill"
+                                        Grid.Row="2"
+                                        MinWidth="44"
+                                        Height="16"
+                                        HorizontalAlignment="Center"
+                                        Background="{DynamicResource Brush.CardBackground}"
+                                        CornerRadius="8">
+                                    <TextBlock x:Name="StateText"
+                                               Text="{Binding RequirementLabel}"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               FontSize="8"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource Brush.TextMuted}"/>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <DataTrigger Binding="{Binding Acronym, Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}"
+                                         Value="{x:Null}">
+                                <Setter TargetName="ModIcon" Property="Visibility" Value="Collapsed"/>
+                                <Setter TargetName="IconFallback" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Requirement}" Value="{x:Static ff:ModRequirement.Required}">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}"/>
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+                                <Setter TargetName="StatePill" Property="Background" Value="{DynamicResource Brush.AccentPink}"/>
+                                <Setter TargetName="StateText" Property="Foreground" Value="{DynamicResource Brush.AppBackground}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Requirement}" Value="{x:Static ff:ModRequirement.Excluded}">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.Danger}"/>
+                                <Setter TargetName="StatePill" Property="Background" Value="{DynamicResource Brush.Danger}"/>
+                                <Setter TargetName="StateText" Property="Foreground" Value="{DynamicResource Brush.AppBackground}"/>
+                                <Setter TargetName="ModIcon" Property="Opacity" Value="0.55"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Requirement}" Value="{x:Static ff:ModRequirement.Wildcard}">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}"/>
+                                <Setter TargetName="StatePill" Property="Background" Value="{DynamicResource Brush.AccentPurple}"/>
+                                <Setter TargetName="StateText" Property="Foreground" Value="{DynamicResource Brush.AppBackground}"/>
+                            </DataTrigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource Brush.ControlHoverBackground}"/>
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.StrongBorder}"/>
+                                <Setter TargetName="Root" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FarmResultModBadge" TargetType="Border">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="25"/>
+            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.ControlBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style x:Key="FarmProgressBar" TargetType="ProgressBar">
+            <Setter Property="Height" Value="4"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.AccentPink}"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.ControlBackground}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid x:Name="PART_Track"
+                              Background="{TemplateBinding Background}"
+                              ClipToBounds="True">
+                            <Border x:Name="PART_Indicator"
+                                    HorizontalAlignment="Left"
+                                    Background="{TemplateBinding Foreground}"
+                                    CornerRadius="2"/>
+                            <Border x:Name="IndeterminateIndicator"
+                                    Width="96"
+                                    HorizontalAlignment="Left"
+                                    Background="{TemplateBinding Foreground}"
+                                    CornerRadius="2"
+                                    Visibility="Collapsed">
+                                <Border.RenderTransform>
+                                    <TranslateTransform X="-96"/>
+                                </Border.RenderTransform>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsIndeterminate" Value="True">
+                                <Setter TargetName="PART_Indicator"
+                                        Property="Visibility"
+                                        Value="Collapsed"/>
+                                <Setter TargetName="IndeterminateIndicator"
+                                        Property="Visibility"
+                                        Value="Visible"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetName="IndeterminateIndicator"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                             From="-96"
+                                                             To="420"
+                                                             Duration="0:0:0.9"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FarmSearchProgressBar"
+               TargetType="ProgressBar"
+               BasedOn="{StaticResource FarmProgressBar}">
+            <Setter Property="Minimum" Value="0"/>
+            <Setter Property="Maximum" Value="{Binding ProgressMaximum, Mode=OneWay}"/>
+            <Setter Property="Value" Value="{Binding ProgressValue, Mode=OneWay}"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Opacity" Value="1"/>
+            <Style.Triggers>
+                <Trigger Property="IsVisible" Value="True">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="0.65"
+                                                 To="1"
+                                                 Duration="0:0:0.65"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="FarmExpander" TargetType="Expander">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Content="{TemplateBinding Header}"
+                                          Style="{StaticResource FarmSectionToggle}"
+                                          FontWeight="SemiBold"/>
+                            <ContentPresenter x:Name="ExpandSite"
+                                              Grid.Row="1"
+                                              Visibility="Collapsed"
+                                              ContentSource="Content"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True">
+                                <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FarmPasswordBox" TargetType="PasswordBox">
+            <Setter Property="Background" Value="{DynamicResource Brush.ControlBackground}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="1">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FarmGridHeader" TargetType="DataGridColumnHeader">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="9,0"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.CardBackground}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="FarmGridRow" TargetType="DataGridRow">
+            <Setter Property="MinHeight" Value="56"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderSubtle}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Brush.CardHoverBackground}"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Brush.CardSelectedBackground}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="FarmGridCell" TargetType="DataGridCell">
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="18,14" UseLayoutRounding="True">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Grid Margin="2,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="LOCAL SCORE INTELLIGENCE"
+                           Style="{StaticResource FarmEyebrow}"
+                           Margin="1,0,0,3"/>
+                <TextBlock Text="Farm Finder" FontSize="24" FontWeight="SemiBold"
+                           Foreground="{DynamicResource Brush.TextPrimary}"/>
+                <TextBlock Text="Find high-value maps across your local Hinamizawa score index."
+                           FontSize="11"
+                           Foreground="{DynamicResource Brush.TextSecondary}"
+                           Margin="1,2,0,0"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="Fetch cache"
+                        Command="{Binding FetchCacheCommand}"
+                        ToolTip="Download and verify the hosted pre-built Farm Finder cache"
+                        Style="{StaticResource FarmAccentButton}"/>
+                <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource FarmButton}"/>
+                <Button x:Name="MoreButton"
+                        Content="&#x2026;"
+                        Click="MoreButton_Click"
+                        ToolTip="More Farm Finder actions"
+                        Style="{StaticResource FarmMoreButton}"
+                        Margin="0">
+                    <Button.ContextMenu>
+                        <ContextMenu x:Name="MoreMenu"
+                                     DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <MenuItem Header="Build full index"
+                                      Command="{Binding BuildFullIndexCommand}"
+                                      ToolTip="Build or resume the complete local index for the selected rank range"/>
+                            <Separator/>
+                            <MenuItem Header="osu! API setup"
+                                      Click="ApiSetupMenuItem_Click"
+                                      ToolTip="Configure osu! client credentials"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+            </StackPanel>
+            <Popup x:Name="ApiSetupPopup"
+                   PlacementTarget="{Binding ElementName=MoreButton}"
+                   Placement="Bottom"
+                   StaysOpen="False"
+                   AllowsTransparency="True"
+                   PopupAnimation="Fade">
+                <Border Width="360"
+                        Margin="0,6,0,0"
+                        Padding="14"
+                        Style="{StaticResource FarmPanel}"
+                        DataContext="{Binding DataContext, ElementName=MoreButton}">
+                    <StackPanel>
+                        <TextBlock Text="Client-credentials OAuth" FontWeight="SemiBold"/>
+                        <TextBlock Text="The secret is encrypted for your Windows account. It is never shown again."
+                                   FontSize="10"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,2,0,7"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding ClientIdText, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource FarmInput}"
+                                     ToolTip="Client ID"/>
+                            <PasswordBox x:Name="SecretBox"
+                                         Grid.Column="1"
+                                         PasswordChanged="SecretBox_PasswordChanged"
+                                         Style="{StaticResource FarmPasswordBox}"
+                                         Margin="7,0,0,0"
+                                         ToolTip="Client secret"/>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                            <Button Content="Save" Command="{Binding SaveCredentialsCommand}" Style="{StaticResource FarmButton}"/>
+                            <Button Content="Test" Command="{Binding TestConnectionCommand}" Style="{StaticResource FarmButton}"/>
+                            <Button Content="Remove" Command="{Binding RemoveCredentialsCommand}" Style="{StaticResource FarmButton}" Margin="0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Popup>
+        </Grid>
+
+        <Grid x:Name="FarmWorkspace"
+              Grid.Row="1"
+              MinHeight="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="302"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="FilterPanel"
+                    Grid.Column="0"
+                    Style="{StaticResource FarmPanel}"
+                    Padding="10"
+                    ClipToBounds="True">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                <ToggleButton IsChecked="{Binding IsFilterPanelExpanded}"
+                              Style="{StaticResource FarmSectionToggle}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Filters"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock Text="Filter by player rank, PP, and map stats"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                       Margin="0,2,0,0"/>
+                        </StackPanel>
+                        <Border Grid.Column="1"
+                                Margin="8,0,0,0"
+                                Padding="7,2"
+                                Background="{DynamicResource Brush.CardSelectedBackground}"
+                                CornerRadius="9"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                ToolTip="Ranked maps using osu! classic scoring">
+                            <TextBlock Text="RANKED"
+                                       FontSize="8"
+                                       FontWeight="Bold"
+                                       Foreground="{DynamicResource Brush.AccentPink}"/>
+                        </Border>
+                    </Grid>
+                </ToggleButton>
+                <ScrollViewer Grid.Row="1"
+                              Margin="0,8,0,0"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              CanContentScroll="False">
+                <Grid>
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsFilterPanelExpanded}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Margin="0,0,0,2">
+                        <Border Style="{StaticResource FarmFilterGroup}">
+                            <StackPanel>
+                                <TextBlock Text="PLAYER RANK" Style="{StaticResource FarmGroupTitle}"/>
+                                <TextBlock Text="Rank range used for the local index" Style="{StaticResource FarmGroupHint}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="FROM" Style="{StaticResource FarmFieldLabel}"/>
+                                        <TextBox Text="{Binding MinimumRankText, UpdateSourceTrigger=PropertyChanged}"
+                                                  Tag="Optional"
+                                                 Style="{StaticResource FarmInput}"
+                                                 MinWidth="0"
+                                                 HorizontalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               Text="—"
+                                               Margin="0,17,0,0"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.TextMuted}"/>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="TO" Style="{StaticResource FarmFieldLabel}"/>
+                                        <TextBox Text="{Binding MaximumRankText, UpdateSourceTrigger=PropertyChanged}"
+                                                  Tag="Optional"
+                                                 Style="{StaticResource FarmInput}"
+                                                 MinWidth="0"
+                                                 HorizontalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource FarmFilterGroup}">
+                            <StackPanel>
+                                <TextBlock Text="PP VALUE" Style="{StaticResource FarmGroupTitle}"/>
+                                <TextBlock Text="Leave empty to include any PP value" Style="{StaticResource FarmGroupHint}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="MIN PP" Style="{StaticResource FarmFieldLabel}"/>
+                                        <TextBox Text="{Binding MinimumPpText, UpdateSourceTrigger=PropertyChanged}"
+                                                  Tag="Optional"
+                                                 Style="{StaticResource FarmInput}"
+                                                 MinWidth="0"
+                                                 HorizontalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               Text="—"
+                                               Margin="0,17,0,0"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.TextMuted}"/>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="MAX PP" Style="{StaticResource FarmFieldLabel}"/>
+                                        <TextBox Text="{Binding MaximumPpText, UpdateSourceTrigger=PropertyChanged}"
+                                                  Tag="Optional"
+                                                 Style="{StaticResource FarmInput}"
+                                                 MinWidth="0"
+                                                 HorizontalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource FarmFilterGroup}"
+                                Padding="10,9,10,11">
+                            <StackPanel>
+                                <TextBlock Text="MAP STATS" Style="{StaticResource FarmGroupTitle}"/>
+                                <TextBlock Text="Exact mod-adjusted values when the beatmap is available" Style="{StaticResource FarmGroupHint}"/>
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="54"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.ColumnSpan="2"
+                                                Orientation="Horizontal">
+                                        <TextBlock Text="BPM"
+                                                   Style="{StaticResource FarmFieldLabel}"
+                                                   Width="54"
+                                                   Margin="1,0,0,0"
+                                                   VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBox Text="{Binding MinimumBpmText, UpdateSourceTrigger=PropertyChanged}"
+                                                      Tag="Any"
+                                                     ToolTip="Minimum effective BPM"
+                                                     Style="{StaticResource FarmCompactInput}"/>
+                                            <TextBlock Text="–" Margin="4,0" VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMuted}"/>
+                                            <TextBox Text="{Binding MaximumBpmText, UpdateSourceTrigger=PropertyChanged}"
+                                                      Tag="Any"
+                                                     ToolTip="Maximum effective BPM"
+                                                     Style="{StaticResource FarmCompactInput}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1"
+                                                Grid.ColumnSpan="2"
+                                                Margin="0,7,0,0"
+                                                Orientation="Horizontal">
+                                        <TextBlock Text="LENGTH"
+                                                   Style="{StaticResource FarmFieldLabel}"
+                                                   Width="54"
+                                                   Margin="1,0,0,0"
+                                                   VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBox Text="{Binding MinimumLengthText, UpdateSourceTrigger=PropertyChanged}"
+                                                      Tag="Any"
+                                                     ToolTip="Minimum seconds or m:ss"
+                                                     Style="{StaticResource FarmCompactInput}"/>
+                                            <TextBlock Text="–" Margin="4,0" VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMuted}"/>
+                                            <TextBox Text="{Binding MaximumLengthText, UpdateSourceTrigger=PropertyChanged}"
+                                                      Tag="Any"
+                                                     ToolTip="Maximum seconds or m:ss"
+                                                     Style="{StaticResource FarmCompactInput}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="2"
+                                                Grid.ColumnSpan="2"
+                                                Margin="0,7,0,2"
+                                                Orientation="Horizontal">
+                                        <TextBlock Text="STARS"
+                                                   Style="{StaticResource FarmFieldLabel}"
+                                                   Width="54"
+                                                   Margin="1,0,0,0"
+                                                   VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBox Text="{Binding MinimumStarsText, UpdateSourceTrigger=PropertyChanged}"
+                                                      Tag="Any"
+                                                     ToolTip="Minimum effective star rating"
+                                                     Style="{StaticResource FarmCompactInput}"/>
+                                            <TextBlock Text="–" Margin="4,0" VerticalAlignment="Center" Foreground="{DynamicResource Brush.TextMuted}"/>
+                                            <TextBox Text="{Binding MaximumStarsText, UpdateSourceTrigger=PropertyChanged}"
+                                                      Tag="Any"
+                                                     ToolTip="Maximum effective star rating"
+                                                     Style="{StaticResource FarmCompactInput}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource FarmFilterGroup}"
+                                Visibility="{Binding HasRankedDateFilter, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
+                            <StackPanel>
+                                <TextBlock Text="RANKED DATE" Style="{StaticResource FarmGroupTitle}"/>
+                                <TextBlock Text="Optional date range" Style="{StaticResource FarmGroupHint}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="FROM" Style="{StaticResource FarmFieldLabel}"/>
+                                        <TextBox Text="{Binding RankedFromText, UpdateSourceTrigger=PropertyChanged}"
+                                                  Tag="Optional"
+                                                 ToolTip="Local date"
+                                                 MinWidth="0"
+                                                 Style="{StaticResource FarmInput}"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               Text="—"
+                                               Margin="0,17,0,0"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.TextMuted}"/>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="TO" Style="{StaticResource FarmFieldLabel}"/>
+                                        <TextBox Text="{Binding RankedToText, UpdateSourceTrigger=PropertyChanged}"
+                                                  Tag="Optional"
+                                                 ToolTip="Local date"
+                                                 MinWidth="0"
+                                                 Style="{StaticResource FarmInput}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" Margin="0,2,0,5">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,1">
+                                <TextBlock Text="PRIMARY MODS"
+                                           Style="{StaticResource FarmLabel}"
+                                           Foreground="{DynamicResource Brush.TextMuted}"/>
+                                <TextBlock Text="Click to cycle states"
+                                           Margin="8,0,0,0"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource Brush.TextMuted}"/>
+                            </StackPanel>
+                            <ItemsControl ItemsSource="{Binding Mods}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:FarmModOptionViewModel}">
+                                        <Button Command="{Binding CycleRequirementCommand}"
+                                                Style="{StaticResource FarmModButton}"
+                                                ToolTip="{Binding AccessibleLabel}"
+                                                AutomationProperties.Name="{Binding AccessibleLabel}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Grid.Row="2"
+                               Text="{Binding ValidationMessage}"
+                               Foreground="{DynamicResource Brush.Warning}"
+                               TextWrapping="Wrap"
+                               Margin="0,2,0,0"/>
+                </Grid>
+                </ScrollViewer>
+                    <StackPanel Grid.Row="2"
+                                Margin="0,10,0,0">
+                        <Button Content="Search cached data"
+                                Command="{Binding SearchCommand}"
+                                Style="{StaticResource FarmPrimaryButton}"
+                                HorizontalAlignment="Stretch"
+                                Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1" Margin="10,0,0,0" MinWidth="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Border Style="{StaticResource FarmPanel}" Padding="12,8">
+                <StackPanel>
+                    <ToggleButton x:Name="IndexStatusToggle"
+                                  IsChecked="False"
+                                  Style="{StaticResource FarmSectionToggle}"
+                                  AutomationProperties.Name="Toggle Farm Finder index details">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding StatusText}"
+                                   Foreground="{DynamicResource Brush.TextPrimary}"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    Margin="12,0,0,0">
+                            <TextBlock Text="{Binding ProgressPercentage, StringFormat={}{0:0.#}%}"
+                                       Foreground="{DynamicResource Brush.AccentPink}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding EstimatedTimeRemainingText}"
+                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                       FontSize="10"
+                                       Margin="9,0,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                    </ToggleButton>
+                    <StackPanel Margin="0,3,0,0"
+                                Visibility="{Binding IsChecked, ElementName=IndexStatusToggle, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
+                    <TextBlock Text="{Binding CoverageText}"
+                               Foreground="{DynamicResource Brush.TextSecondary}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               Margin="0,4,0,0"/>
+                    <TextBlock Text="{Binding ProgressDetailsText}"
+                               Foreground="{DynamicResource Brush.TextSecondary}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,3,0,0"/>
+                    <TextBlock Text="{Binding ResumableJobText}"
+                               Foreground="{DynamicResource Brush.AccentPurple}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               Margin="0,3,0,0"
+                               Visibility="{Binding HasResumableJob, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"/>
+                    <TextBlock Text="{Binding RateLimitText}"
+                               Foreground="{DynamicResource Brush.Warning}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               Margin="0,3,0,0"
+                               Visibility="{Binding HasRateLimit, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"/>
+                    <ProgressBar Minimum="0"
+                                 Maximum="{Binding ProgressMaximum, Mode=OneWay}"
+                                  Value="{Binding ProgressValue, Mode=OneWay}"
+                                  Style="{StaticResource FarmProgressBar}"
+                                  Margin="0,6,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Border x:Name="ResultsPanel"
+                Grid.Row="1"
+                Style="{StaticResource FarmPanel}"
+                Padding="0"
+                ClipToBounds="True">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="42"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Border BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                        BorderThickness="0,0,0,1"
+                        Padding="14,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Results"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource Brush.TextPrimary}"/>
+                        </StackPanel>
+                        <TextBox x:Name="ResultsSearchBox"
+                                 Grid.Column="1"
+                                 Width="340"
+                                 Height="30"
+                                 Margin="18,0"
+                                 HorizontalAlignment="Right"
+                                 VerticalAlignment="Center"
+                                 Style="{StaticResource FarmInput}"
+                                 Tag="Search results…"
+                                 ToolTip="Filter the visible results by beatmap, artist, mapper, difficulty, or mods"
+                                 AutomationProperties.Name="Search Farm Finder results"
+                                 TextChanged="ResultsSearchBox_TextChanged"/>
+                        <TextBlock Grid.Column="2"
+                                   Margin="0,0,2,0"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource Brush.TextMuted}">
+                            <Run Text="Showing "/>
+                            <Run Text="{Binding Results.Count, Mode=OneWay, StringFormat={}{0:N0}}"/>
+                            <Run Text=" results"/>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+                <DataGrid x:Name="ResultsGrid"
+                          Grid.Row="1"
+                          ItemsSource="{Binding Results}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          ScrollViewer.CanContentScroll="True"
+                          RowDetailsVisibilityMode="Collapsed"
+                          PreviewMouseLeftButtonUp="ResultsGrid_PreviewMouseLeftButtonUp"
+                          Background="{DynamicResource Brush.PanelBackground}"
+                          Foreground="{DynamicResource Brush.TextPrimary}"
+                          BorderThickness="0"
+                          ColumnHeaderStyle="{StaticResource FarmGridHeader}"
+                          RowStyle="{StaticResource FarmGridRow}"
+                          CellStyle="{StaticResource FarmGridCell}"
+                          HorizontalGridLinesBrush="{DynamicResource Brush.BorderSubtle}"
+                          VerticalGridLinesBrush="Transparent">
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="Beatmap" Width="2.4*">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="60"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="54"
+                                                Height="38"
+                                                CornerRadius="5"
+                                                ClipToBounds="True"
+                                                Background="{DynamicResource Brush.CardBackground}">
+                                            <Image Source="{Binding Beatmap, Mode=OneWay, Converter={x:Static vm:FarmBeatmapArtworkConverter.Instance}}"
+                                                   Stretch="UniformToFill"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1"
+                                                    Margin="8,0,4,0"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Beatmap.Title, Mode=OneWay}"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock FontSize="10"
+                                                       Foreground="{DynamicResource Brush.TextSecondary}"
+                                                       TextTrimming="CharacterEllipsis">
+                                                <Run Text="mapped by "/>
+                                                <Run Text="{Binding Beatmap.Mapper, Mode=OneWay}"/>
+                                                <Run Text="  ·  "/>
+                                                <Run Text="{Binding Beatmap.Artist, Mode=OneWay}"/>
+                                                <Run Text="  ·  ["/>
+                                                <Run Text="{Binding Beatmap.Difficulty, Mode=OneWay}"/>
+                                                <Run Text="]"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Mods" Width="110">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <ItemsControl ItemsSource="{Binding ModAcronyms, Mode=OneWay}"
+                                                  VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource FarmResultModBadge}" ToolTip="{Binding}">
+                                                    <Grid Margin="3">
+                                                        <Polygon Points="2,10.5 7,1 20,1 25,10.5 20,20 7,20"
+                                                                 Stretch="Fill"
+                                                                 Fill="{Binding Converter={x:Static vm:ModAcronymToBrushConverter.Instance}}"/>
+                                                        <Rectangle x:Name="ResultModIcon"
+                                                                   Width="14"
+                                                                   Height="14"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   Fill="{Binding Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}">
+                                                            <Rectangle.OpacityMask>
+                                                                <ImageBrush Stretch="Uniform"
+                                                                            ImageSource="{Binding Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}"/>
+                                                            </Rectangle.OpacityMask>
+                                                        </Rectangle>
+                                                        <TextBlock x:Name="ResultModFallback"
+                                                                   Text="{Binding}"
+                                                                   Visibility="Collapsed"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   FontSize="8"
+                                                                   FontWeight="Bold"
+                                                                   Foreground="{Binding Converter={x:Static vm:ModAcronymToForegroundBrushConverter.Instance}}"/>
+                                                    </Grid>
+                                                </Border>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding Converter={x:Static vm:ModAcronymToIconSourceConverter.Instance}}"
+                                                                 Value="{x:Null}">
+                                                        <Setter TargetName="ResultModIcon" Property="Visibility" Value="Collapsed"/>
+                                                        <Setter TargetName="ResultModFallback" Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Players ↓" Width="125">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding UniquePlayers, Mode=OneWay, StringFormat={}{0:N0}}"
+                                                   FontWeight="SemiBold"/>
+                                        <TextBlock FontSize="10"
+                                                   Foreground="{DynamicResource Brush.TextMuted}">
+                                            <Run Text="{Binding CohortPercentage, Mode=OneWay, StringFormat={}{0:0.##}%}"/>
+                                            <Run Text=" of rank range"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="PP profile" Width="145">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold">
+                                            <Run Text="{Binding AveragePp, Mode=OneWay, StringFormat={}{0:0.##}}"/>
+                                            <Run Text="pp average"/>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding PpRangeText, Mode=OneWay}"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource Brush.TextMuted}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Map stats" Width="176">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding EffectiveStarRatingText, Mode=OneWay}"
+                                                   FontWeight="SemiBold"/>
+                                        <TextBlock FontSize="10"
+                                                   Foreground="{DynamicResource Brush.TextMuted}">
+                                            <Run Text="{Binding EffectiveBpmText, Mode=OneWay}"/>
+                                            <Run Text="  ·  "/>
+                                            <Run Text="{Binding EffectiveLengthText, Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Score quality" Width="128">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold">
+                                            <Run Text="{Binding MedianAccuracy, Mode=OneWay, StringFormat={}{0:P2}}"/>
+                                            <Run Text=" acc."/>
+                                        </TextBlock>
+                                        <TextBlock FontSize="10"
+                                                   Foreground="{DynamicResource Brush.TextMuted}">
+                                            <Run Text="{Binding FullComboPercentage, Mode=OneWay, StringFormat={}{0:0.#}%}"/>
+                                            <Run Text=" full combo"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                    <DataGrid.RowDetailsTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.BorderSubtle}" BorderThickness="0,1,0,1" Padding="12" Margin="0,2">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold">
+                                                <Run Text="{Binding Beatmap.Artist, Mode=OneWay}"/><Run Text=" — "/><Run Text="{Binding Beatmap.Title, Mode=OneWay}"/><Run Text=" ["/><Run Text="{Binding Beatmap.Difficulty, Mode=OneWay}"/><Run Text="]"/>
+                                            </TextBlock>
+                                            <TextBlock Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11">
+                                                <Run Text="{Binding EffectiveBpmText, Mode=OneWay}"/><Run Text=" · Hit length "/><Run Text="{Binding EffectiveLengthText, Mode=OneWay}"/>
+                                                <Run Text=" · "/><Run Text="{Binding BaseBpmText, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding BaseLengthText, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <Button Content="Open beatmap" Command="{Binding DataContext.OpenBeatmapCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource FarmButton}"/>
+                                            <Button Content="Copy URL" Command="{Binding DataContext.CopyBeatmapUrlCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource FarmButton}" Margin="0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <ItemsControl Grid.Row="1" ItemsSource="{Binding Players, Mode=OneWay}" Margin="0,9,0,0" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type ff:FarmScoreDetail}">
+                                                <Grid Margin="0,2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="150"/><ColumnDefinition Width="80"/><ColumnDefinition Width="85"/>
+                                                        <ColumnDefinition Width="70"/><ColumnDefinition Width="70"/><ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Username, Mode=OneWay}" FontWeight="SemiBold"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding GlobalRank, Mode=OneWay, StringFormat=#{0:N0}}"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding Pp, Mode=OneWay, StringFormat={}{0:0.##}pp}"/>
+                                                    <TextBlock Grid.Column="3" Text="{Binding Accuracy, Mode=OneWay, StringFormat={}{0:P2}}"/>
+                                                    <TextBlock Grid.Column="4" Text="{Binding ModsText, Mode=OneWay}"/>
+                                                    <ItemsControl Grid.Column="5" ItemsSource="{Binding ActualMods, Mode=OneWay}">
+                                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <TextBlock FontSize="10" Foreground="{DynamicResource Brush.TextSecondary}" Margin="0,0,8,0" Text="{Binding SettingsJson, Mode=OneWay}" TextTrimming="CharacterEllipsis" MaxWidth="180"/>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                    <StackPanel Grid.Column="6" Orientation="Horizontal">
+                                                        <Button Content="Player" Command="{Binding DataContext.OpenPlayerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource FarmButton}" Height="24" Padding="7,0"/>
+                                                        <Button Content="Beatmap" Command="{Binding DataContext.OpenScoreCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource FarmButton}" Height="24" Padding="7,0" Margin="0"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </DataGrid.RowDetailsTemplate>
+                </DataGrid>
+                <Border Grid.Row="1"
+                        Panel.ZIndex="10"
+                        Background="{DynamicResource Brush.PanelBackground}"
+                        Visibility="{Binding IsResultsOperationActive, Converter={x:Static vm:BoolToVisibleConverter.Instance}}">
+                    <StackPanel Width="420"
+                                MaxWidth="520"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="{Binding StatusText, Mode=OneWay}"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Brush.TextPrimary}"/>
+                        <TextBlock Text="{Binding ProgressDetailsText, Mode=OneWay}"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"/>
+                        <ProgressBar Style="{StaticResource FarmSearchProgressBar}"
+                                     IsIndeterminate="{Binding IsProgressIndeterminate, Mode=OneWay}"
+                                     Margin="0,12,0,0"/>
+                    </StackPanel>
+                </Border>
+                <StackPanel Grid.Row="1"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasResults}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <TextBlock Text="No cached results to show" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Search the local cache, or configure the osu! API and update a rank range." Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,5,0,0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

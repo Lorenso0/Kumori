@@ -35,6 +35,9 @@ capture_tests/bin/
 capture_tests/obj/
 third_party/osu/
 push-to-github.bat
+# Local Farm Finder publishing launchers and deployment configuration.
+/publish-farm-finder-cache.bat
+/scripts/publish-farm-finder-cache.ps1
 /UPDATE.md
 /SKINS.md
 /.tmp/

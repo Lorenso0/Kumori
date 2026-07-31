@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.7.0",
+    "date": "2026-07-31",
+    "major": [
+      "Added Farm Finder, a fast local search for discovering ranked osu! maps from real top-player scores"
+    ],
+    "features": [
+      "Added player-rank, PP, BPM, length, stars, status, mapper, player-count, and mod filtering with difficulty-adjusted star ratings",
+      "Added downloadable pre-built Farm Finder caches with compatibility checks, update protection, live speed and progress, and safe rollback",
+      "Added sortable map-group results with mod icons, average PP, coverage statistics, and direct beatmap links"
+    ],
+    "improvements": [
+      "Made cached searches responsive and showed each download, verification, installation, and result-loading stage in the results area",
+      "Streamlined the Farm Finder layout and result table for clearer filters and denser, easier-to-scan results"
+    ],
+    "fixes": [
+      "Prevented result selection from crashing the app and fixed clipped filter labels, values, and mod controls"
+    ]
+  },
+  {
     "version": "0.6.2",
     "date": "2026-07-29",
     "improvements": [

@@ -40,6 +40,32 @@ internal static class BeatmapArtworkResolver
             : null;
     }
 
+    public static string? Resolve(
+        long beatmapId,
+        long beatmapSetId,
+        string difficulty,
+        string? fallbackUrl)
+    {
+        var key = MediaCacheKey(null, beatmapId);
+        if (!Cache.TryGetValue(key, out var local))
+        {
+            local = LazerStorage.ResolveBeatmapAssets(
+                        beatmapId,
+                        beatmapSetId,
+                        difficulty)?.BackgroundPath
+                    ?? ResolveLocal(key);
+            if (!string.IsNullOrWhiteSpace(local))
+                Cache[key] = local;
+        }
+        if (!string.IsNullOrWhiteSpace(local))
+            return local;
+        if (!string.IsNullOrWhiteSpace(fallbackUrl))
+            return fallbackUrl;
+        return beatmapSetId > 0
+            ? $"https://assets.ppy.sh/beatmaps/{beatmapSetId}/covers/cover.jpg"
+            : null;
+    }
+
     public static string? ResolveBeatmapFile(AttemptSummary summary)
     {
         var lazer = LazerStorage.ResolveBeatmapAssets(summary.OsuBeatmapId, summary.BeatmapSetId, summary.Difficulty);
@@ -67,6 +93,36 @@ internal static class BeatmapArtworkResolver
                     return legacy;
                 }
             }
+        }
+
+        return null;
+    }
+
+    public static string? ResolveBeatmapFile(
+        long beatmapId,
+        long beatmapSetId,
+        string difficulty)
+    {
+        var lazer = LazerStorage.ResolveBeatmapAssets(
+            beatmapId,
+            beatmapSetId,
+            difficulty);
+        if (lazer is not null)
+            return lazer.BeatmapPath;
+
+        var manifestFile = ResolveManifestFile($"id-{beatmapId}", "beatmap_file");
+        if (!string.IsNullOrWhiteSpace(manifestFile))
+            return manifestFile;
+
+        foreach (var directory in new[]
+                 {
+                     AppPaths.LegacyBeatmapFilesDir,
+                     AppPaths.OldLegacyBeatmapFilesDir,
+                 })
+        {
+            var path = Path.Combine(directory, $"{beatmapId}.osu");
+            if (File.Exists(path))
+                return path;
         }
 
         return null;

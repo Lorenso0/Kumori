@@ -24,6 +24,7 @@ public sealed class KumoriSettings
     public AppearanceSettings Appearance { get; set; } = new();
     public BackupSettings Backup { get; set; } = new();
     public DeveloperSettings Developer { get; set; } = new();
+    public FarmFinderSettings FarmFinder { get; set; } = new();
 
     public sealed class TrackingSettings
     {
@@ -128,6 +129,31 @@ public sealed class KumoriSettings
         /// same replay recovery path as a tosu result-data failure.
         /// </summary>
         public bool ForceReplayRecoveryNextPlay { get; set; }
+    }
+
+    public sealed class FarmFinderSettings
+    {
+        public string MinimumRankText { get; set; } = "";
+        public string MaximumRankText { get; set; } = "";
+        public string MinimumPpText { get; set; } = "";
+        public string MaximumPpText { get; set; } = "";
+        public string MinimumBpmText { get; set; } = "";
+        public string MaximumBpmText { get; set; } = "";
+        public string MinimumLengthText { get; set; } = "";
+        public string MaximumLengthText { get; set; } = "";
+        public string MinimumStarsText { get; set; } = "";
+        public string MaximumStarsText { get; set; } = "";
+        public string RankedFromText { get; set; } = "";
+        public string RankedToText { get; set; } = "";
+        public string MinimumPlayersText { get; set; } = "";
+        public string TextSearch { get; set; } = "";
+        public string MapStatus { get; set; } = "Any";
+        public string MatchMode { get; set; } = "ContainsRequired";
+        public bool TreatNightcoreAsDoubleTime { get; set; } = true;
+        public Dictionary<string, string> ModRequirements { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public string SortField { get; set; } = "UniquePlayers";
+        public string SortDirection { get; set; } = "Descending";
+        public bool IsFilterPanelExpanded { get; set; } = true;
     }
 
 }

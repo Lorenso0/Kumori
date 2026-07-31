@@ -4,10 +4,12 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
 using Kumori.App.ViewModels;
+using Kumori.App.FarmFinder;
 using Kumori.Core;
 using Kumori.Core.Settings;
 using Kumori.Core.State;
 using Kumori.Native;
+using Kumori.FarmFinder;
 using Kumori.Storage;
 using Kumori.Tracking;
 using Serilog;
@@ -216,6 +218,43 @@ public partial class App : Application
             sessions,
             localAssetCandidates: ShareMediaResolver.FindLocalAssetCandidates);
         var importsViewModel = new ImportsViewModel(playShare, replayViewer);
+        Func<FarmFinderPage> farmFinderPageFactory = () =>
+        {
+            var farmRepository = new FarmFinderRepository(AppPaths.FarmFinderDatabase);
+            var rankedModCatalog = new OsuRankedModCatalog();
+            var clockRates = new ClockRateCalculator();
+            var farmCredentials = new WindowsCredentialsStore(AppPaths.FarmFinderCredentialsFile);
+            var osuApi = new OsuApiClient(farmCredentials, rankedModCatalog, clockRates);
+            var hinamizawaScores = new HinamizawaTopScoresProvider(
+                rankedModCatalog,
+                clockRates);
+            var farmService = new FarmFinderService(
+                farmRepository,
+                osuApi,
+                hinamizawaScores,
+                new FarmMapAggregator(
+                    new ModNormalizer(clockRates),
+                    new ModMatcher(),
+                    new FarmStarRatingCalculator(
+                        farmRepository,
+                        osuApi,
+                        new HinamizawaStarRatingClient(),
+                        new FarmBeatmapFileCache())));
+            var farmCacheInstaller = new FarmFinderCacheInstaller(
+                AppPaths.FarmFinderDatabase,
+                farmRepository,
+                FarmFinderCacheDistribution.ManifestUrl);
+            return new FarmFinderPage(
+                new FarmFinderViewModel(
+                    farmService,
+                    farmRepository,
+                    farmCredentials,
+                    osuApi,
+                    rankedModCatalog,
+                    new ExternalUrlLauncher(),
+                    settings,
+                    farmCacheInstaller));
+        };
         var viewModel = new MainViewModel(
             store,
             attempts,
@@ -234,7 +273,8 @@ public partial class App : Application
             settings,
             importsViewModel,
             playShare,
-            gameplayWork);
+            gameplayWork,
+            farmFinderPageFactory);
         _mainWindow.StateChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         _mainWindow.IsVisibleChanged += (_, _) => ScheduleAvailableUpdatePrompt();
         if (startMinimizedToTray)

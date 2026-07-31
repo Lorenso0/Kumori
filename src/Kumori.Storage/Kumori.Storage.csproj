@@ -9,6 +9,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Kumori.Core\Kumori.Core.csproj" />
+    <ProjectReference Include="..\Kumori.FarmFinder\Kumori.FarmFinder.csproj" />
     <ProjectReference Include="..\Kumori.Gameplay\Kumori.Gameplay.csproj" />
     <ProjectReference Include="..\Kumori.Tracking\Kumori.Tracking.csproj" />
   </ItemGroup>
