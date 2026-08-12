@@ -44,6 +44,31 @@ public sealed class ScoreWebhookServiceTests : IDisposable
     }
 
     [Fact]
+    public void TopPlayMatch_RequiresTheStrictFingerprintInsideOfficialList()
+    {
+        AttemptDetails local = Attempt();
+        var matching = new OsuBeatmapUserScore(
+            50, 777, 99, 123,
+            DateTimeOffset.Parse(local.Summary.EndedAt!),
+            local.Summary.Score,
+            local.Summary.Accuracy / 100,
+            local.Summary.Pp,
+            local.Summary.Combo,
+            local.N300,
+            local.N100,
+            local.N50,
+            local.Summary.Misses,
+            ["HD", "DT"]);
+
+        Assert.Equal(matching, ScoreWebhookService.FindMatchingTopPlay(
+            local,
+            [matching with { TotalScore = matching.TotalScore + 1 }, matching]));
+        Assert.Null(ScoreWebhookService.FindMatchingTopPlay(
+            local,
+            [matching with { TotalScore = matching.TotalScore + 1 }]));
+    }
+
+    [Fact]
     public void Payload_FormatsPbCardAndDisablesMentions()
     {
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(
@@ -68,7 +93,7 @@ public sealed class ScoreWebhookServiceTests : IDisposable
             ScoreWebhookService.BuildPayload(Attempt(), "Lorenzo", null, 0, true, true));
         using JsonDocument document = JsonDocument.Parse(json);
         JsonElement embed = document.RootElement.GetProperty("embeds")[0];
-        Assert.Equal("PB alert test for Lorenzo", embed.GetProperty("title").GetString());
+        Assert.Equal("Top-play alert test for Lorenzo", embed.GetProperty("title").GetString());
         Assert.Equal(JsonValueKind.Null, embed.GetProperty("url").ValueKind);
     }
 
@@ -326,6 +351,12 @@ public sealed class ScoreWebhookServiceTests : IDisposable
             long beatmapId,
             long userId,
             CancellationToken cancellationToken = default) => Task.FromResult<OsuBeatmapUserScore?>(null);
+
+        public Task<IReadOnlyList<OsuBeatmapUserScore>> GetUserBestScoresAsync(
+            long userId,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OsuBeatmapUserScore>>([]);
     }
 
     private sealed class CaptureHandler : HttpMessageHandler

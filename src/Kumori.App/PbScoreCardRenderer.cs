@@ -70,7 +70,7 @@ internal static class PbScoreCardRenderer
         })
         {
             IsBackground = true,
-            Name = "Kumori PB card renderer",
+            Name = "Kumori top-play card renderer",
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
@@ -106,7 +106,7 @@ internal static class PbScoreCardRenderer
 
             string heading = beatmapRank is > 0
                 ? Invariant($"NEW #{beatmapRank:N0} BEST PLAY")
-                : isTest ? "PB ALERT PREVIEW" : "NEW PERSONAL BEST";
+                : isTest ? "TOP-PLAY ALERT PREVIEW" : "NEW TOP PLAY";
             var titlePlate = new Rect(20, 20, 430, 100);
             drawing.DrawRoundedRectangle(Brush("#D90F090D"), Pen("#5D3448", 1), titlePlate, 7, 7);
             DrawPlayerAvatar(drawing, avatarPath, playerName, new Rect(32, 43, 56, 56));

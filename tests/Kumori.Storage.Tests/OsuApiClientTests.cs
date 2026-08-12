@@ -161,6 +161,35 @@ public sealed class OsuApiClientTests
     }
 
     [Fact]
+    public async Task BestScores_PreserveOfficialPerformanceOrderAndRequestedLimit()
+    {
+        using var client = CreateClient(new StubHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/oauth/token")
+                return Task.FromResult(Json("""{"access_token":"token","expires_in":3600}"""));
+            Assert.Equal("/api/v2/users/99/scores/best", request.RequestUri.AbsolutePath);
+            Assert.Contains("limit=50", request.RequestUri.Query);
+            Assert.Contains("legacy_only=0", request.RequestUri.Query);
+            return Task.FromResult(Json("""
+                [
+                  {"id":777,"total_score":1000,"accuracy":0.99,"pp":300,"max_combo":500,
+                   "ended_at":"2026-07-25T13:57:00Z","statistics":{"great":400,"miss":1},
+                   "mods":[],"beatmap":{"id":123}},
+                  {"id":555,"total_score":900,"accuracy":0.98,"pp":290,"max_combo":450,
+                   "ended_at":"2026-07-24T13:57:00Z","statistics":{"great":390,"miss":2},
+                   "mods":[],"beatmap":{"id":456}}
+                ]
+                """));
+        }));
+
+        IReadOnlyList<OsuBeatmapUserScore> scores = await client.GetUserBestScoresAsync(99, 50);
+
+        Assert.Equal([777L, 555L], scores.Select(score => score.ScoreId));
+        Assert.Equal([1, 2], scores.Select(score => score.Position));
+        Assert.Equal([123L, 456L], scores.Select(score => score.BeatmapId));
+    }
+
+    [Fact]
     public async Task TopScores_ReturnsTopHundredAndRejectsWholeMixedUnrankedCombination()
     {
         using var client = CreateClient(new StubHandler(request =>

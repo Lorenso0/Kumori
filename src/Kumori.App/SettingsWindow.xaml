@@ -631,7 +631,7 @@
                         <Border Style="{StaticResource SettingsCard}">
                             <StackPanel>
                                 <TextBlock Text="Discord Updates" Style="{StaticResource SettingsTitle}" />
-                                <TextBlock Text="Send daily performance summaries and confirmed online personal-best alerts to independent Discord webhooks."
+                                <TextBlock Text="Send daily performance summaries and confirmed top-50 play alerts to independent Discord webhooks."
                                            Style="{StaticResource SettingsHint}" />
                                 <CheckBox x:Name="DailyWebhookEnabled" Content="Send daily progress updates" />
                                 <Label Content="Daily update webhook URL"
@@ -648,20 +648,20 @@
                                         AutomationProperties.Name="Send a test daily Discord update" />
                                 <Separator Margin="0,14,0,12" />
                                 <CheckBox x:Name="ScoreWebhookEnabled"
-                                          Content="Send confirmed online PB alerts with replay attachments"
+                                           Content="Send confirmed top-50 play alerts with replay attachments"
                                           ToolTip="Requires osu! API credentials configured in Farm Finder." />
-                                <Label Content="PB alert webhook URL"
+                                <Label Content="Top-play alert webhook URL"
                                        Target="{Binding ElementName=ScoreWebhookUrl}"
                                        Style="{StaticResource SettingsFieldLabel}" />
                                 <TextBox x:Name="ScoreWebhookUrl"
-                                         AutomationProperties.Name="Personal best Discord webhook URL"
-                                         AutomationProperties.HelpText="Paste the separate Discord webhook URL used for PB alerts." />
+                                         AutomationProperties.Name="Top-play Discord webhook URL"
+                                         AutomationProperties.HelpText="Paste the separate Discord webhook URL used for top-50 play alerts." />
                                 <Button x:Name="SendScoreWebhookTest"
-                                        Content="Test PB alert"
+                                        Content="Test top-play alert"
                                         HorizontalAlignment="Left"
                                         Margin="0,8,0,0"
                                         Click="SendScoreWebhookTest_Click"
-                                        AutomationProperties.Name="Send a test personal best Discord alert" />
+                                        AutomationProperties.Name="Send a test top-play Discord alert" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

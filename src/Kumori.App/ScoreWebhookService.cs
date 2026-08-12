@@ -17,6 +17,7 @@ namespace Kumori.App;
 
 public sealed class ScoreWebhookService
 {
+    internal const int TopPlayLimit = 50;
     internal const long DiscordAttachmentLimit = 10L * 1024 * 1024;
     internal const string ScoreCardAttachmentName = "kumori-pb-card.png";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -124,15 +125,15 @@ public sealed class ScoreWebhookService
             : profile?.PlayerName ?? "Kumori user";
         int? rank = null;
         long scoreId = 0;
-        if (profile is not null && attempt.Summary.OsuBeatmapId is > 0)
+        if (profile is not null)
         {
             try
             {
-                OsuBeatmapUserScore? online = await osuApi.GetBeatmapUserScoreAsync(
-                    attempt.Summary.OsuBeatmapId.Value,
+                IReadOnlyList<OsuBeatmapUserScore> bestScores = await osuApi.GetUserBestScoresAsync(
                     profile.PlayerId,
+                    TopPlayLimit,
                     cancellationToken);
-                if (online is not null && Matches(attempt, online))
+                if (FindMatchingTopPlay(attempt, bestScores) is { } online)
                 {
                     rank = online.Position;
                     scoreId = online.ScoreId;
@@ -145,7 +146,7 @@ public sealed class ScoreWebhookService
                                                   or OsuApiRateLimitException
                                                   or InvalidDataException)
             {
-                Log.Debug(exception, "Could not match the random test score to an official osu! score");
+                Log.Debug(exception, "Could not match the random test score to the official osu! top-play list");
             }
         }
 
@@ -211,11 +212,11 @@ public sealed class ScoreWebhookService
 
         try
         {
-            OsuBeatmapUserScore? online = await osuApi.GetBeatmapUserScoreAsync(
-                attempt.Summary.OsuBeatmapId.Value,
+            IReadOnlyList<OsuBeatmapUserScore> bestScores = await osuApi.GetUserBestScoresAsync(
                 delivery.PlayerId,
+                TopPlayLimit,
                 cancellationToken);
-            if (online is not null && Matches(attempt, online))
+            if (FindMatchingTopPlay(attempt, bestScores) is { } online)
             {
                 deliveries.MarkConfirmed(
                     delivery.AttemptId,
@@ -224,15 +225,7 @@ public sealed class ScoreWebhookService
                     now);
                 return;
             }
-            if (delivery.VerificationAttempts >= VerificationDelays.Length)
-            {
-                deliveries.MarkTerminal(delivery.AttemptId, "unconfirmed", now, "score_not_confirmed");
-                return;
-            }
-            deliveries.ScheduleVerification(
-                delivery.AttemptId,
-                now + VerificationDelays[delivery.VerificationAttempts],
-                "score_not_propagated");
+            ScheduleUnconfirmed(delivery, now, "score_not_in_top_50");
         }
         catch (OsuApiAuthenticationException)
         {
@@ -353,7 +346,7 @@ public sealed class ScoreWebhookService
                     replayStatus = exception is DiscordAttachmentRejectedException
                         ? "rejected"
                         : "unavailable";
-                    Log.Warning(exception, "PB card was delivered, but replay attachment upload failed for attempt {AttemptId}", delivery.AttemptId);
+                    Log.Warning(exception, "Top-play card was delivered, but replay attachment upload failed for attempt {AttemptId}", delivery.AttemptId);
                     await TrySendAttachmentUnavailableNoticeAsync(webhookUrl, cancellationToken);
                 }
             }
@@ -427,6 +420,27 @@ public sealed class ScoreWebhookService
         return Mods(local.Mods.Select(mod => mod.Acronym)).SetEquals(Mods(online.Mods));
     }
 
+    internal static OsuBeatmapUserScore? FindMatchingTopPlay(
+        AttemptDetails local,
+        IReadOnlyList<OsuBeatmapUserScore> bestScores) =>
+        bestScores.FirstOrDefault(online => Matches(local, online));
+
+    private void ScheduleUnconfirmed(
+        ScoreWebhookDelivery delivery,
+        DateTimeOffset now,
+        string category)
+    {
+        if (delivery.VerificationAttempts >= VerificationDelays.Length)
+        {
+            deliveries.MarkTerminal(delivery.AttemptId, "unconfirmed", now, category);
+            return;
+        }
+        deliveries.ScheduleVerification(
+            delivery.AttemptId,
+            now + VerificationDelays[delivery.VerificationAttempts],
+            category);
+    }
+
     internal static object BuildPayload(
         AttemptDetails attempt,
         string playerName,
@@ -471,7 +485,7 @@ public sealed class ScoreWebhookService
                 {
                     title = rank is > 0
                         ? $"{(isTest ? "TEST · " : "")}New #{rank:N0} for {Escape(playerName)} in osu!"
-                        : $"PB alert test for {Escape(playerName)}",
+                        : $"Top-play alert test for {Escape(playerName)}",
                     url = scoreId > 0 ? $"https://osu.ppy.sh/scores/{scoreId}" : null,
                     description,
                     color = 0xFF5C66,
@@ -493,7 +507,7 @@ public sealed class ScoreWebhookService
             {
                 id = 0,
                 filename = ScoreCardAttachmentName,
-                description = $"Kumori personal-best score card for {attempt.Summary.Artist} — {attempt.Summary.Title} [{attempt.Summary.Difficulty}]",
+                description = $"Kumori top-play score card for {attempt.Summary.Artist} — {attempt.Summary.Title} [{attempt.Summary.Difficulty}]",
             },
         },
     };
@@ -539,7 +553,7 @@ public sealed class ScoreWebhookService
                                                           or IOException
                                                           or InvalidDataException)
                     {
-                        Log.Debug(exception, "Could not load osu! profile avatar for PB card");
+                        Log.Debug(exception, "Could not load osu! profile avatar for top-play card");
                     }
                 }
                 await PbScoreCardRenderer.RenderAsync(

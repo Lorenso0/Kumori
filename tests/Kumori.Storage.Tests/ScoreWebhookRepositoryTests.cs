@@ -105,6 +105,21 @@ public sealed class ScoreWebhookRepositoryTests : IDisposable
             DateTimeOffset.UtcNow));
     }
 
+    [Fact]
+    public void ScoreOnlyPb_WithoutPpImprovement_IsNotQueued()
+    {
+        var factory = new SqliteConnectionFactory(database, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        _ = PersistCompleted(sink, 1_000_000, 1);
+        long scoreOnlyPb = PersistCompleted(sink, 1_100_000, 2);
+
+        Assert.False(new ScoreWebhookRepository(factory).TryEnqueue(
+            scoreOnlyPb,
+            99,
+            "Lorenzo",
+            DateTimeOffset.UtcNow));
+    }
+
     private static long PersistCompleted(AttemptSqliteSink sink, int score, int ordinal)
     {
         sink.StartAttempt(new AttemptStart

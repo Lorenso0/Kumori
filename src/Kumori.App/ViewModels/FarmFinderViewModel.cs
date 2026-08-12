@@ -505,7 +505,7 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
                 StatusText = "Preparing to fetch the pre-built Farm Finder cache…";
                 ProgressValue = 0;
                 ProgressMaximum = 1;
-                var downloadProgress = new Progress<FarmCacheDownloadProgress>(progress =>
+                var downloadProgress = createProgress<FarmCacheDownloadProgress>(progress =>
                 {
                     ProgressValue = progress.BytesReceived;
                     ProgressMaximum = Math.Max(1, progress.TotalBytes);
@@ -854,7 +854,7 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     }
 
     private IProgress<FarmFinderProgress> createProgress() =>
-        new Progress<FarmFinderProgress>(progress =>
+        createProgress<FarmFinderProgress>(progress =>
         {
             if (currentProgressPhase != progress.Phase)
             {
@@ -875,6 +875,25 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
             if (progress.RateLimitedUntil is { } until)
                 startRateLimitCountdown(until);
         });
+
+    private IProgress<T> createProgress<T>(Action<T> report) =>
+        new SynchronizationContextProgress<T>(synchronizationContext, report);
+
+    private sealed class SynchronizationContextProgress<T>(
+        SynchronizationContext? context,
+        Action<T> report) : IProgress<T>
+    {
+        public void Report(T value)
+        {
+            if (context is null || ReferenceEquals(SynchronizationContext.Current, context))
+            {
+                report(value);
+                return;
+            }
+
+            context.Send(_ => report(value), null);
+        }
+    }
 
     private void updateProgressDetails(FarmFinderProgress progress)
     {

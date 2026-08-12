@@ -66,7 +66,7 @@ public sealed class ScoreWebhookRepository
               AND (a.n300 + a.n100 + a.n50 + a.misses) > 0
               AND EXISTS(
                   SELECT 1 FROM attempt_improvements i
-                  WHERE i.attempt_id = a.id AND i.metric = 'score')
+                  WHERE i.attempt_id = a.id AND i.metric = 'pp')
               AND NOT EXISTS(
                   SELECT 1 FROM attempt_context c
                   WHERE c.attempt_id = a.id

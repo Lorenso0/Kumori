@@ -114,6 +114,11 @@ public interface IOsuBeatmapScoreProvider
         long beatmapId,
         long userId,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<OsuBeatmapUserScore>> GetUserBestScoresAsync(
+        long userId,
+        int limit,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IFarmFinderRepository

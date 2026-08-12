@@ -183,11 +183,6 @@ public sealed class LazerSkinReloadServiceTests : IDisposable
             {
                 WriteSelectedSkin(neighbour);
                 platform.Foreground = 99;
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(15);
-                    platform.Foreground = 2;
-                });
             }
             else
             {
@@ -196,10 +191,15 @@ public sealed class LazerSkinReloadServiceTests : IDisposable
         };
         var executor = CreateExecutor(platform);
 
-        var result = await executor.ExecuteAsync(
+        var pending = executor.ExecuteAsync(
             root,
             original,
             CancellationToken.None);
+
+        Assert.False(pending.IsCompleted);
+        Assert.Single(platform.SentChords);
+        platform.Foreground = 2;
+        var result = await pending;
 
         Assert.Equal(LazerSkinReloadStatus.Reloaded, result.Status);
         Assert.Equal(2, platform.SentChords.Count);

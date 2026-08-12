@@ -117,6 +117,67 @@ public sealed class OsuApiClient :
                 .ToArray());
     }
 
+    public async Task<IReadOnlyList<OsuBeatmapUserScore>> GetUserBestScoresAsync(
+        long userId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(userId));
+        if (limit is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(limit));
+
+        using var response = await SendApiAsync(
+            () => new HttpRequestMessage(
+                HttpMethod.Get,
+                $"users/{userId}/scores/best?mode=osu&limit={limit}&legacy_only=0"),
+            cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        ScoreResponse[] payload;
+        try
+        {
+            payload = await JsonSerializer.DeserializeAsync<ScoreResponse[]>(
+                          stream, jsonOptions, cancellationToken)
+                      ?? throw new InvalidDataException("osu! returned an empty best-score response.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("osu! returned a malformed best-score response.", exception);
+        }
+
+        var scores = new List<OsuBeatmapUserScore>(payload.Length);
+        for (var index = 0; index < payload.Length; index++)
+        {
+            ScoreResponse score = payload[index];
+            DateTimeOffset? endedAt = score.EndedAt ?? score.CreatedAt;
+            if (score.Id <= 0 || score.Beatmap?.Id is not > 0 || endedAt is null)
+                continue;
+            ScoreStatistics? statistics = score.Statistics;
+            scores.Add(new OsuBeatmapUserScore(
+                index + 1,
+                score.Id,
+                userId,
+                score.Beatmap.Id,
+                endedAt.Value,
+                score.LegacyScoreId is not null
+                    ? score.LegacyTotalScore ?? score.TotalScore ?? 0
+                    : score.TotalScore ?? score.LegacyTotalScore ?? 0,
+                score.Accuracy,
+                score.Pp ?? 0,
+                score.MaxCombo,
+                statistics?.Count300 ?? 0,
+                statistics?.Count100 ?? 0,
+                statistics?.Count50 ?? 0,
+                statistics?.CountMiss ?? 0,
+                (score.Mods ?? [])
+                    .Select(mod => mod.Acronym?.Trim().ToUpperInvariant())
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Cast<string>()
+                    .ToArray()));
+        }
+        return scores;
+    }
+
     public async Task<IReadOnlyList<string>> GetCountryCodesAsync(
         CancellationToken cancellationToken = default)
     {

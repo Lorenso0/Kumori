@@ -175,7 +175,7 @@ public partial class SettingsWindow : Window
         if (ScoreWebhookEnabled.IsChecked == true
             && !DailyProgressWebhookService.TryValidateWebhookUrl(scoreWebhookUrl, out _))
         {
-            SetStatus("Enter a valid HTTPS Discord webhook URL for PB alerts.", isError: true);
+            SetStatus("Enter a valid HTTPS Discord webhook URL for top-play alerts.", isError: true);
             return;
         }
         if (ScoreWebhookEnabled.IsChecked == true)
@@ -186,7 +186,7 @@ public partial class SettingsWindow : Window
                     AppPaths.FarmFinderCredentialsFile);
                 if ((await credentialStore.LoadAsync())?.IsConfigured != true)
                 {
-                    SetStatus("Configure osu! API credentials in Farm Finder before enabling PB alerts.", isError: true);
+                    SetStatus("Configure osu! API credentials in Farm Finder before enabling top-play alerts.", isError: true);
                     return;
                 }
             }
@@ -285,7 +285,7 @@ public partial class SettingsWindow : Window
         }
 
         SendScoreWebhookTest.IsEnabled = false;
-        SetStatus("Sending test PB alert…");
+        SetStatus("Sending test top-play alert…");
         try
         {
             var factory = new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false);
@@ -304,12 +304,12 @@ public partial class SettingsWindow : Window
                 api,
                 profileTelemetry.GetCurrentIdentity);
             await service.SendTestAsync(webhookUrl);
-            SetStatus("Test PB alert sent.");
+            SetStatus("Test top-play alert sent.");
         }
         catch (Exception ex)
         {
             SetStatus(ex.Message, isError: true);
-            Log.Warning(ex, "Could not send test PB alert");
+            Log.Warning(ex, "Could not send test top-play alert");
         }
         finally
         {
