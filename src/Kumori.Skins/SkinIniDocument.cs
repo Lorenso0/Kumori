@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Kumori.App.Skins;
+namespace Kumori.Skins;
 
 public enum SkinIniValueType
 {
@@ -278,6 +278,57 @@ public sealed class SkinIniDocument
         if (line < 0) return;
         lines.RemoveAt(line);
         Reindex();
+    }
+
+    public bool RemoveManiaSection(int keys)
+    {
+        var header = FindManiaSection(keys);
+        if (header < 0)
+            return false;
+        var end = lines.Count;
+        for (var line = header + 1; line < lines.Count; line++)
+        {
+            var trimmed = lines[line].Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                end = line;
+                break;
+            }
+        }
+        lines.RemoveRange(header, end - header);
+        if (header > 0
+            && header <= lines.Count
+            && lines[header - 1].Length == 0
+            && (header == lines.Count || lines[header].Length == 0))
+        {
+            lines.RemoveAt(header - 1);
+        }
+        Reindex();
+        return true;
+    }
+
+    public bool AddManiaSection(int keys)
+    {
+        if (keys is < 1 or > 18)
+            throw new ArgumentOutOfRangeException(
+                nameof(keys),
+                "Mania key count must be between 1 and 18.");
+        if (FindManiaSection(keys) >= 0)
+            return false;
+        SetManiaValue(keys, "Keys", keys.ToString());
+        SetManiaValue(keys, "ColumnStart", "136");
+        SetManiaValue(keys, "HitPosition", "402");
+        SetManiaValue(keys, "ScorePosition", "325");
+        SetManiaValue(keys, "ComboPosition", "111");
+        SetManiaValue(
+            keys,
+            "ColumnWidth",
+            string.Join(',', Enumerable.Repeat("30", keys)));
+        SetManiaValue(
+            keys,
+            "ColumnLineWidth",
+            string.Join(',', Enumerable.Repeat("2", keys + 1)));
+        return true;
     }
 
     public void ApplyPatch(IEnumerable<SkinExtraIniPatchEntry> patch)

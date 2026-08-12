@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private string _selectedPage = "Dashboard";
     private WelcomeWindow? _onboardingWindow;
     private SkinLibraryWindow? _onboardingToolWindow;
+    private SkinStudioLauncherPage? _skinStudioLauncherPage;
     private SkinEditorPage? _skinEditorPage;
     private FarmFinderPage? _farmFinderPage;
     private readonly Func<FarmFinderPage>? _farmFinderPageFactory;
@@ -94,6 +95,7 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _skinStudioLauncherPage?.Dispose();
             (_farmFinderPage?.DataContext as IDisposable)?.Dispose();
             (_lazerSkinReload as IDisposable)?.Dispose();
         };
@@ -287,7 +289,7 @@ public partial class MainWindow : Window
         var replay = new MenuItem { Header = "Open Replay Analyzer", IsEnabled = row.CanOpenReplayInspector };
         if (DashboardRoot.DataContext is ImportsViewModel imports)
         {
-            replay.Click += async (_, _) => await TryUiActionAsync(() => imports.OpenReplayInspectorAsync(row));
+            replay.Click += async (_, _) => await TryUiActionAsync(() => imports.OpenReplayInspectorAsync(row, this));
             var deleteImport = new MenuItem { Header = "Delete imported play" };
             deleteImport.Click += async (_, _) => await TryUiActionAsync(() => imports.DeleteAsync(row, this));
             menu.Items.Add(replay);
@@ -314,6 +316,23 @@ public partial class MainWindow : Window
         menu.Items.Add(delete);
         menu.PlacementTarget = button;
         menu.IsOpen = true;
+    }
+
+    private async void ReplayAnalyzer_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (DashboardRoot.DataContext is ImportsViewModel imports
+            && imports.SelectedAttempt is { } importedRow)
+        {
+            await TryUiActionAsync(() => imports.OpenReplayInspectorAsync(importedRow, this));
+            return;
+        }
+
+        if (DashboardRoot.DataContext is MainViewModel viewModel
+            && viewModel.SelectedAttempt is { } historyRow)
+        {
+            await TryUiActionAsync(() => viewModel.OpenReplayInspectorAsync(historyRow));
+        }
     }
 
     private void SessionOverflow_Click(object sender, RoutedEventArgs e)
@@ -427,18 +446,19 @@ public partial class MainWindow : Window
     private async void SkinEditorNavigation_Click(object sender, RoutedEventArgs e)
     {
         ShowPage("SkinEditor");
-        if (_skinEditorPage is null)
+        try
         {
-            _skinEditorPage = new SkinEditorPage(
-                _settings,
-                realmService: null,
-                reloadService: _lazerSkinReload);
-            SkinEditorHost.Content = _skinEditorPage;
-            // Let WPF paint the themed page shell before Realm discovery and
-            // preview decoding begin.
-            await Dispatcher.Yield(DispatcherPriority.Loaded);
+            await ShowLegacySkinEditorAsync();
         }
-        await _skinEditorPage.EnsureLoadedAsync();
+        catch (Exception ex)
+        {
+            KumoriDialog.Show(
+                this,
+                $"The Skin Studio could not be opened.\n\n{ex.Message}",
+                "Skin Studio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
     private void FarmFinderNavigation_Click(object sender, RoutedEventArgs e)
     {
@@ -511,6 +531,58 @@ public partial class MainWindow : Window
         return panel;
     }
 
+    private async Task ShowLegacySkinEditorAsync()
+    {
+        if (_skinStudioLauncherPage is { } launcher
+            && ReferenceEquals(SkinEditorHost.Content, launcher))
+        {
+            await launcher.StopAsync();
+            launcher.Dispose();
+            _skinStudioLauncherPage = null;
+        }
+        if (_skinEditorPage is null)
+        {
+            _skinEditorPage = new SkinEditorPage(
+                _settings,
+                realmService: null,
+                reloadService: _lazerSkinReload,
+                openLazerEditor: ShowLazerSkinEditorAsync);
+        }
+        SkinEditorHost.Content = _skinEditorPage;
+        // Let WPF paint the themed page shell before Realm discovery and
+        // preview decoding begin.
+        await Dispatcher.Yield(DispatcherPriority.Loaded);
+        await _skinEditorPage.EnsureLoadedAsync();
+    }
+
+    private async Task ShowLazerSkinEditorAsync()
+    {
+        try
+        {
+            if (_skinStudioLauncherPage is null)
+            {
+                _skinStudioLauncherPage = new SkinStudioLauncherPage(
+                    _settings,
+                    ShowLegacySkinEditorAsync,
+                    _lazerSkinReload);
+                SkinEditorHost.Content = _skinStudioLauncherPage;
+                await Dispatcher.Yield(DispatcherPriority.Loaded);
+            }
+            else if (!ReferenceEquals(
+                         SkinEditorHost.Content,
+                         _skinStudioLauncherPage))
+            {
+                SkinEditorHost.Content = _skinStudioLauncherPage;
+            }
+
+            await _skinStudioLauncherPage.EnsureReadyAsync();
+        }
+        catch
+        {
+            await ShowLegacySkinEditorAsync();
+            throw;
+        }
+    }
     private void ChangelogNavigation_Click(object sender, RoutedEventArgs e) =>
         OpenWorkspaceTab(new ChangelogWindow(), "Changelog");
     private void DiscordNavigation_Click(object sender, RoutedEventArgs e)
@@ -586,6 +658,9 @@ public partial class MainWindow : Window
             string omissions = preview.OptionalMediaOmissions.Count == 0
                 ? ""
                 : $"\n\nOptional media not included:\n{string.Join("\n", preview.OptionalMediaOmissions)}";
+            string compactMedia = preview.MediaProfile == PlaySharePackageService.CompactDiscordProfile
+                ? "\n\nThis compact Discord replay includes its beatmap and audio. Older compact packages can still resolve missing media after you confirm."
+                : "";
             KumoriDialog.ToggleConfirmation confirmation = KumoriDialog.ConfirmWithToggle(
                 this,
                 $"Shared by {preview.PlayerName}\n\n" +
@@ -593,6 +668,7 @@ public partial class MainWindow : Window
                 $"Score {play.Score:N0}  ·  {play.Accuracy:0.00}%  ·  {play.ModsKey}\n" +
                 $"Replay {TimeSpan.FromSeconds(play.Results.DurationSeconds):m\\:ss}  ·  {FormatBytes(preview.PackageSize)}" +
                 omissions +
+                compactMedia +
                 "\n\nPlayer attribution is supplied by the sender and is not verified.",
                 "Delete the .kumori file after a successful import",
                 _settings.Current.Startup.DeleteSharedPackageAfterImport,
@@ -607,6 +683,7 @@ public partial class MainWindow : Window
                 return;
             KumoriImportResult result = await _playShare.ImportAsync(path);
             string? packageDeleteWarning = null;
+            bool replayAnalyzerOpened = false;
             if (confirmation.IsChecked)
             {
                 try
@@ -626,6 +703,21 @@ public partial class MainWindow : Window
             else if (result.ReusedLocalAssetCount > 0)
                 _importsViewModel.HistoryStatus =
                     $"Imported play · reused {result.ReusedLocalAssetCount} local file(s), saving {FormatBytes(result.ReusedLocalAssetBytes)}";
+            if (_settings.Current.ReplayViewer.Enabled
+                && _importsViewModel.SelectedAttempt is { CanOpenReplayInspector: true } importedRow)
+            {
+                try
+                {
+                    await _importsViewModel.OpenReplayInspectorAsync(importedRow, this);
+                    replayAnalyzerOpened = true;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Imported play {ImportId} could not be opened in Replay Analyzer", result.ImportId);
+                    _importsViewModel.HistoryStatus =
+                        "The play was imported, but Replay Analyzer could not be opened";
+                }
+            }
             if (packageDeleteWarning is not null)
             {
                 KumoriDialog.Show(
@@ -635,7 +727,8 @@ public partial class MainWindow : Window
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }
-            Activate();
+            if (!replayAnalyzerOpened)
+                Activate();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
         {
@@ -946,6 +1039,9 @@ public partial class MainWindow : Window
         MapsSortBadge.Visibility = showPageBadges ? Visibility.Visible : Visibility.Collapsed;
 
         MetricsGrid.Columns = _layoutState.IsCompact ? 3 : 6;
+        PerformanceMetrics.Columns = _layoutState.IsShort
+            ? 6
+            : _layoutState.IsCompact ? 4 : 6;
         MetricsRow.Height = _selectedPage == "Imports"
             ? new GridLength(0)
             : new GridLength(_layoutState.IsCompact ? 136 : 88);

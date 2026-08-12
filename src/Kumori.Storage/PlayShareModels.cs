@@ -15,6 +15,7 @@ public sealed record KumoriPackageManifestV1
     [JsonPropertyName("movement")] public IReadOnlyList<KumoriPackageMovementEntryV1> Movement { get; init; } = [];
     [JsonPropertyName("assets")] public IReadOnlyList<KumoriPackageAssetV1> Assets { get; init; } = [];
     [JsonPropertyName("optional_media_omissions")] public IReadOnlyList<string> OptionalMediaOmissions { get; init; } = [];
+    [JsonPropertyName("media_profile")] public string MediaProfile { get; init; } = PlaySharePackageService.FullPortableProfile;
 }
 
 public sealed record KumoriPackageMovementEntryV1
@@ -380,7 +381,8 @@ public sealed record KumoriPackagePreview(
     SharedPlayV1 Play,
     DateTimeOffset ExportedAt,
     long PackageSize,
-    IReadOnlyList<string> OptionalMediaOmissions);
+    IReadOnlyList<string> OptionalMediaOmissions,
+    string MediaProfile = PlaySharePackageService.FullPortableProfile);
 
 public sealed record KumoriImportResult(
     long ImportId,
@@ -390,3 +392,9 @@ public sealed record KumoriImportResult(
     long ReusedLocalAssetBytes = 0);
 
 public sealed record ShareMediaFile(string LogicalName, string Role, string Path);
+
+public enum KumoriPackageProfile
+{
+    FullPortable,
+    CompactDiscord,
+}

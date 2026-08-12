@@ -32,12 +32,20 @@ public sealed class DateDisplayViewModelTests
     {
         var separator = new DayRowViewModel("2026-07-04",
         [
-            new AttemptRowViewModel(new AttemptSummary { Outcome = "completed", Pp = 123.45 }),
-            new AttemptRowViewModel(new AttemptSummary { Outcome = "failed", Pp = 50 }),
+            new AttemptRowViewModel(new AttemptSummary
+            {
+                Outcome = "completed", Pp = 123.45, Key1Count = 120, Key2Count = 130, DurationSeconds = 125,
+            }),
+            new AttemptRowViewModel(new AttemptSummary
+            {
+                Outcome = "failed", Pp = 50, Key1Count = 30, Key2Count = 20, DurationSeconds = 55,
+            }),
         ], isCollapsed: false, ppChange: 6.25);
 
         Assert.True(separator.IsDayHeader);
-        Assert.Equal("PP gained +6.3pp  ·  2 plays  ·  1 completed  ·  123.5pp best", separator.StatsLine);
+        Assert.Equal("PP gained +6.3pp  ·  2 plays  ·  1 completed  ·  123.5pp best", separator.PrimaryStatsLine);
+        Assert.Equal("300 key presses  ·  3m active playtime", separator.ActivityStatsLine);
+        Assert.Equal("PP gained +6.3pp  ·  2 plays  ·  1 completed  ·  123.5pp best  ·  300 key presses  ·  3m active playtime", separator.StatsLine);
         Assert.Equal("+6.3pp", separator.PpChangeText);
         Assert.Equal("Collapse day", separator.ToggleLabel);
 
@@ -67,6 +75,29 @@ public sealed class DateDisplayViewModelTests
             today: new DateTime(2026, 7, 16));
 
         Assert.Equal(expected, day.DateText);
+    }
+
+    [Fact]
+    public void PerformanceDay_SummarizesResultsAndActivity()
+    {
+        var day = new PerformanceDayViewModel(new DailyAttemptTrend
+        {
+            Day = "2026-07-04",
+            Attempts = 4,
+            Completed = 3,
+            AverageAccuracy = 98.25,
+            BestPp = 175.5,
+            TotalDurationSeconds = 610,
+            ZTotal = 1000,
+            XTotal = 1100,
+            TotalMisses = 12,
+            PpChange = 4.25,
+            RankChange = 20,
+        });
+
+        Assert.Equal("4 plays  ·  3 completed (75%)  ·  98.25% avg  ·  175.5pp best", day.ResultStatsLine);
+        Assert.Equal("2,100 key presses  ·  10m active playtime  ·  12 misses", day.ActivityStatsLine);
+        Assert.Equal("PP +4.3pp  ·  Rank +20", day.ChangeStatsLine);
     }
 
     [Theory]

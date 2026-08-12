@@ -31,6 +31,7 @@ internal static class TrackingFrameMapper
         BeatmapStats = snapshot.BeatmapStats,
         ModsKey = snapshot.ModsKey,
         Mods = snapshot.Mods,
+        ModsAreAuthoritativeResult = snapshot.ModsAreAuthoritativeResult,
         Score = checked((int)Math.Min(snapshot.Score, int.MaxValue)),
         Grade = snapshot.Grade,
         Pp = snapshot.Pp,

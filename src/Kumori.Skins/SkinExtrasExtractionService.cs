@@ -1,7 +1,7 @@
 using System.IO;
 using System.IO.Compression;
 
-namespace Kumori.App.Skins;
+namespace Kumori.Skins;
 
 public sealed record SkinExtractionFile(string Filename, byte[] Bytes);
 
@@ -130,7 +130,7 @@ public sealed class SkinExtrasExtractionService
         };
     }
 
-    internal static bool IsRootSourceFile(string filename)
+    public static bool IsRootSourceFile(string filename)
     {
         if (string.IsNullOrWhiteSpace(filename) || Path.IsPathRooted(filename))
             return false;
@@ -152,8 +152,8 @@ public sealed class SkinExtrasExtractionService
         }
 
         var assetFiles = ResolveTargetCollisions(source.Files.Where(file =>
-                SkinElementCategorizer.IsImage(file.Filename)
-                || SkinElementCategorizer.IsAudio(file.Filename))
+                SkinMediaTypes.IsImage(file.Filename)
+                || SkinMediaTypes.IsAudio(file.Filename))
             .Where(file => !SkinCursorMiddlePolicy.IsCursorMiddle(file.Filename)));
         var result = new List<SkinExtractionFamily>();
         foreach (var family in SkinExtraFamilyRegistry.All.Where(family =>
@@ -561,14 +561,14 @@ public sealed class SkinExtrasExtractionService
                         candidate.TargetFilename,
                         file.Filename));
                 if (manifestFile is null
-                    || !SkinElementCategorizer.IsImage(file.Filename)
-                    || !SkinImageTools.IsFullyTransparentImage(file.Bytes))
+                    || !SkinMediaTypes.IsImage(file.Filename)
+                    || !SkinImageAnalysis.IsFullyTransparent(file.Bytes))
                     return false;
                 var existingPath = Path.Combine(
                     existing.DirectoryPath,
                     manifestFile.TargetFilename.Replace('/', Path.DirectorySeparatorChar));
                 return File.Exists(existingPath)
-                       && SkinImageTools.IsFullyTransparentImage(
+                       && SkinImageAnalysis.IsFullyTransparent(
                            File.ReadAllBytes(existingPath));
             });
         }
@@ -666,8 +666,8 @@ public sealed class SkinExtrasExtractionService
             SkinExtraFamilyRegistry.ForFile(file.Filename) is null
             && !LooksLikeNumberAsset(file.Filename)
             && !LooksLikeInvalidKnownAsset(file.Filename)).ToArray();
-        Add("audio.other", unknown.Where(file => SkinElementCategorizer.IsAudio(file.Filename)).ToArray());
-        Add("misc.other", unknown.Where(file => SkinElementCategorizer.IsImage(file.Filename)).ToArray());
+        Add("audio.other", unknown.Where(file => SkinMediaTypes.IsAudio(file.Filename)).ToArray());
+        Add("misc.other", unknown.Where(file => SkinMediaTypes.IsImage(file.Filename)).ToArray());
 
         void Add(string id, IReadOnlyList<SkinExtractionFile> matches)
         {
@@ -819,6 +819,6 @@ public sealed class SkinExtrasExtractionService
 
     private static bool IsSkinFile(string filename) =>
         Path.GetFileName(filename).Equals("skin.ini", StringComparison.OrdinalIgnoreCase)
-        || SkinElementCategorizer.IsImage(filename)
-        || SkinElementCategorizer.IsAudio(filename);
+        || SkinMediaTypes.IsImage(filename)
+        || SkinMediaTypes.IsAudio(filename);
 }

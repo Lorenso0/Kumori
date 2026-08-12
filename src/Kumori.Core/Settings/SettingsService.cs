@@ -123,6 +123,7 @@ public sealed class SettingsService
         restored.Tracking.PacketRecordingEnabled = false;
         restored.Backup = new KumoriSettings.BackupSettings();
         restored.Developer = new KumoriSettings.DeveloperSettings();
+        restored.DailyWebhook = new KumoriSettings.DailyWebhookSettings();
 
         return JsonSerializer.Serialize(restored, JsonOptions);
     }
@@ -147,6 +148,9 @@ public sealed class SettingsService
         settings.Backup ??= new KumoriSettings.BackupSettings();
         settings.Developer ??= new KumoriSettings.DeveloperSettings();
         settings.FarmFinder ??= new KumoriSettings.FarmFinderSettings();
+        settings.DailyWebhook ??= new KumoriSettings.DailyWebhookSettings();
+        settings.DailyWebhook.WebhookUrl ??= string.Empty;
+        settings.DailyWebhook.ScoreAlertsWebhookUrl ??= string.Empty;
         settings.FarmFinder.ModRequirements ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         settings.Appearance.CustomTheme ??= new CustomThemeSettings();
         settings.Appearance.CustomTheme.Colors ??= CustomThemePalette.CreateDefaultColors();

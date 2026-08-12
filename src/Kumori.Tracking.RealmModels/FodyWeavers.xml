@@ -1,0 +1,6 @@
+<!-- Realm weaving is isolated here so loading Kumori.Tracking inside osu! does not
+     register duplicate default-schema models after osu!'s Realm is open. -->
+<Weavers xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="FodyWeavers.xsd">
+  <Realm />
+</Weavers>

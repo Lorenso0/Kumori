@@ -102,6 +102,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _globalCompletedMetric = "-";
     [ObservableProperty] private string _globalFailedMetric = "-";
     [ObservableProperty] private string _globalScoreMetric = "-";
+    [ObservableProperty] private string _globalKeysMetric = "-";
+    [ObservableProperty] private string _globalMissesMetric = "-";
+    [ObservableProperty] private string _globalAverageActiveMetric = "-";
+    [ObservableProperty] private string _globalKeysPerPlayMetric = "-";
     [ObservableProperty] private string _accountChangeLine = "ACCOUNT CHANGE  ·  PP +0.0  ·  Rank +0  ·  Accuracy +0.000%  ·  Plays +0";
     [ObservableProperty] private string _groupHeader = "Recent plays";
     [ObservableProperty] private string _groupStats = "";
@@ -204,7 +208,7 @@ public partial class MainViewModel : ObservableObject
     public bool HasActiveSession => _activeSessionId is not null;
     public bool ShowSessionGrouping => true;
     private bool CanMaintainTrackingData() => !HasActiveSession;
-    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.7.0"}";
+    public string AppVersionText => $"v{typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.8.0"}";
 
     partial void OnCanStartTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
     partial void OnIsLaunchingTosuChanged(bool value) => LaunchTosuCommand.NotifyCanExecuteChanged();
@@ -463,6 +467,15 @@ public partial class MainViewModel : ObservableObject
         GlobalCompletedMetric = analytics.Completed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         GlobalFailedMetric = analytics.Failed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
         GlobalScoreMetric = analytics.TotalScore.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        var totalKeys = analytics.ZTotal + analytics.XTotal;
+        GlobalKeysMetric = totalKeys.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        GlobalMissesMetric = analytics.TotalMisses.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        GlobalAverageActiveMetric = analytics.Attempts == 0
+            ? "0m"
+            : FormatPlaytime(analytics.TotalDurationSeconds / analytics.Attempts);
+        GlobalKeysPerPlayMetric = analytics.Attempts == 0
+            ? "0"
+            : Invariant($"{totalKeys / (double)analytics.Attempts:N0}");
         var synced = FormatLocalProfileSyncTime(analytics.LastSyncedAt);
         SyncLine = Invariant($"Dashboard updated {synced}");
 

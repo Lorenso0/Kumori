@@ -2,6 +2,7 @@ using System.Net;
 using Kumori.App.FarmFinder;
 using Kumori.FarmFinder;
 using Kumori.Gameplay;
+using Kumori.Storage;
 using Xunit;
 
 namespace Kumori.App.Tests;
@@ -11,6 +12,35 @@ public sealed class FarmBeatmapFileCacheTests : IDisposable
     private readonly string directory = Path.Combine(
         Path.GetTempPath(),
         $"kumori-farm-beatmaps-{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task MetadataProviderEnrichesAnExistingCacheFromTheOsuFile()
+    {
+        Directory.CreateDirectory(directory);
+        var beatmapPath = Path.Combine(
+            FindRepositoryRoot(),
+            "tests",
+            "Kumori.App.Tests",
+            "Fixtures",
+            "difficulty-curve.osu");
+        var files = new FarmBeatmapFileCache(
+            directory,
+            new HttpClient(new ThrowingHandler()),
+            _ => beatmapPath);
+        var repository = new FarmFinderRepository(
+            Path.Combine(directory, "farm-finder.sqlite3"));
+        var provider = new FarmBeatmapMetadataProvider(files, repository);
+        var beatmap = new FarmBeatmap(
+            123, 456, "Artist", "Title", "Insane", "Mapper",
+            180, 90, 100, 6, "ranked", DateTimeOffset.UtcNow, "");
+
+        var enriched = await provider.EnrichAsync(beatmap);
+
+        Assert.Equal(4, enriched.CircleSize);
+        Assert.Equal(9, enriched.ApproachRate);
+        Assert.Equal(8, enriched.OverallDifficulty);
+        Assert.Equal(5, enriched.DrainRate);
+    }
 
     [Fact]
     public async Task DownloadsAndReusesAValidatedBeatmapFile()
@@ -132,6 +162,7 @@ public sealed class FarmBeatmapFileCacheTests : IDisposable
 
     public void Dispose()
     {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         if (Directory.Exists(directory))
             Directory.Delete(directory, true);
     }

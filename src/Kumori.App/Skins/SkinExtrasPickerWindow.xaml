@@ -1,6 +1,7 @@
 <UserControl x:Class="Kumori.App.Skins.SkinExtrasPickerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Kumori.App"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         Focusable="True"
@@ -181,6 +182,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="36" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="150" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
@@ -211,6 +213,33 @@
                                        Foreground="{DynamicResource Brush.TextMuted}" />
                         </StackPanel>
                         <Button Grid.Column="3"
+                                Height="30"
+                                Margin="8,0,0,0"
+                                Padding="7,0"
+                                HorizontalContentAlignment="Stretch"
+                                Click="ElementTintButton_Click"
+                                ToolTip="Recolour this logical element">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="20" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="16"
+                                        Height="16"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Background="{Binding TintBrush}"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="1"
+                                        CornerRadius="2" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding TintLabel}"
+                                           Margin="6,0,0,0"
+                                           VerticalAlignment="Center"
+                                           FontSize="10" />
+                            </Grid>
+                        </Button>
+                        <Button Grid.Column="4"
                                 Content="Only"
                                 Margin="6,0,0,0"
                                 Padding="7,2"
@@ -232,86 +261,13 @@
                       IsEnabled="{Binding IsEditable}"
                       Margin="0,2"
                       Padding="3,2"
+                      ToolTip="{Binding ChangeText}"
                       Click="PackSettingChoice_Click">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="115" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding Section}"
-                               FontSize="9"
-                               Foreground="{DynamicResource Brush.TextMuted}" />
-                    <StackPanel Grid.Column="1">
-                        <TextBlock Text="{Binding Key}"
-                                   FontSize="10"
-                                   FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding ChangeText}"
-                                   Margin="0,2,0,0"
-                                   FontSize="9"
-                                   Foreground="{DynamicResource Brush.TextSecondary}"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
-                    <TextBlock Grid.Column="2"
-                               Text="{Binding RequirementText}"
-                               Margin="8,0,0,0"
-                               FontSize="9"
-                               Foreground="{DynamicResource Brush.AccentPink}" />
-                </Grid>
+                <TextBlock Text="{Binding Key}"
+                           FontSize="10"
+                           FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" />
             </CheckBox>
-        </DataTemplate>
-        <DataTemplate x:Key="PreviewElementLayerTemplate">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="24" />
-                    <ColumnDefinition Width="34" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <CheckBox VerticalAlignment="Center"
-                          HorizontalAlignment="Center"
-                          IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                          Click="PackElementChoice_Click"
-                          ToolTip="{Binding SelectionToolTip}" />
-                <Border Grid.Column="1"
-                        Width="28"
-                        Height="28"
-                        Background="#FF000000"
-                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
-                        BorderThickness="1"
-                        CornerRadius="4">
-                    <Image Source="{Binding Thumbnail}"
-                           Margin="2"
-                           Stretch="Uniform"
-                           RenderOptions.BitmapScalingMode="LowQuality" />
-                </Border>
-                <StackPanel Grid.Column="2"
-                            Margin="7,0,0,0"
-                            VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Name}"
-                               FontSize="10"
-                               FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="{Binding LayerDetailText}"
-                               Margin="0,1,0,0"
-                               FontSize="9">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground"
-                                        Value="{DynamicResource Brush.TextMuted}" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding FromCurrentSkin}"
-                                                 Value="True">
-                                        <Setter Property="Foreground"
-                                                Value="{DynamicResource Brush.AccentPink}" />
-                                        <Setter Property="FontWeight"
-                                                Value="SemiBold" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </StackPanel>
-            </Grid>
         </DataTemplate>
     </UserControl.Resources>
 
@@ -382,67 +338,98 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel>
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="260" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock x:Name="TitleText"
-                           Text="Browse Skin Extras"
-                           FontSize="20"
-                           FontWeight="SemiBold" />
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="340" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="TitleText"
+                               Text="Browse Skin Extras"
+                               FontSize="20"
+                               FontWeight="SemiBold" />
+                    <Border Margin="10,2,0,0"
+                            Padding="7,2"
+                            VerticalAlignment="Top"
+                            Background="{DynamicResource Brush.ControlBackground}"
+                            CornerRadius="9">
+                        <TextBlock x:Name="HeaderPackCountText"
+                                   Text="0 packs"
+                                   FontSize="9"
+                                   Foreground="{DynamicResource Brush.TextSecondary}" />
+                    </Border>
+                </StackPanel>
+                <TextBlock x:Name="SubtitleText"
+                           Margin="0,3,0,0"
+                           Foreground="{DynamicResource Brush.TextSecondary}"
+                           TextWrapping="Wrap" />
+                <TextBlock x:Name="ExtrasSyncStatusText"
+                           Margin="0,3,0,0"
+                           FontSize="10"
+                           Foreground="{DynamicResource Brush.AccentPink}"
+                           Text="Extras catalog has not been checked yet."
+                           TextWrapping="Wrap" />
+            </StackPanel>
+            <Grid Grid.Column="1" Height="32" VerticalAlignment="Top">
                 <TextBox x:Name="SearchBox"
-                         Grid.Column="1"
-                         Height="30"
-                         Padding="9,4"
+                         Padding="28,5,9,5"
                          ToolTip="Search names, authors, families, filenames, or tags"
+                         AutomationProperties.Name="Search packs"
                          TextChanged="SearchBox_TextChanged" />
-                <CheckBox x:Name="LazerUsedOnlyCheckBox"
-                          Grid.Column="3"
-                          Content="Lazer-used only"
-                          Margin="10,0,0,0"
-                          VerticalAlignment="Center"
-                          ToolTip="Show only assets requested by osu! lazer 2026.702.0"
-                          Checked="LazerFilter_Changed"
-                          Unchecked="LazerFilter_Changed" />
-                <CheckBox x:Name="FavoritesOnlyCheckBox"
-                          Grid.Column="4"
-                          Content="Favorites"
-                          Margin="10,0,0,0"
-                          VerticalAlignment="Center"
-                          Checked="LibraryFilter_Changed"
-                          Unchecked="LibraryFilter_Changed" />
-                <Button x:Name="CheckExtrasUpdatesButton"
-                        Grid.Column="2"
-                        Content="Check for updates"
-                        Height="30"
-                        Margin="10,0,0,0"
-                        Padding="10,0"
-                        Click="CheckExtrasUpdates_Click"
-                        ToolTip="Check GitHub and synchronize the complete Extras catalog"
-                        AutomationProperties.Name="Check Extras for updates" />
+                <TextBlock Margin="10,0,0,0"
+                           VerticalAlignment="Center"
+                           IsHitTestVisible="False"
+                           Foreground="{DynamicResource Brush.TextMuted}"
+                           Text="Search packs">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Text.Length, ElementName=SearchBox}"
+                                             Value="0">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </Grid>
-            <TextBlock x:Name="SubtitleText"
-                       Margin="0,3,0,0"
-                       Foreground="{DynamicResource Brush.TextSecondary}"
-                       TextWrapping="Wrap" />
-            <TextBlock x:Name="ExtrasSyncStatusText"
-                       Margin="0,3,0,0"
-                       FontSize="10"
-                       Foreground="{DynamicResource Brush.AccentPink}"
-                       Text="Extras catalog has not been checked yet."
-                       TextWrapping="Wrap" />
-        </StackPanel>
+            <Button x:Name="CheckExtrasUpdatesButton"
+                    Grid.Column="2"
+                    Content="Check for updates"
+                    Height="32"
+                    Margin="10,0,0,0"
+                    Padding="10,0"
+                    VerticalAlignment="Top"
+                    Click="CheckExtrasUpdates_Click"
+                    ToolTip="Check GitHub and synchronize the complete Extras catalog"
+                    AutomationProperties.Name="Check Extras for updates" />
+            <CheckBox x:Name="LazerUsedOnlyCheckBox"
+                      Grid.Column="3"
+                      Content="Lazer used"
+                      Margin="12,7,0,0"
+                      VerticalAlignment="Top"
+                      ToolTip="Show only assets requested by osu! lazer 2026.702.0"
+                      Checked="LazerFilter_Changed"
+                      Unchecked="LazerFilter_Changed" />
+            <CheckBox x:Name="FavoritesOnlyCheckBox"
+                      Grid.Column="4"
+                      Content="Favorites"
+                      Margin="12,7,0,0"
+                      VerticalAlignment="Top"
+                      Checked="LibraryFilter_Changed"
+                      Unchecked="LibraryFilter_Changed" />
+        </Grid>
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="210" />
+                <ColumnDefinition Width="230" />
                 <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="340" />
                 <ColumnDefinition Width="12" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
@@ -456,7 +443,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="ELEMENT FAMILIES"
+                    <TextBlock Text="FAMILIES"
                                Style="{StaticResource Text.LabelUpper}"
                                Margin="12,10,12,8" />
                 <ListBox x:Name="FamilyList"
@@ -545,7 +532,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="AVAILABLE PACKS"
+                    <TextBlock Text="PACKS"
                                Style="{StaticResource Text.LabelUpper}"
                                Margin="12,10,12,8" />
                     <ItemsControl x:Name="PackList"
@@ -802,41 +789,118 @@
                     CornerRadius="{DynamicResource Radius.ThemeCard}">
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="88" />
                         <RowDefinition Height="*" />
-                        <!-- Keep the preview geometry stable when a pack exposes
-                             resolution choices, settings, or longer health text. -->
-                        <RowDefinition Height="272" />
                     </Grid.RowDefinitions>
-                    <Grid Margin="14,11,14,10">
+                    <Grid x:Name="SelectedPackHeader"
+                          Margin="14,12"
+                          MaxWidth="1180"
+                          HorizontalAlignment="Stretch">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="64" />
+                            <ColumnDefinition Width="12" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel>
+                        <Border Width="64"
+                                Height="64"
+                                Background="#FF000000"
+                                BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <Image x:Name="SelectedPackThumbnail"
+                                   Margin="7"
+                                   Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
                             <TextBlock x:Name="SelectedPackName"
                                        Text="Select a pack"
-                                       FontSize="15"
+                                       FontSize="16"
                                        FontWeight="SemiBold" />
+                            <StackPanel Margin="0,5,0,0" Orientation="Horizontal">
+                                <TextBlock x:Name="SelectedPackSummaryText"
+                                           Foreground="{DynamicResource Brush.TextSecondary}"
+                                           Text="Choose a pack to inspect its elements" />
+                                <Border x:Name="SelectedPackHealthBadge"
+                                        Margin="10,0,0,0"
+                                        Padding="7,2"
+                                        Background="{DynamicResource Brush.ControlBackground}"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Visibility="Collapsed">
+                                    <TextBlock x:Name="SelectedPackHealthText"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.Success}"
+                                               Text="Healthy" />
+                                </Border>
+                                <Border x:Name="SelectedPackCompletenessBadge"
+                                        Margin="6,0,0,0"
+                                        Padding="7,2"
+                                        Background="{DynamicResource Brush.ControlBackground}"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Visibility="Collapsed">
+                                    <TextBlock x:Name="SelectedPackCompletenessText"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.TextSecondary}" />
+                                </Border>
+                            </StackPanel>
                             <TextBlock x:Name="SelectedPackPath"
-                                       Margin="0,3,0,0"
-                                       FontSize="10"
+                                       Margin="0,4,0,0"
+                                       MaxWidth="720"
+                                       FontSize="9"
                                        Foreground="{DynamicResource Brush.TextMuted}"
                                        TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                         <Button x:Name="FavoriteButton"
-                                Grid.Column="1"
-                                Content="☆ Favorite"
+                                Grid.Column="3"
+                                Content="&#x2606;"
                                 Margin="12,0,0,0"
-                                Padding="9,3"
-                                VerticalAlignment="Top"
+                                Width="38"
+                                Height="38"
+                                Padding="0"
+                                VerticalAlignment="Center"
                                 IsEnabled="False"
                                 Click="Favorite_Click"
                                 ToolTip="Keep this pack at the top of its family" />
+                        <Button x:Name="UsePackButton"
+                                Grid.Column="4"
+                                Content="Add to Changes"
+                                MinWidth="148"
+                                Height="38"
+                                Margin="10,0,0,0"
+                                Padding="14,0"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource Button.Primary}"
+                                IsDefault="True"
+                                IsEnabled="False"
+                                Click="UsePack_Click" />
                     </Grid>
 
-                    <Border Grid.Row="1"
-                            Margin="14,0"
+                    <Grid x:Name="PackWorkspaceGrid"
+                          Grid.Row="1"
+                          Margin="14,0,14,14"
+                          MaxWidth="1180"
+                          HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="300" />
+                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="PreviewAndElementsPane">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" MinHeight="250" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="300" />
+                            </Grid.RowDefinitions>
+                    <Border Grid.Row="0"
+                            Margin="0"
+                            MaxHeight="470"
+                            HorizontalAlignment="Stretch"
                             Background="#FF000000"
                             BorderBrush="{DynamicResource Brush.BorderSubtle}"
                             BorderThickness="1"
@@ -848,6 +912,12 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
+                            <ContentControl x:Name="RendererMount"
+                                            Grid.Row="1"
+                                            Margin="8,2"
+                                            Panel.ZIndex="40"
+                                            Background="#FF000000"
+                                            Visibility="Collapsed" />
                             <StackPanel x:Name="EmptyPreview"
                                         Grid.RowSpan="3"
                                         HorizontalAlignment="Center"
@@ -1105,160 +1175,76 @@
                                     Grid.Row="0"
                                     Margin="8,7,8,3"
                                     Padding="3"
+                                    HorizontalAlignment="Center"
+                                    Background="{DynamicResource Brush.ControlBackground}"
+                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                    BorderThickness="1"
+                                    CornerRadius="7"
+                                    Visibility="Hidden">
+                                <StackPanel Orientation="Horizontal">
+                                    <ToggleButton x:Name="PackOnlyPreviewButton"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Pack"
+                                                  Tag="Pack"
+                                                  IsChecked="True"
+                                                  Click="PreviewMode_Click" />
+                                    <ToggleButton x:Name="CurrentSkinPreviewButton"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Current skin"
+                                                  Tag="Current"
+                                                  Margin="3,0,0,0"
+                                                  IsChecked="False"
+                                                  Click="PreviewMode_Click" />
+                                    <ToggleButton x:Name="ComparePreviewButton"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Compare"
+                                                  Tag="Compare"
+                                                  Margin="3,0,0,0"
+                                                  IsChecked="False"
+                                                  Click="PreviewMode_Click" />
+                                    <ToggleButton x:Name="PreviewPlaybackToggle"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  MinWidth="66"
+                                                  Content="Pause"
+                                                  Margin="3,0,0,0"
+                                                  IsChecked="True"
+                                                  Click="PreviewPlaybackToggle_Click"
+                                                  ToolTip="Pause animated Extras previews" />
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="NativePreviewControls"
+                                    Grid.Row="0"
+                                    Margin="8,7,8,3"
+                                    Padding="7,4"
                                     HorizontalAlignment="Right"
+                                    Panel.ZIndex="60"
                                     Background="{DynamicResource Brush.ControlBackground}"
                                     BorderBrush="{DynamicResource Brush.BorderSubtle}"
                                     BorderThickness="1"
                                     CornerRadius="7"
                                     Visibility="Collapsed">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="Preview"
-                                               Margin="7,0,9,0"
-                                               VerticalAlignment="Center"
-                                               FontSize="10"
-                                               Foreground="{DynamicResource Brush.TextMuted}" />
-                                    <ToggleButton x:Name="ComparePreviewButton"
-                                                  Style="{StaticResource PreviewModeToggle}"
-                                                  Content="Compare"
-                                                  Tag="Compare"
-                                                  IsChecked="False"
-                                                  Click="PreviewMode_Click" />
-                                    <ToggleButton x:Name="PackOnlyPreviewButton"
-                                                  Style="{StaticResource PreviewModeToggle}"
-                                                  Content="Pack only"
-                                                  Tag="Pack"
-                                                  Margin="3,0,0,0"
-                                                  IsChecked="True"
-                                                  Click="PreviewMode_Click" />
-                                </StackPanel>
-                            </Border>
-                            <Border x:Name="PreviewElementSidebar"
-                                    Grid.Row="1"
-                                    Width="176"
-                                    Margin="8,2,0,2"
-                                    HorizontalAlignment="Left"
-                                    Panel.ZIndex="20"
-                                    Background="{DynamicResource Brush.PanelBackground}"
-                                    BorderBrush="{DynamicResource Brush.BorderSubtle}"
-                                    BorderThickness="1"
-                                    CornerRadius="7"
-                                    Visibility="Collapsed">
-                                <Grid Margin="7">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Text="ELEMENT LAYERS"
-                                               Margin="4,2,4,6"
-                                               Style="{StaticResource Text.LabelUpper}" />
-                                    <ToggleButton x:Name="FullRenderButton"
-                                                  Grid.Row="1"
-                                                  Height="34"
-                                                  Margin="0,0,0,3"
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <ToggleButton x:Name="NativeCursorMotionToggle"
+                                                  Content="Motion on"
+                                                  Height="24"
+                                                  MinWidth="76"
+                                                  Margin="7,0,0,0"
                                                   Padding="8,0"
-                                                  HorizontalContentAlignment="Left"
                                                   IsChecked="True"
-                                                  Click="FullRenderButton_Click"
-                                                  Content="Full render"
-                                                  ToolTip="Show the complete element without highlighting a layer">
-                                        <ToggleButton.Template>
-                                            <ControlTemplate TargetType="ToggleButton">
-                                                <Border x:Name="FullRenderChrome"
-                                                        Padding="{TemplateBinding Padding}"
-                                                        Background="Transparent"
-                                                        BorderBrush="Transparent"
-                                                        BorderThickness="1"
-                                                        CornerRadius="6">
-                                                    <ContentPresenter VerticalAlignment="Center" />
-                                                </Border>
-                                                <ControlTemplate.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="FullRenderChrome"
-                                                                Property="Background"
-                                                                Value="{DynamicResource Brush.ControlHoverBackground}" />
-                                                    </Trigger>
-                                                    <Trigger Property="IsChecked" Value="True">
-                                                        <Setter TargetName="FullRenderChrome"
-                                                                Property="Background"
-                                                                Value="{DynamicResource Brush.CardSelectedBackground}" />
-                                                        <Setter TargetName="FullRenderChrome"
-                                                                Property="BorderBrush"
-                                                                Value="{DynamicResource Brush.AccentPink}" />
-                                                    </Trigger>
-                                                </ControlTemplate.Triggers>
-                                            </ControlTemplate>
-                                        </ToggleButton.Template>
-                                    </ToggleButton>
-                                    <ListBox x:Name="PreviewElementList"
-                                             Grid.Row="2"
-                                             Background="Transparent"
-                                             BorderThickness="0"
-                                             HorizontalContentAlignment="Stretch"
-                                             ScrollViewer.CanContentScroll="True"
-                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                             ScrollViewer.VerticalScrollBarVisibility="Hidden"
-                                             VirtualizingPanel.IsVirtualizing="True"
-                                             VirtualizingPanel.VirtualizationMode="Recycling"
-                                             ItemTemplate="{StaticResource PreviewElementLayerTemplate}"
-                                             SelectionChanged="PreviewElementList_SelectionChanged">
-                                        <ListBox.ItemContainerStyle>
-                                            <Style TargetType="ListBoxItem">
-                                                <Setter Property="Margin" Value="0,1" />
-                                                <Setter Property="Padding" Value="6,5" />
-                                                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-                                                <Setter Property="Template">
-                                                    <Setter.Value>
-                                                        <ControlTemplate TargetType="ListBoxItem">
-                                                            <Border x:Name="LayerChrome"
-                                                                    Padding="{TemplateBinding Padding}"
-                                                                    Background="Transparent"
-                                                                    BorderBrush="Transparent"
-                                                                    BorderThickness="1"
-                                                                    CornerRadius="6">
-                                                                <ContentPresenter />
-                                                            </Border>
-                                                            <ControlTemplate.Triggers>
-                                                                <Trigger Property="IsMouseOver" Value="True">
-                                                                    <Setter TargetName="LayerChrome"
-                                                                            Property="Background"
-                                                                            Value="{DynamicResource Brush.ControlHoverBackground}" />
-                                                                </Trigger>
-                                                                <Trigger Property="IsSelected" Value="True">
-                                                                    <Setter TargetName="LayerChrome"
-                                                                            Property="Background"
-                                                                            Value="{DynamicResource Brush.CardSelectedBackground}" />
-                                                                    <Setter TargetName="LayerChrome"
-                                                                            Property="BorderBrush"
-                                                                            Value="{DynamicResource Brush.AccentPink}" />
-                                                                </Trigger>
-                                                            </ControlTemplate.Triggers>
-                                                        </ControlTemplate>
-                                                    </Setter.Value>
-                                                </Setter>
-                                            </Style>
-                                        </ListBox.ItemContainerStyle>
-                                    </ListBox>
-                                </Grid>
+                                                  Click="NativeCursorMotionToggle_Click"
+                                                  Visibility="Collapsed"
+                                                  ToolTip="Animate the cursor and its native lazer trail" />
+                                </StackPanel>
                             </Border>
                             <Grid x:Name="ComparisonPreview"
                                   Grid.Row="1"
+                                  Margin="8,2"
                                   Visibility="Collapsed">
-                                <Grid.Style>
-                                    <Style TargetType="Grid">
-                                        <Setter Property="Margin" Value="8,2" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Visibility, ElementName=PreviewElementSidebar}"
-                                                         Value="Visible">
-                                                <Setter Property="Margin" Value="190,2,8,2" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Grid.Style>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="1" />
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition x:Name="CurrentPreviewColumn" Width="*" />
+                                    <ColumnDefinition x:Name="ComparisonDividerColumn" Width="1" />
+                                    <ColumnDefinition x:Name="ResultPreviewColumn" Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid>
                                     <Viewbox Margin="3,18,3,3"
@@ -1274,9 +1260,10 @@
                                                FontSize="9"
                                                Foreground="{DynamicResource Brush.TextMuted}" />
                                 </Grid>
-                                <Border Grid.Column="1"
+                                <Border x:Name="ComparisonDivider"
+                                        Grid.Column="1"
                                         Background="{DynamicResource Brush.BorderSubtle}" />
-                                <Grid Grid.Column="2">
+                                <Grid x:Name="ResultPreviewPane" Grid.Column="2">
                                     <Viewbox Margin="3,18,3,3"
                                              Stretch="Uniform">
                                         <Canvas x:Name="ResultPreviewCanvas"
@@ -1292,18 +1279,8 @@
                             </Grid>
                             <Grid x:Name="CursorPreview"
                                   Grid.Row="1"
+                                  Margin="8,2"
                                   Visibility="Collapsed">
-                                <Grid.Style>
-                                    <Style TargetType="Grid">
-                                        <Setter Property="Margin" Value="8,2" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Visibility, ElementName=PreviewElementSidebar}"
-                                                         Value="Visible">
-                                                <Setter Property="Margin" Value="190,2,8,2" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Grid.Style>
                                 <Viewbox Stretch="Uniform">
                                     <Canvas x:Name="CursorTrailCanvas"
                                             Width="380"
@@ -1320,50 +1297,70 @@
                         </Grid>
                     </Border>
 
-                    <ScrollViewer Grid.Row="2"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  VerticalScrollBarVisibility="Hidden"
-                                  PanningMode="VerticalOnly">
-                    <StackPanel Margin="14,10,14,12">
-                        <TextBlock x:Name="PackDetails"
-                                   Foreground="{DynamicResource Brush.TextSecondary}"
-                                   TextWrapping="Wrap" />
+                    <Border x:Name="IncludedElementsCard"
+                            Grid.Row="2"
+                            Padding="10"
+                            Background="{DynamicResource Brush.ControlBackground}"
+                            BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                            BorderThickness="1"
+                            CornerRadius="8">
                         <Expander x:Name="PackFilesExpander"
-                                  Header="Elements"
-                                  Margin="0,7,0,0"
-                                  IsExpanded="False"
+                                  Header="Included elements"
+                                  IsExpanded="True"
                                   Expanded="PackFilesExpander_Expanded">
-                            <Border Margin="0,5,0,0"
-                                    Padding="8,5"
-                                    Background="{DynamicResource Brush.ControlBackground}"
-                                    CornerRadius="5">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <StackPanel Orientation="Horizontal"
-                                                Margin="0,0,0,4">
-                                        <Button Content="All"
-                                                Padding="7,2"
-                                                Click="SelectAllPackFiles_Click" />
-                                        <Button Content="None"
-                                                Margin="5,0,0,0"
-                                                Padding="7,2"
-                                                Click="SelectNoPackFiles_Click" />
-                                        <Button Content="Invert"
-                                                Margin="5,0,0,0"
-                                                Padding="7,2"
-                                                Click="InvertPackFiles_Click" />
-                                    </StackPanel>
-                                    <ItemsControl x:Name="PackFilesList"
-                                                  Grid.Row="1"
-                                                  MaxHeight="132"
-                                                  Style="{StaticResource VirtualizedExtrasItems}"
-                                                  ItemTemplate="{StaticResource PackElementChoiceTemplate}" />
-                                </Grid>
-                            </Border>
+                            <Grid Margin="0,7,0,0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <StackPanel Orientation="Horizontal"
+                                            Margin="0,0,0,6">
+                                    <Button Content="All"
+                                            Padding="7,2"
+                                            Click="SelectAllPackFiles_Click" />
+                                    <Button Content="None"
+                                            Margin="5,0,0,0"
+                                            Padding="7,2"
+                                            Click="SelectNoPackFiles_Click" />
+                                    <Button Content="Invert"
+                                            Margin="5,0,0,0"
+                                            Padding="7,2"
+                                            Click="InvertPackFiles_Click" />
+                                </StackPanel>
+                                <ItemsControl x:Name="PackFilesList"
+                                              Grid.Row="1"
+                                              MaxHeight="210"
+                                              Style="{StaticResource VirtualizedExtrasItems}"
+                                              ItemTemplate="{StaticResource PackElementChoiceTemplate}" />
+                            </Grid>
                         </Expander>
+                    </Border>
+                        </Grid>
+
+                    <Border x:Name="PackDetailsInspector"
+                            Grid.Column="2"
+                            Background="{DynamicResource Brush.ControlBackground}"
+                            BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                    <ScrollViewer
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  PanningMode="VerticalOnly">
+                    <StackPanel Margin="14">
+                        <Border x:Name="PackNoticePanel"
+                                Margin="0,0,0,8"
+                                Padding="9,7"
+                                Background="{DynamicResource Brush.PanelBackground}"
+                                BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Visibility="Collapsed">
+                            <TextBlock x:Name="PackDetails"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource Brush.TextSecondary}"
+                                       TextWrapping="Wrap" />
+                        </Border>
                         <Border x:Name="ResolutionMismatchPanel"
                                 Margin="0,8,0,0"
                                 Padding="10,8"
@@ -1383,22 +1380,13 @@
                                 <RadioButton x:Name="UpscaleResolutionOption"
                                              GroupName="ExtrasResolutionPolicy"
                                              IsChecked="True"
-                                             Content="Create matching @2x automatically (recommended)"
+                                             Content="Create matching @2x (recommended)"
                                              ToolTip="High-quality 2× upscale that replaces the current @2x file." />
-                                <TextBlock Margin="22,1,0,5"
-                                           FontSize="9"
-                                           Foreground="{DynamicResource Brush.TextMuted}"
-                                           Text="Keeps the skin's high-resolution variant and uses the selected artwork."
-                                           TextWrapping="Wrap" />
                                 <RadioButton x:Name="UseOneXResolutionOption"
                                              GroupName="ExtrasResolutionPolicy"
-                                             Content="Use the pack's 1× file only"
+                                             Margin="0,5,0,0"
+                                             Content="Use the pack's 1× file"
                                              ToolTip="Removes the current @2x file so osu! uses the selected 1× file." />
-                                <TextBlock Margin="22,1,0,0"
-                                           FontSize="9"
-                                           Foreground="{DynamicResource Brush.TextMuted}"
-                                           Text="Removes the conflicting @2x from your skin when the change is applied."
-                                           TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                         <Border x:Name="CursorOptionsPanel"
@@ -1416,11 +1404,6 @@
                                           Checked="SmoothTrail_Changed"
                                           Unchecked="SmoothTrail_Changed"
                                           ToolTip="Adds a transparent 1×1 cursormiddle.png placeholder." />
-                                <TextBlock Margin="22,2,0,0"
-                                           FontSize="9"
-                                           Foreground="{DynamicResource Brush.TextMuted}"
-                                           TextWrapping="Wrap"
-                                           Text="Cursor-middle files from the pack and current skin are removed. Enable this to add a blank 1×1 cursormiddle.png for a smooth continuous trail." />
                             </StackPanel>
                         </Border>
                         <StackPanel Margin="0,8,0,0"
@@ -1453,17 +1436,15 @@
                         </Expander>
                     </StackPanel>
                     </ScrollViewer>
+                    </Border>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>
 
-        <Grid Grid.Row="4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" HorizontalAlignment="Left" Orientation="Horizontal">
-                <Button Content="Open Extras folder"
+        <Grid x:Name="UtilityBar" Grid.Row="4">
+            <StackPanel HorizontalAlignment="Left" Orientation="Horizontal">
+                <Button Content="Open folder"
                         Click="OpenFolder_Click" />
                 <Button Content="Import file…"
                         Margin="8,0,0,0"
@@ -1477,15 +1458,6 @@
                 <Button Content="Check &amp; repair"
                         Margin="8,0,0,0"
                         Click="ValidateRepair_Click" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal">
-                <Button x:Name="UsePackButton"
-                        Content="Add selected to Changes"
-                        Width="160"
-                        Style="{StaticResource Button.Primary}"
-                        IsDefault="True"
-                        IsEnabled="False"
-                        Click="UsePack_Click" />
             </StackPanel>
         </Grid>
             </Grid>
@@ -1543,6 +1515,14 @@
                     </StackPanel>
                 </Border>
             </Grid>
+            <Popup x:Name="ElementColorPickerPopup"
+                   Placement="Right"
+                   AllowsTransparency="True"
+                   StaysOpen="False"
+                   PopupAnimation="Fade"
+                   HorizontalOffset="6">
+                <local:CustomThemeColorPicker x:Name="ElementColorPicker" />
+            </Popup>
         </Grid>
     </Border>
 </UserControl>

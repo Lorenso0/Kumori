@@ -100,6 +100,10 @@ public sealed class BackupServiceTests : IDisposable
         dangerous.Backup.RetentionCount = 1;
         dangerous.Developer.LogRetentionDays = 1;
         dangerous.Developer.ForceReplayRecoveryNextPlay = true;
+        dangerous.DailyWebhook.Enabled = true;
+        dangerous.DailyWebhook.WebhookUrl = "https://discord.com/api/webhooks/123/secret";
+        dangerous.DailyWebhook.ScoreAlertsEnabled = true;
+        dangerous.DailyWebhook.ScoreAlertsWebhookUrl = "https://discord.com/api/webhooks/456/other-secret";
         File.WriteAllText(settingsFile, JsonSerializer.Serialize(dangerous));
 
         var service = new BackupService(database, settingsFile, pendingRestore);
@@ -126,6 +130,10 @@ public sealed class BackupServiceTests : IDisposable
         Assert.Equal(14, restored.Backup.RetentionCount);
         Assert.Equal(AppPaths.DefaultLogRetentionDays, restored.Developer.LogRetentionDays);
         Assert.False(restored.Developer.ForceReplayRecoveryNextPlay);
+        Assert.False(restored.DailyWebhook.Enabled);
+        Assert.Empty(restored.DailyWebhook.WebhookUrl);
+        Assert.False(restored.DailyWebhook.ScoreAlertsEnabled);
+        Assert.Empty(restored.DailyWebhook.ScoreAlertsWebhookUrl);
     }
 
     [Fact]

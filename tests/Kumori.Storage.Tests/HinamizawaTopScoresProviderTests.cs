@@ -26,12 +26,12 @@ public sealed class HinamizawaTopScoresProviderTests
                   "count":3,
                   "scores":[
                     {
-                      "id":1001,"pp":321.5,"accuracy":0.9876,"max_combo":900,
+                      "id":1001,"type":"score_best_osu","pp":321.5,"accuracy":0.9876,"max_combo":900,
                       "created_at":"2026-01-01T00:00:00Z","perfect":true,
                       "statistics":{"count_miss":0},"mods":["HD","DT"],
                       "beatmap":{"id":50,"beatmapset_id":5,"version":"Insane",
                         "bpm":180,"hit_length":100,"total_length":120,
-                        "difficulty_rating":6.2,"status":"ranked"},
+                        "difficulty_rating":6.2,"cs":4,"ar":9,"accuracy":8,"drain":6,"status":"ranked"},
                       "beatmapset":{"artist":"Artist","title":"Title","creator":"Mapper",
                         "status":"ranked","ranked_date":"2025-01-01T00:00:00Z",
                         "covers":{"card":"https://example.test/card.jpg"}}
@@ -61,13 +61,21 @@ public sealed class HinamizawaTopScoresProviderTests
 
         var score = Assert.Single(payload.Scores);
         Assert.Equal(1001, score.ScoreId);
-        Assert.Equal(["HD", "DT"], score.ActualMods.Select(mod => mod.Acronym));
+        Assert.Equal(FarmScoreOrigin.Legacy, score.Origin);
+        Assert.Equal(1001, score.LegacyScoreId);
+        Assert.True(score.UsesClassicScoring);
+        Assert.Equal(["HD", "DT", "CL"], score.ActualMods.Select(mod => mod.Acronym));
         Assert.All(score.ActualMods, mod => Assert.Equal("{}", mod.SettingsJson));
+        Assert.Equal("CL+DT+HD", score.CanonicalModSignature);
         Assert.Equal(1.5, score.ClockRate);
         Assert.True(score.IsFullCombo);
         var beatmap = Assert.Single(payload.Beatmaps);
         Assert.Equal("Artist", beatmap.Artist);
         Assert.Equal("https://example.test/card.jpg", beatmap.CoverUrl);
+        Assert.Equal(4, beatmap.CircleSize);
+        Assert.Equal(9, beatmap.ApproachRate);
+        Assert.Equal(8, beatmap.OverallDifficulty);
+        Assert.Equal(6, beatmap.DrainRate);
     }
 
     [Fact]
@@ -78,7 +86,8 @@ public sealed class HinamizawaTopScoresProviderTests
                 {
                   "scores":[
                     {
-                      "id":1001,"pp":321.5,"accuracy":0.9876,"max_combo":900,
+                      "id":1001,"type":"solo_score","build_id":20260730,
+                      "total_score":1000000,"pp":321.5,"accuracy":0.9876,"max_combo":900,
                       "ended_at":"2026-01-01T00:00:00Z",
                       "is_perfect_combo":false,
                       "statistics":{"miss":1},
@@ -98,7 +107,14 @@ public sealed class HinamizawaTopScoresProviderTests
 
         var score = Assert.Single(payload.Scores);
         Assert.Equal(1, score.MissCount);
+        Assert.Equal(FarmScoreOrigin.Lazer, score.Origin);
+        Assert.Equal(20260730, score.BuildId);
+        Assert.Equal(1_000_000, score.TotalScore);
+        Assert.False(score.UsesClassicScoring);
         Assert.Contains("\"adjust_pitch\":true", score.ActualMods[1].SettingsJson);
+        Assert.DoesNotContain(
+            score.ActualMods,
+            mod => mod.Acronym.Equals("CL", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

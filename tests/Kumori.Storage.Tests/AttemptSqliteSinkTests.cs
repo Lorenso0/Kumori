@@ -34,6 +34,7 @@ public class AttemptSqliteSinkTests : IDisposable
         Assert.Equal("Song", row.Title);
         Assert.Equal("HDDT", row.ModsKey);
         Assert.Equal(55_000, row.Score);
+        Assert.InRange(row.DurationSeconds, 3.5, 4.0);
         var reloaded = Assert.IsType<AttemptSummary>(repo.GetAttempt(row.Id));
         Assert.Equal(row with { Mods = Array.Empty<ModEntry>() }, reloaded with { Mods = Array.Empty<ModEntry>() });
         Assert.Equal(row.Mods.ToArray(), reloaded.Mods.ToArray());

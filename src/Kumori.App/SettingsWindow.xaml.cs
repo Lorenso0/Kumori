@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -14,10 +15,13 @@ using System.Runtime.CompilerServices;
 using MediaBrush = System.Windows.Media.Brush;
 using MediaColor = System.Windows.Media.Color;
 using MediaColorConverter = System.Windows.Media.ColorConverter;
+using Kumori.App.FarmFinder;
 using Kumori.Core;
 using Kumori.Core.Settings;
+using Kumori.FarmFinder;
 using Kumori.Native;
 using Kumori.Storage;
+using Serilog;
 
 namespace Kumori.App;
 
@@ -109,6 +113,10 @@ public partial class SettingsWindow : Window
         BackupInterval.Text = s.Backup.IntervalHours.ToString(CultureInfo.InvariantCulture);
         BackupRetention.Text = s.Backup.RetentionCount.ToString(CultureInfo.InvariantCulture);
         BackupDirectory.Text = s.Backup.Directory;
+        DailyWebhookEnabled.IsChecked = s.DailyWebhook.Enabled;
+        ScoreWebhookEnabled.IsChecked = s.DailyWebhook.ScoreAlertsEnabled;
+        DailyWebhookUrl.Text = s.DailyWebhook.WebhookUrl;
+        ScoreWebhookUrl.Text = s.DailyWebhook.ScoreAlertsWebhookUrl;
         RefreshKumoriAssociationStatus();
         LoadCustomTheme(CustomThemePalette.Normalize(s.Appearance.CustomTheme));
         switch (ThemeManager.Resolve(s.Appearance.ThemeId).Id)
@@ -142,7 +150,7 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private async void Save_Click(object sender, RoutedEventArgs e)
     {
         if (!int.TryParse(MinimumAttemptSeconds.Text, out var minimumAttemptSeconds)
             || minimumAttemptSeconds is < 1 or > 300
@@ -156,7 +164,38 @@ public partial class SettingsWindow : Window
         var hasValidCustomTheme = TryReadCustomTheme(out var customTheme, showError: SelectedThemeId == ThemeManager.CustomThemeId);
         if (SelectedThemeId == ThemeManager.CustomThemeId && !hasValidCustomTheme)
             return;
-
+        var dailyWebhookUrl = DailyWebhookUrl.Text.Trim();
+        var scoreWebhookUrl = ScoreWebhookUrl.Text.Trim();
+        if (DailyWebhookEnabled.IsChecked == true
+            && !DailyProgressWebhookService.TryValidateWebhookUrl(dailyWebhookUrl, out _))
+        {
+            SetStatus("Enter a valid HTTPS Discord webhook URL for daily updates.", isError: true);
+            return;
+        }
+        if (ScoreWebhookEnabled.IsChecked == true
+            && !DailyProgressWebhookService.TryValidateWebhookUrl(scoreWebhookUrl, out _))
+        {
+            SetStatus("Enter a valid HTTPS Discord webhook URL for PB alerts.", isError: true);
+            return;
+        }
+        if (ScoreWebhookEnabled.IsChecked == true)
+        {
+            try
+            {
+                var credentialStore = new FarmFinder.WindowsCredentialsStore(
+                    AppPaths.FarmFinderCredentialsFile);
+                if ((await credentialStore.LoadAsync())?.IsConfigured != true)
+                {
+                    SetStatus("Configure osu! API credentials in Farm Finder before enabling PB alerts.", isError: true);
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or System.ComponentModel.Win32Exception)
+            {
+                SetStatus("Kumori could not read the protected osu! API credentials. Re-enter them in Farm Finder.", isError: true);
+                return;
+            }
+        }
         _settings.Update(s =>
         {
             s.Tracking.Enabled = TrackingEnabled.IsChecked == true;
@@ -183,6 +222,10 @@ public partial class SettingsWindow : Window
             s.Backup.IntervalHours = Math.Clamp(backupInterval, 1, 720);
             s.Backup.RetentionCount = Math.Clamp(backupRetention, 1, 365);
             s.Backup.Directory = BackupDirectory.Text.Trim();
+            s.DailyWebhook.Enabled = DailyWebhookEnabled.IsChecked == true;
+            s.DailyWebhook.ScoreAlertsEnabled = ScoreWebhookEnabled.IsChecked == true;
+            s.DailyWebhook.WebhookUrl = dailyWebhookUrl;
+            s.DailyWebhook.ScoreAlertsWebhookUrl = scoreWebhookUrl;
         });
         _themes?.Apply(SelectedThemeId, persist: false);
         try
@@ -202,6 +245,77 @@ public partial class SettingsWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
+
+    private async void SendDailyWebhookTest_Click(object sender, RoutedEventArgs e)
+    {
+        var webhookUrl = DailyWebhookUrl.Text.Trim();
+        if (!DailyProgressWebhookService.TryValidateWebhookUrl(webhookUrl, out _))
+        {
+            SetStatus("Enter a valid HTTPS Discord webhook URL first.", isError: true);
+            return;
+        }
+
+        SendDailyWebhookTest.IsEnabled = false;
+        SetStatus("Sending test daily update…");
+        try
+        {
+            var analytics = new AnalyticsRepository(
+                new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: true));
+            await new DailyProgressWebhookService(_settings, analytics)
+                .SendTestAsync(webhookUrl);
+            SetStatus("Test daily update sent.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetStatus(ex.Message, isError: true);
+        }
+        finally
+        {
+            SendDailyWebhookTest.IsEnabled = true;
+        }
+    }
+
+    private async void SendScoreWebhookTest_Click(object sender, RoutedEventArgs e)
+    {
+        var webhookUrl = ScoreWebhookUrl.Text.Trim();
+        if (!DailyProgressWebhookService.TryValidateWebhookUrl(webhookUrl, out _))
+        {
+            SetStatus("Enter a valid HTTPS Discord webhook URL first.", isError: true);
+            return;
+        }
+
+        SendScoreWebhookTest.IsEnabled = false;
+        SetStatus("Sending test PB alert…");
+        try
+        {
+            var factory = new SqliteConnectionFactory(AppPaths.TrackingDatabase, readOnly: false);
+            var credentials = new FarmFinder.WindowsCredentialsStore(AppPaths.FarmFinderCredentialsFile);
+            using var api = new OsuApiClient(credentials, new OsuRankedModCatalog(), new ClockRateCalculator());
+            var profileTelemetry = new ProfileTelemetryStore(factory);
+            var service = new ScoreWebhookService(
+                _settings,
+                new ScoreWebhookRepository(factory),
+                new AttemptDetailsRepository(factory),
+                new MovementRepository(factory),
+                new PlaySharePackageService(
+                    new AttemptDetailsRepository(factory),
+                    new MovementRepository(factory),
+                    new SessionRepository(factory)),
+                api,
+                profileTelemetry.GetCurrentIdentity);
+            await service.SendTestAsync(webhookUrl);
+            SetStatus("Test PB alert sent.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus(ex.Message, isError: true);
+            Log.Warning(ex, "Could not send test PB alert");
+        }
+        finally
+        {
+            SendScoreWebhookTest.IsEnabled = true;
+        }
+    }
 
     private async void DeleteOldTrackingData_Click(object sender, RoutedEventArgs e)
     {

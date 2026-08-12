@@ -2,8 +2,6 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Input;
-using System.Windows.Media;
 using Kumori.App.ViewModels;
 using Kumori.FarmFinder;
 
@@ -19,6 +17,7 @@ public partial class FarmFinderPage : UserControl
         InitializeComponent();
         DataContext = viewModel;
         viewModel.ConfirmUpdateAsync = ConfirmUpdateAsync;
+        viewModel.ConfirmMetadataRepairAsync = ConfirmMetadataRepairAsync;
         viewModel.PropertyChanged += ViewModelOnPropertyChanged;
         Unloaded += (_, _) =>
         {
@@ -62,38 +61,6 @@ public partial class FarmFinderPage : UserControl
     private static bool Contains(string value, string query) =>
         value.Contains(query, StringComparison.OrdinalIgnoreCase);
 
-    private void ResultsGrid_PreviewMouseLeftButtonUp(
-        object sender,
-        MouseButtonEventArgs e)
-    {
-        if (e.OriginalSource is not DependencyObject source ||
-            FindAncestor<DataGridRow>(source) is not
-            {
-                Item: FarmMapResult result,
-            })
-            return;
-
-        e.Handled = true;
-        viewModel.OpenBeatmapCommand.Execute(result);
-    }
-
-    private static T? FindAncestor<T>(DependencyObject? current)
-        where T : DependencyObject
-    {
-        while (current is not null)
-        {
-            if (current is T target)
-                return target;
-
-            current = current is ContentElement content
-                ? ContentOperations.GetParent(content) ??
-                  (content as FrameworkContentElement)?.Parent
-                : VisualTreeHelper.GetParent(current);
-        }
-
-        return null;
-    }
-
     private Task<bool> ConfirmUpdateAsync(int minimumRank, int maximumRank)
     {
         var playerCount = maximumRank - minimumRank + 1;
@@ -114,6 +81,26 @@ public partial class FarmFinderPage : UserControl
             discovery + "\n\n" +
             "Progress is shown live. You can cancel and resume without losing completed players.",
             "Build Farm Finder index",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+        return Task.FromResult(result == MessageBoxResult.Yes);
+    }
+
+    private Task<bool> ConfirmMetadataRepairAsync(
+        FarmScoreMetadataRepairStatus status)
+    {
+        var estimatedMinutes = Math.Max(
+            1,
+            (int)Math.Ceiling(status.PendingPlayers / 500d));
+        var result = MessageBox.Show(
+            Window.GetWindow(this),
+            $"Refresh top scores for {status.PendingPlayers:N0} cached players?\n\n" +
+            "This fills the new stable/lazer origin, Classic, legacy score ID, " +
+            "score-total, and client-build fields. Existing rows are replaced only " +
+            "after each player's response is downloaded successfully.\n\n" +
+            $"At the current provider limit this may take about {estimatedMinutes:N0} minutes. " +
+            "You can cancel at any time and run this action again to resume.",
+            "Repair Farm Finder score data",
             MessageBoxButton.YesNo,
             MessageBoxImage.Information);
         return Task.FromResult(result == MessageBoxResult.Yes);

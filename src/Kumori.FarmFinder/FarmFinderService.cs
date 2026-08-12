@@ -256,6 +256,93 @@ public sealed class FarmFinderService : IFarmFinderService, IDisposable
         }
     }
 
+    public async Task<FarmScoreMetadataRepairResult> RepairScoreMetadataAsync(
+        IProgress<FarmFinderProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        await repository.InitializeAsync(cancellationToken);
+        var pending = await repository.GetPlayersNeedingScoreMetadataRepairAsync(
+            cancellationToken);
+        var sourceName = scoresProviderMetadata?.SourceName ?? "score provider";
+        if (pending.Count == 0)
+        {
+            progress?.Report(new FarmFinderProgress(
+                1,
+                1,
+                "Cached score metadata is already current.",
+                Phase: FarmFinderProgressPhase.Completed,
+                SourceName: sourceName));
+            return new FarmScoreMetadataRepairResult(0, 0, 0, 0);
+        }
+
+        progress?.Report(new FarmFinderProgress(
+            0,
+            pending.Count,
+            $"Repairing cached score metadata from {sourceName}...",
+            Phase: FarmFinderProgressPhase.FetchingScores,
+            SourceName: sourceName));
+
+        var processed = 0;
+        var completed = 0;
+        var failed = 0;
+        var scoresRefreshed = 0;
+        await Parallel.ForEachAsync(
+            pending,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism =
+                    scoresProviderMetadata?.RecommendedConcurrency ?? 2,
+                CancellationToken = cancellationToken,
+            },
+            async (player, token) =>
+            {
+                try
+                {
+                    var payload = await scoresProvider.GetTopScoresAsync(player, token);
+                    await repository.ReplacePlayerScoresAsync(payload, token);
+                    Interlocked.Add(ref scoresRefreshed, payload.Scores.Count);
+                    Interlocked.Increment(ref completed);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch
+                {
+                    Interlocked.Increment(ref failed);
+                }
+                finally
+                {
+                    var current = Interlocked.Increment(ref processed);
+                    progress?.Report(new FarmFinderProgress(
+                        current,
+                        pending.Count,
+                        $"Repaired metadata for {current:N0} of {pending.Count:N0} cached players...",
+                        PlayersFetched: Volatile.Read(ref completed),
+                        ScoresExamined: Volatile.Read(ref scoresRefreshed),
+                        RateLimitedUntil: rateLimitedUntil,
+                        PlayersFailed: Volatile.Read(ref failed),
+                        Phase: FarmFinderProgressPhase.FetchingScores,
+                        SourceName: sourceName));
+                }
+            });
+
+        progress?.Report(new FarmFinderProgress(
+            pending.Count,
+            pending.Count,
+            $"Score metadata repair finished: {completed:N0} players updated, {failed:N0} failed.",
+            PlayersFetched: completed,
+            ScoresExamined: scoresRefreshed,
+            PlayersFailed: failed,
+            Phase: FarmFinderProgressPhase.Completed,
+            SourceName: sourceName));
+        return new FarmScoreMetadataRepairResult(
+            pending.Count,
+            completed,
+            failed,
+            scoresRefreshed);
+    }
+
     private async Task<int> ScanGlobalRankingAsync(
         IndexJob job,
         int rankingCount,

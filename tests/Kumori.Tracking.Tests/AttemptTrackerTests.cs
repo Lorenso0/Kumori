@@ -158,6 +158,35 @@ public class AttemptTrackerTests
     }
 
     [Fact]
+    public void LazerAuthoritativeResultMods_ReplaceFalseCapturedBpm()
+    {
+        var bpm = new AttemptMod("BPM", """{"target_bpm":240}""");
+        _tracker.Ingest(Play(0, live: 0) with
+        {
+            ClientKind = OsuClientKind.Lazer,
+            ModsKey = "HDBPM",
+            Mods = [new AttemptMod("HD"), bpm],
+        });
+        _tracker.Ingest(Play(3.5, live: 3500, score: 50_000, n300: 100, progress: 1) with
+        {
+            ClientKind = OsuClientKind.Lazer,
+            ModsKey = "HDBPM",
+            Mods = [new AttemptMod("HD"), bpm],
+        });
+        _tracker.Ingest(Results(3.8, score: 50_000, n300: 100, progress: 1) with
+        {
+            ClientKind = OsuClientKind.Lazer,
+            ModsKey = "HDDT",
+            Mods = [new AttemptMod("HD"), new AttemptMod("DT")],
+            ModsAreAuthoritativeResult = true,
+        });
+
+        AttemptSnapshot final = Assert.Single(_sink.Finals).Snapshot;
+        Assert.Equal("HDDT", final.ModsKey);
+        Assert.Equal(["HD", "DT"], final.Mods.Select(mod => mod.Acronym));
+    }
+
+    [Fact]
     public void ResultsScreenRichHitCounts_AreFinalized()
     {
         _tracker.Ingest(Play(0, live: 0));

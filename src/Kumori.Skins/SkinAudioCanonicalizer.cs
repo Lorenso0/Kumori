@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ManagedBass;
 
-namespace Kumori.App.Skins;
+namespace Kumori.Skins;
 
 /// <summary>
 /// Produces a container/metadata-independent fingerprint from decoded PCM.

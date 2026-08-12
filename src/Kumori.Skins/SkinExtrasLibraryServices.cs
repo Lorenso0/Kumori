@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-namespace Kumori.App.Skins;
+namespace Kumori.Skins;
 
 public static class SkinExtrasPersistentIndex
 {
@@ -98,7 +98,7 @@ public static class SkinExtrasPersistentIndex
             if (descriptor is null) continue;
             cacheChanged = true;
             if (descriptor.Manifest.Files.Any(file =>
-                    SkinElementCategorizer.IsAudio(file.TargetFilename))
+                    SkinMediaTypes.IsAudio(file.TargetFilename))
                 || SkinCursorMiddlePolicy.IsCursorFamily(
                     descriptor.Manifest.FamilyId))
             {
@@ -254,8 +254,8 @@ public static class SkinExtrasPersistentIndex
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
                      .Where(path => Path.GetFileName(path).Equals("extras.json", StringComparison.OrdinalIgnoreCase)
-                                    || SkinElementCategorizer.IsImage(path)
-                                    || SkinElementCategorizer.IsAudio(path))
+                                    || SkinMediaTypes.IsImage(path)
+                                    || SkinMediaTypes.IsAudio(path))
                      .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             var info = new FileInfo(file);
@@ -671,8 +671,8 @@ public static class SkinExtraPackValidator
                 described.Add(actual);
                 if (!actual.ByteHash.Equals(file.ByteHash, StringComparison.OrdinalIgnoreCase))
                     issues.Add(Error("byte-hash", "The file changed after extraction.", file.TargetFilename));
-                if (SkinElementCategorizer.IsImage(path))
-                    _ = SkinImageTools.Decode(bytes);
+                if (SkinMediaTypes.IsImage(path))
+                    _ = SkinImageAnalysis.Decode(bytes);
                 // Empty audio is a valid osu! skin convention for intentionally
                 // silencing a sound, so it participates in canonical deduplication.
             }
@@ -750,7 +750,7 @@ public static class SkinExtraPackValidator
         return repaired;
     }
 
-    internal static SkinExtraPackDescriptor CanonicalizeDuplicateTargets(
+    public static SkinExtraPackDescriptor CanonicalizeDuplicateTargets(
         SkinExtraPackDescriptor pack,
         bool forceRebuild = false)
     {
@@ -849,9 +849,9 @@ public static class SkinExtraPortablePackage
 {
     private static readonly DateTimeOffset DeterministicArchiveTimestamp =
         new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
-    internal const int MaxEntries = 4096;
-    internal const long MaxExpandedBytes = 512L * 1024 * 1024;
-    internal const long MaxCompressedBytes = 256L * 1024 * 1024;
+    public const int MaxEntries = 4096;
+    public const long MaxExpandedBytes = 512L * 1024 * 1024;
+    public const long MaxCompressedBytes = 256L * 1024 * 1024;
     internal const long MaxSingleEntryBytes = 256L * 1024 * 1024;
     internal const int MaxManifestBytes = 2 * 1024 * 1024;
     private const long CompressionRatioThresholdBytes = 1024 * 1024;
@@ -894,7 +894,7 @@ public static class SkinExtraPortablePackage
             return ImportCore(packagePath, extrasRoot);
     }
 
-    internal static SkinExtraPortableImportResult ImportForCatalog(
+    public static SkinExtraPortableImportResult ImportForCatalog(
         string packagePath,
         string extrasRoot,
         CancellationToken cancellationToken,

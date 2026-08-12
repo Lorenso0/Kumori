@@ -232,6 +232,89 @@ public sealed class PlaySharePackageServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CompactDiscordPackage_ContainsBeatmapAndAudioAndPreviewsOffline()
+    {
+        (PlaySharePackageService exporter, long attemptId) = CreateServiceWithPlay();
+        string beatmap = Path.Combine(root, "compact.osu");
+        string audio = Path.Combine(root, "compact.mp3");
+        await File.WriteAllTextAsync(
+            beatmap,
+            "osu file format v14\n\n[General]\nAudioFilename: compact.mp3\n");
+        await File.WriteAllBytesAsync(audio, Encoding.UTF8.GetBytes("compact audio"));
+        string package = Path.Combine(root, "compact.kumori");
+
+        await exporter.ExportAsync(
+            attemptId,
+            "Sender",
+            package,
+            [
+                new ShareMediaFile("compact.osu", "beatmap", beatmap),
+                new ShareMediaFile("compact.mp3", "audio", audio),
+            ],
+            ["Backgrounds, video, and custom hitsounds are omitted."],
+            KumoriPackageProfile.CompactDiscord);
+
+        var resolverCalls = 0;
+        var factory = new SqliteConnectionFactory(trackingDatabase, readOnly: false);
+        var importer = new PlaySharePackageService(
+            new AttemptDetailsRepository(factory),
+            new MovementRepository(factory),
+            new SessionRepository(factory),
+            importsDatabase,
+            assetsDirectory,
+            stagingDirectory,
+            compactMediaResolver: (_, _) =>
+            {
+                resolverCalls++;
+                return Task.FromResult<IReadOnlyList<ShareMediaFile>>(
+                [
+                    new("compact.osu", "beatmap", beatmap),
+                    new("compact.mp3", "audio", audio),
+                ]);
+            });
+
+        KumoriPackagePreview preview = await importer.PreviewAsync(package);
+        Assert.Equal(PlaySharePackageService.CompactDiscordProfile, preview.MediaProfile);
+        Assert.Equal(0, resolverCalls);
+        using (ZipArchive archive = ZipFile.OpenRead(package))
+            Assert.Contains(archive.Entries, entry => entry.FullName.EndsWith(".mp3"));
+
+        KumoriImportResult result = await importer.ImportAsync(package);
+        Assert.Equal(0, resolverCalls);
+        Assert.Equal(3, importer.GetImportedMovement(result.ImportId).Count);
+        string importedAudio = Assert.Single(
+            result.Details.LocalMediaPaths,
+            pair => pair.Key == "compact.mp3").Value;
+        Assert.True(File.Exists(importedAudio));
+        Assert.Equal(
+            await File.ReadAllBytesAsync(audio),
+            await File.ReadAllBytesAsync(importedAudio));
+    }
+
+    [Fact]
+    public async Task Preview_RemainsCompatibleWithVersionOneFullPackages()
+    {
+        (PlaySharePackageService service, long attemptId) = CreateServiceWithPlay();
+        string package = await ExportBasicPackageAsync(service, attemptId, "legacy-v1.kumori");
+        using (ZipArchive archive = ZipFile.Open(package, ZipArchiveMode.Update))
+        {
+            ZipArchiveEntry manifestEntry = archive.GetEntry("manifest.json")!;
+            JsonObject manifest;
+            using (Stream input = manifestEntry.Open())
+                manifest = JsonNode.Parse(input)!.AsObject();
+            manifestEntry.Delete();
+            manifest["version"] = 1;
+            manifest.Remove("media_profile");
+            ZipArchiveEntry replacement = archive.CreateEntry("manifest.json");
+            await using Stream output = replacement.Open();
+            await output.WriteAsync(Encoding.UTF8.GetBytes(manifest.ToJsonString()));
+        }
+
+        KumoriPackagePreview preview = await service.PreviewAsync(package);
+        Assert.Equal(PlaySharePackageService.FullPortableProfile, preview.MediaProfile);
+    }
+
+    [Fact]
     public void RememberPlayerName_UpdatesOnlyTheSelectedPlay()
     {
         (PlaySharePackageService service, long attemptId) = CreateServiceWithPlay();

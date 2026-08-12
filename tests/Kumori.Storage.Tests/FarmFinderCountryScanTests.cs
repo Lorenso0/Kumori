@@ -89,6 +89,27 @@ public sealed class FarmFinderCountryScanTests : IDisposable
             cursor => cursor?.Contains("\"page\":2", StringComparison.Ordinal) == true);
     }
 
+    [Fact]
+    public async Task ScoreMetadataRepair_RefreshesEveryPendingPlayerAndIsResumableByVersion()
+    {
+        var repository = new FarmFinderRepository(databasePath);
+        var job = await repository.BeginOrResumeJobAsync(1, 100);
+        await repository.UpsertRankingPlayersAsync(
+            job.Id,
+            [Player(1, 50), Player(2, 51)]);
+        var service = CreateService(repository, new StubCountryCohort());
+
+        var first = await service.RepairScoreMetadataAsync();
+        var second = await service.RepairScoreMetadataAsync();
+
+        Assert.Equal(2, first.PlayersRequested);
+        Assert.Equal(2, first.PlayersCompleted);
+        Assert.Equal(0, first.PlayersFailed);
+        Assert.Equal(0, second.PlayersRequested);
+        Assert.True(
+            (await repository.GetScoreMetadataRepairStatusAsync()).IsComplete);
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

@@ -42,7 +42,8 @@ public sealed record SkinExtrasSelectionResult(
     bool ReplaceEntireFamily,
     SkinExtraResolutionPolicy ResolutionPolicy,
     IReadOnlyList<string>? DeleteCurrentFiles = null,
-    bool SmoothTrail = false);
+    bool SmoothTrail = false,
+    IReadOnlyDictionary<string, SkinRgb>? ElementTints = null);
 
 public enum SkinExtraResolutionPolicy
 {

@@ -379,6 +379,11 @@
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="PerformanceMetricCell" TargetType="Border" BasedOn="{StaticResource MetricCellCompact}">
+            <Setter Property="Padding" Value="5,5" />
+            <Setter Property="Margin" Value="2" />
+        </Style>
+
         <!-- Score/replay badges use the fork's native BPM Adjust treatment:
              acronym logo, serialized target, and the configurable-mod cog. -->
         <DataTemplate x:Key="CompactScoreModBadgeTemplate">
@@ -1158,7 +1163,7 @@
                              VirtualizingPanel.ScrollUnit="Pixel">
                         <ListBox.Resources>
                             <DataTemplate DataType="{x:Type vm:DayRowViewModel}">
-                                <Border Height="34"
+                                <Border MinHeight="44"
                                         Padding="6,0,10,0"
                                         Background="{DynamicResource Brush.PanelBackground}"
                                         BorderBrush="{DynamicResource Brush.SubtleBorder}"
@@ -1168,8 +1173,8 @@
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="30" />
-                                            <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <Button Grid.Column="0"
                                                 Click="DayToggle_Click"
@@ -1210,15 +1215,21 @@
                                                    FontSize="12"
                                                    FontWeight="SemiBold"
                                                    VerticalAlignment="Center"
+                                                   Margin="0,0,12,0"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="2"
-                                                   Text="{Binding StatsLine}"
-                                                   Foreground="{DynamicResource Brush.TextMuted}"
-                                                   FontSize="10"
-                                                   VerticalAlignment="Center"
-                                                   MaxWidth="430"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Margin="10,0,0,0" />
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding PrimaryStatsLine}"
+                                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                                       FontSize="10"
+                                                       TextAlignment="Right"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding ActivityStatsLine}"
+                                                       Foreground="{DynamicResource Brush.TextMuted}"
+                                                       FontSize="10"
+                                                       TextAlignment="Right"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,1,0,0" />
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -2384,7 +2395,7 @@
                                                    Margin="0,0,12,0" />
                                         <Button Grid.Column="2"
                                                 Content="Replay Analyzer"
-                                                Command="{Binding DataContext.OpenSelectedReplayInspectorCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Click="ReplayAnalyzer_Click"
                                                 Visibility="{Binding CanOpenReplayInspector, Converter={x:Static vm:BoolToVisibleConverter.Instance}}"
                                                 Style="{StaticResource Button.Primary}"
                                                 FontSize="11"
@@ -2461,7 +2472,7 @@
                             </Expander>
                             <Button Grid.Column="2"
                                     Content="Replay Analyzer"
-                                    Command="{Binding DataContext.OpenSelectedReplayInspectorCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    Click="ReplayAnalyzer_Click"
                                     FontSize="11"
                                     FontWeight="Bold"
                                     MinWidth="118"
@@ -2664,33 +2675,34 @@
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel><TextBlock Text="Performance" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Your long-term play quality, consistency and activity" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" Margin="0,3,12,14"/></StackPanel>
+                <StackPanel><TextBlock Text="Performance" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Your long-term play quality, consistency and activity" Foreground="{DynamicResource Brush.TextSecondary}" TextWrapping="Wrap" Margin="0,3,12,8"/></StackPanel>
                 <Border x:Name="PerformanceScopeBadge" Grid.Column="1" Style="{StaticResource PagePanel}" Padding="12,7" VerticalAlignment="Top"><TextBlock Text="All recorded plays" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11"/></Border>
             </Grid>
-            <UniformGrid x:Name="PerformanceMetrics" Grid.Row="1" Columns="4" Margin="-4,0,-4,12">
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="TOTAL PLAYS" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalAttemptsMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="COMPLETION RATE" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalCompletionMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}" Margin="0,6,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="AVERAGE ACCURACY" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalAccuracyMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="BEST PERFORMANCE" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalBestPpMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AccentPink}" Margin="0,6,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="COMPLETED" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalCompletedMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="FAILED" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalFailedMetric}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Danger}" Margin="0,5,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="TOTAL SCORE" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalScoreMetric}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,5,0,0"/></Grid></Border>
-                <Border Style="{StaticResource MetricCellCompact}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="PLAY TIME" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalPlaytimeMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
+            <UniformGrid x:Name="PerformanceMetrics" Grid.Row="1" Columns="4" Margin="0,0,0,4">
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="TOTAL PLAYS" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalAttemptsMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="COMPLETION RATE" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalCompletionMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Success}" Margin="0,6,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="AVERAGE ACCURACY" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalAccuracyMetric}" FontSize="22" FontWeight="SemiBold" Margin="0,6,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="BEST PERFORMANCE" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalBestPpMetric}" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource Brush.AccentPink}" Margin="0,6,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="COMPLETED" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalCompletedMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="FAILED" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalFailedMetric}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Danger}" Margin="0,5,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="TOTAL SCORE" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalScoreMetric}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,5,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="ACTIVE PLAYTIME" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalPlaytimeMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="KEY PRESSES" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalKeysMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="MISSES" Style="{StaticResource Text.LabelUpper}"/><TextBlock Grid.Row="1" Text="{Binding GlobalMissesMetric}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Danger}" Margin="0,5,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="AVG ACTIVE / PLAY" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalAverageActiveMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
+                <Border Style="{StaticResource PerformanceMetricCell}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="KEYS / PLAY" Style="{StaticResource Text.LabelUpper}" TextWrapping="Wrap"/><TextBlock Grid.Row="1" Text="{Binding GlobalKeysPerPlayMetric}" FontSize="18" FontWeight="SemiBold" Margin="0,5,0,0"/></Grid></Border>
             </UniformGrid>
             <Border Grid.Row="2" Style="{StaticResource PagePanel}" Padding="0" ClipToBounds="True">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <Grid Margin="16,14,16,11"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Daily performance" Style="{StaticResource PageSectionTitle}"/><TextBlock Text="All recorded days · select a day to show every play" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,3,0,0"/></StackPanel><TextBlock Grid.Column="1" Text="Account changes use the prior recorded day" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" VerticalAlignment="Center"/></Grid>
-                    <Grid Grid.Row="1" Height="28" Background="{DynamicResource Brush.ControlBackground}" Margin="1,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="1.3*"/><ColumnDefinition Width="0.55*"/><ColumnDefinition Width="0.95*"/><ColumnDefinition Width="0.8*"/><ColumnDefinition Width="0.65*"/><ColumnDefinition Width="0.65*"/><ColumnDefinition Width="0.65*"/></Grid.ColumnDefinitions>
-                        <TextBlock Text="DATE" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center" Margin="15,0,0,0"/>
-                        <TextBlock Grid.Column="1" Text="PLAYS" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="2" Text="COMPLETION" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="3" Text="AVG ACC" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="4" Text="BEST PP" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                        <TextBlock Grid.Column="5" Text="PP Δ" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                        <TextBlock Grid.Column="6" Text="RANK Δ" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,16,0"/>
-                    </Grid>
+                    <Border Grid.Row="1" Height="28" Background="{DynamicResource Brush.ControlBackground}" Margin="1,0" Padding="15,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="DATE" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="RESULTS  ·  ACTIVITY  ·  ACCOUNT CHANGE" Style="{StaticResource Text.LabelUpper}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                        </Grid>
+                    </Border>
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8,5" AutomationProperties.Name="Daily performance history">
                         <ItemsControl ItemsSource="{Binding PerformanceDays}" Focusable="False" IsTabStop="False" AutomationProperties.Name="Daily performance entries">
                             <ItemsControl.ItemTemplate>
@@ -2698,15 +2710,14 @@
                                     <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" HorizontalContentAlignment="Stretch" Margin="0,0,0,5">
                                         <Expander.Header>
                                             <Border Background="{DynamicResource Brush.CardBackground}" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="1" CornerRadius="6" Padding="8,7">
-                                                <Grid Height="50">
-                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.3*"/><ColumnDefinition Width="0.55*"/><ColumnDefinition Width="0.95*"/><ColumnDefinition Width="0.8*"/><ColumnDefinition Width="0.65*"/><ColumnDefinition Width="0.65*"/><ColumnDefinition Width="0.65*"/></Grid.ColumnDefinitions>
-                                                    <StackPanel Margin="6,0,0,0" VerticalAlignment="Center"><TextBlock Text="{Binding DateText}" FontWeight="SemiBold" FontSize="12"/><TextBlock Text="{Binding DayText}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,2,0,0"/></StackPanel>
-                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding PlaysText}" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="{Binding CompletedText, StringFormat={}{0} done}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="10" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
-                                                    <Grid Grid.Column="2" Margin="0,4,12,4"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="{Binding CompletionText}" FontSize="11" FontWeight="SemiBold"/><ProgressBar Grid.Row="1" Minimum="0" Maximum="100" Value="{Binding CompletionRate}" Height="4" Margin="0,5,0,0" Foreground="{DynamicResource Brush.Success}" Background="{DynamicResource Brush.ControlBackground}" BorderThickness="0" AutomationProperties.Name="Completion rate"/></Grid>
-                                                    <TextBlock Grid.Column="3" Text="{Binding AccuracyText}" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Grid.Column="4" Text="{Binding BestPpText}" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="{DynamicResource Brush.AccentPink}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Grid.Column="5" Text="{Binding PpChangeText}" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="{DynamicResource Brush.AccentPink}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Grid.Column="6" Text="{Binding RankChangeText}" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="{DynamicResource Brush.Cyan}" FontSize="11" FontWeight="SemiBold" Margin="0,0,7,0" TextTrimming="CharacterEllipsis"/>
+                                                <Grid MinHeight="50">
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                    <StackPanel Width="104" Margin="6,0,12,0" VerticalAlignment="Center"><TextBlock Text="{Binding DateText}" FontWeight="SemiBold" FontSize="12"/><TextBlock Text="{Binding DayText}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" Margin="0,2,0,0"/></StackPanel>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding ResultStatsLine}" FontSize="11" FontWeight="SemiBold" TextAlignment="Right" TextWrapping="Wrap"/>
+                                                        <TextBlock Text="{Binding ActivityStatsLine}" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="10" TextAlignment="Right" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                                        <TextBlock Text="{Binding ChangeStatsLine}" Foreground="{DynamicResource Brush.AccentPink}" FontSize="10" FontWeight="SemiBold" TextAlignment="Right" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                                    </StackPanel>
                                                 </Grid>
                                             </Border>
                                         </Expander.Header>

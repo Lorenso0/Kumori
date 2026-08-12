@@ -13,7 +13,11 @@ internal static class ReplayAnalyzerWindowPlacement
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpShowWindow = 0x0040;
 
-    public static async Task<bool> CenterNearOwnerAsync(Process process, Window owner, CancellationToken cancellationToken = default)
+    public static async Task<bool> CenterNearOwnerAsync(
+        Process process,
+        Window owner,
+        CancellationToken cancellationToken = default,
+        bool activate = false)
     {
         var target = TargetBounds(owner);
         try
@@ -30,27 +34,39 @@ internal static class ReplayAnalyzerWindowPlacement
                 var handle = process.MainWindowHandle;
                 if (handle != IntPtr.Zero)
                 {
-                    var ok = SetWindowPos(
+                    uint flags = SwpNoZOrder | SwpShowWindow;
+                    if (!activate)
+                        flags |= SwpNoActivate;
+                    var positioned = SetWindowPos(
                         handle,
                         IntPtr.Zero,
                         target.X,
                         target.Y,
                         target.Width,
                         target.Height,
-                        SwpNoZOrder | SwpNoActivate | SwpShowWindow);
-                    if (!ok)
+                        flags);
+                    if (!positioned)
                     {
                         Log.Debug("Could not position Replay Analyzer window. Win32 error {Error}", Marshal.GetLastWin32Error());
                     }
-                    return ok;
+                    if (!activate)
+                        return positioned;
+
+                    _ = ShowWindow(handle, SwRestore);
+                    bool focused = SetForegroundWindow(handle);
+                    if (!focused)
+                        Log.Debug("Windows did not grant foreground focus to Replay Analyzer");
+                    return positioned || focused;
                 }
 
                 await Task.Delay(100, cancellationToken);
             }
         }
-        catch (ObjectDisposedException)
+        catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException)
         {
             // Output capture owns and disposes the process after it exits.
+            // Process.HasExited and MainWindowHandle can throw either exception
+            // once the native process association has been released.
             return false;
         }
 
@@ -104,6 +120,14 @@ internal static class ReplayAnalyzerWindowPlacement
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect lpRect);
+
+    private const int SwRestore = 9;
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly struct NativeRect

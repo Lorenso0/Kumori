@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not defined KUMORI_VERSION set KUMORI_VERSION=0.7.0
+if not defined KUMORI_VERSION set KUMORI_VERSION=0.8.0
 
 REM ============================================================
 REM  Kumori WPF app (new .NET solution) build script.
@@ -25,7 +25,8 @@ REM launched from this checkout before every development build; otherwise
 REM MSBuild can spend tens of seconds retrying copies before it fails.
 set "KUMORI_DEBUG_APP=%CD%\src\Kumori.App\bin\Debug\net10.0-windows10.0.17763.0\Kumori.exe"
 set "KUMORI_DEBUG_VIEWER=%CD%\replay_viewer\bin\Debug\net10.0\win-x64\Kumori.ReplayViewer.exe"
-powershell -NoProfile -NonInteractive -Command "$targets=@([IO.Path]::GetFullPath($env:KUMORI_DEBUG_APP),[IO.Path]::GetFullPath($env:KUMORI_DEBUG_VIEWER)); function Find-DebugProcesses { @(Get-Process -Name Kumori,Kumori.ReplayViewer -ErrorAction SilentlyContinue | Where-Object { try { $targets -contains [IO.Path]::GetFullPath($_.Path) } catch { $false } }) }; $running=@(Find-DebugProcesses); if ($running.Count -eq 0) { exit 0 }; Write-Host 'Stopping running Debug processes before rebuilding...'; $running | Stop-Process -Force; $deadline=[DateTime]::UtcNow.AddSeconds(10); do { Start-Sleep -Milliseconds 100; $remaining=@(Find-DebugProcesses) } while ($remaining.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline); if ($remaining.Count -gt 0) { Write-Error 'Could not stop the running Debug processes.'; exit 1 }"
+set "KUMORI_DEBUG_STUDIO=%CD%\src\Kumori.SkinStudio\bin\Debug\net10.0\win-x64\Kumori.SkinStudio.exe"
+powershell -NoProfile -NonInteractive -Command "$targets=@([IO.Path]::GetFullPath($env:KUMORI_DEBUG_APP),[IO.Path]::GetFullPath($env:KUMORI_DEBUG_VIEWER),[IO.Path]::GetFullPath($env:KUMORI_DEBUG_STUDIO)); function Find-DebugProcesses { @(Get-Process -Name Kumori,Kumori.ReplayViewer,Kumori.SkinStudio -ErrorAction SilentlyContinue | Where-Object { try { $targets -contains [IO.Path]::GetFullPath($_.Path) } catch { $false } }) }; $running=@(Find-DebugProcesses); if ($running.Count -eq 0) { exit 0 }; Write-Host 'Stopping running Debug processes before rebuilding...'; $running | Stop-Process -Force; $deadline=[DateTime]::UtcNow.AddSeconds(10); do { Start-Sleep -Milliseconds 100; $remaining=@(Find-DebugProcesses) } while ($remaining.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline); if ($remaining.Count -gt 0) { Write-Error 'Could not stop the running Debug processes.'; exit 1 }"
 if errorlevel 1 (
     echo.
     echo Failed to stop the running Debug processes. Build cancelled.
@@ -33,19 +34,30 @@ if errorlevel 1 (
 )
 
 if /i "%~1"=="run" (
-    dotnet build Kumori.Dev.slnf -c Debug -p:Version=%KUMORI_VERSION% -nr:false
+    set "KUMORI_DEV_RESTORE_REQUIRED="
+    if not exist "src\Kumori.App\obj\project.assets.json" set "KUMORI_DEV_RESTORE_REQUIRED=1"
+    if not exist "src\Kumori.SkinStudio\obj\project.assets.json" set "KUMORI_DEV_RESTORE_REQUIRED=1"
+    if not exist "replay_viewer\obj\project.assets.json" set "KUMORI_DEV_RESTORE_REQUIRED=1"
+    if defined KUMORI_DEV_RESTORE_REQUIRED (
+        echo Restoring development dependencies...
+        dotnet restore Kumori.Dev.slnf -p:Version=%KUMORI_VERSION%
+        if errorlevel 1 exit /b 1
+    )
+    dotnet build Kumori.Dev.slnf -c Debug --no-restore -p:Version=%KUMORI_VERSION% -nr:false
 ) else (
     dotnet build Kumori.sln -c Debug -p:Version=%KUMORI_VERSION% -nr:false
 )
 if errorlevel 1 exit /b %errorlevel%
 
-xcopy /D /E /I /Y replay_viewer\bin\Debug\net10.0\win-x64 src\Kumori.App\bin\Debug\net10.0-windows10.0.17763.0\Kumori.ReplayViewer >nul
-if errorlevel 1 exit /b %errorlevel%
+if /i not "%~1"=="run" (
+    xcopy /D /E /I /Y replay_viewer\bin\Debug\net10.0\win-x64 src\Kumori.App\bin\Debug\net10.0-windows10.0.17763.0\Kumori.ReplayViewer >nul
+    if errorlevel 1 exit /b 1
+)
 
 if /i "%~1"=="run" (
     echo.
     echo Tests skipped. Launching Kumori...
-    dotnet run --project src\Kumori.App\Kumori.App.csproj -c Debug --no-build
+    "%KUMORI_DEBUG_APP%"
     exit /b
 )
 
@@ -57,8 +69,8 @@ echo Build + tests OK.
 exit /b 0
 
 :publish
-if exist artifacts\viewer-release rmdir /S /Q artifacts\viewer-release
-if exist artifacts\Kumori.ReplayViewer.zip del /Q artifacts\Kumori.ReplayViewer.zip
+if exist artifacts\native-tools-release rmdir /S /Q artifacts\native-tools-release
+if exist artifacts\Kumori.NativeTools.zip del /Q artifacts\Kumori.NativeTools.zip
 if exist artifacts\app-publish rmdir /S /Q artifacts\app-publish
 if exist dist\app rmdir /S /Q dist\app
 
@@ -72,13 +84,28 @@ dotnet publish replay_viewer\Kumori.ReplayViewer.csproj -c Release -r win-x64 -p
   --self-contained true ^
   -p:PublishSingleFile=false ^
   -p:PublishReadyToRun=false ^
-  -o artifacts\viewer-release
+  -o artifacts\native-tools-release
 if errorlevel 1 exit /b %errorlevel%
 
-powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path 'artifacts\viewer-release').Path, (Join-Path (Resolve-Path 'artifacts').Path 'Kumori.ReplayViewer.zip'), [System.IO.Compression.CompressionLevel]::Optimal, $false)"
+dotnet publish src\Kumori.SkinStudio\Kumori.SkinStudio.csproj -c Release -r win-x64 -p:Version=%KUMORI_VERSION% ^
+  --self-contained true ^
+  -p:PublishSingleFile=false ^
+  -p:PublishReadyToRun=false ^
+  -o artifacts\native-tools-release
 if errorlevel 1 exit /b %errorlevel%
 
-powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $archive=[System.IO.Compression.ZipFile]::OpenRead((Resolve-Path 'artifacts\Kumori.ReplayViewer.zip')); try { if (-not ($archive.Entries | Where-Object FullName -eq 'Kumori.ReplayViewer.exe')) { throw 'Replay viewer bundle is missing Kumori.ReplayViewer.exe.' } } finally { $archive.Dispose() }"
+REM Both native tools publish into the same directory. The second publish can
+REM replace osu.Game.dll after the per-project compatibility target has run, so
+REM patch and fail-closed verify the final shared assembly immediately before
+REM it is archived.
+dotnet tools\Kumori.AutoMapperCompatPatcher\bin\Release\net10.0\Kumori.AutoMapperCompatPatcher.dll ^
+  artifacts\native-tools-release\osu.Game.dll
+if errorlevel 1 exit /b %errorlevel%
+
+powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path 'artifacts\native-tools-release').Path, (Join-Path (Resolve-Path 'artifacts').Path 'Kumori.NativeTools.zip'), [System.IO.Compression.CompressionLevel]::Optimal, $false)"
+if errorlevel 1 exit /b %errorlevel%
+
+powershell -NoProfile -NonInteractive -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $archive=[System.IO.Compression.ZipFile]::OpenRead((Resolve-Path 'artifacts\Kumori.NativeTools.zip')); try { foreach ($required in @('Kumori.ReplayViewer.exe','Kumori.SkinStudio.exe','THIRD-PARTY-NOTICES.md','OSU-LICENCE')) { if (-not ($archive.Entries | Where-Object FullName -eq $required)) { throw ('Native-tools bundle is missing ' + $required + '.') } } } finally { $archive.Dispose() }"
 if errorlevel 1 exit /b %errorlevel%
 
 dotnet publish src\Kumori.App\Kumori.App.csproj -c Release -r win-x64 -p:Version=%KUMORI_VERSION% ^
@@ -90,7 +117,7 @@ dotnet publish src\Kumori.App\Kumori.App.csproj -c Release -r win-x64 -p:Version
   -p:IncludeNativeLibrariesForSelfExtract=true ^
   -p:DebugType=None ^
   -p:DebugSymbols=false ^
-  -p:ReplayViewerBundlePath="%CD%\artifacts\Kumori.ReplayViewer.zip" ^
+  -p:NativeToolsBundlePath="%CD%\artifacts\Kumori.NativeTools.zip" ^
   -o artifacts\app-publish
 if errorlevel 1 exit /b %errorlevel%
 
@@ -100,5 +127,5 @@ if errorlevel 1 exit /b %errorlevel%
 
 echo.
 echo Published to dist\app\Kumori.exe
-echo The replay viewer is embedded in Kumori.exe and extracts to %%APPDATA%%\Kumori\runtime when required.
+echo Replay Viewer and Skin Studio are embedded in Kumori.exe and extract atomically when required.
 exit /b 0

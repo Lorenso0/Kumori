@@ -20,6 +20,7 @@ headless/
 third_party/artifacts/
 **/bin/
 **/obj/
+**/.codex-obj/
 **/publish/
 *_wpftmp.csproj
 .claude/

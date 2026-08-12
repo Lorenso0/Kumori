@@ -16,6 +16,9 @@ namespace Kumori.App;
 
 public partial class App
 {
+    internal const DispatcherPriority ShutdownStartPriority =
+        DispatcherPriority.Normal;
+
     internal static AttemptSqliteSink CreateAttemptPersistence(SqliteConnectionFactory factory) =>
         new(factory);
 

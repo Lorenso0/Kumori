@@ -331,7 +331,12 @@ public sealed partial class TosuClient
         var parsedMods = modPayload.Mods;
         if (parsedMods.Count == 0 && !modPayload.IsExplicit && fallbackMods.Count > 0)
             parsedMods = fallbackMods;
-        parsedMods = PreserveLazerBpmMods(parsedMods, fallbackMods, clientKind, continuousAttemptTelemetry);
+        parsedMods = PreserveLazerBpmMods(
+            parsedMods,
+            fallbackMods,
+            clientKind,
+            continuousAttemptTelemetry,
+            modPayload.IsAuthoritativeResult);
         var mods = NormalizeMods(parsedMods, clientKind);
         var modsKey = mods.Count == 0 ? "NM" : string.Concat(mods.Select(mod => mod.Acronym));
         var hitErrors = ParseHitErrors(play, beatmapIdentity, liveTimeMs, isPlaying, isResults);
@@ -380,6 +385,7 @@ public sealed partial class TosuClient
             MaxPp = performance.Max ?? 0,
             ModsKey = modsKey,
             Mods = mods,
+            ModsAreAuthoritativeResult = modPayload.IsAuthoritativeResult,
             Play = new JudgementCapture.PlayValues
             {
                 Hit300 = GetDouble(hits, "300") ?? 0,

@@ -10,8 +10,8 @@ echo Root: %ROOT%
 echo.
 echo This removes regenerable workspace data only:
 echo   - all bin and obj directories
-echo   - TestResults directories
-echo   - root dist and artifacts directories
+echo   - test results and generated .artifacts directories
+echo   - root dist, artifacts, headless, and .tmp directories
 echo   - the root .vs directory
 echo.
 echo It does not remove source files or %%APPDATA%%\Kumori.
@@ -29,8 +29,8 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference = 'Stop';" ^
   "$root = [IO.Path]::GetFullPath('%ROOT%').TrimEnd([IO.Path]::DirectorySeparatorChar);" ^
   "$before = (Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum;" ^
-  "$candidatePaths = @(Get-ChildItem -LiteralPath $root -Directory -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('bin','obj','TestResults') } | ForEach-Object { $_.FullName });" ^
-  "$candidatePaths += @('.vs','dist','artifacts') | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Container };" ^
+  "$candidatePaths = @(Get-ChildItem -LiteralPath $root -Directory -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('bin','obj','TestResults','.artifacts','artifacts') } | ForEach-Object { $_.FullName });" ^
+  "$candidatePaths += @('.vs','dist','artifacts','headless','.tmp') | ForEach-Object { Join-Path $root $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Container };" ^
   "$safePaths = @($candidatePaths | ForEach-Object {" ^
   "  $resolved = [IO.Path]::GetFullPath($_).TrimEnd([IO.Path]::DirectorySeparatorChar);" ^
   "  if (-not $resolved.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw ('Refusing path outside workspace: ' + $resolved) };" ^

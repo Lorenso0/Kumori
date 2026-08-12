@@ -21,9 +21,14 @@ public sealed class MapCardViewModel
         Mapper = representative.Mapper;
         _artworkSummary = representative;
         PlayCount = ordered.Length;
-        BestPp = ordered.Max(attempt => attempt.Pp);
-        BestAccuracy = ordered
+        var completed = ordered
             .Where(attempt => string.Equals(attempt.Outcome, "completed", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        BestPp = completed
+            .Select(attempt => attempt.Pp)
+            .DefaultIfEmpty(0)
+            .Max();
+        BestAccuracy = completed
             .Select(attempt => attempt.Accuracy)
             .DefaultIfEmpty(0)
             .Max();

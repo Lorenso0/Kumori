@@ -293,6 +293,7 @@ public sealed partial class AttemptSqliteSink
         {
             score = snapshot.Score,
             grade = snapshot.Grade ?? "",
+            mods_authoritative_result = snapshot.ModsAreAuthoritativeResult,
             hits = new
             {
                 _300 = snapshot.N300,

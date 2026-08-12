@@ -338,7 +338,7 @@ public partial class App
         statusWindow.UpdateStatus($"Installing Kumori {update.Version}...");
         Dispatcher.BeginInvoke(
             new Action(() => _ = ShutdownFromTrayAsync(statusWindow)),
-            DispatcherPriority.ContextIdle);
+            ShutdownStartPriority);
     }
 
     private void InstallCrashHandlers()

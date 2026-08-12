@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Kumori.App.FarmFinder;
 using Kumori.Core.Settings;
 using Kumori.FarmFinder;
 
@@ -74,12 +75,14 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     private readonly IOsuCredentialsStore credentials;
     private readonly OsuApiClient apiClient;
     private readonly IFarmFinderCacheInstaller? cacheInstaller;
+    private readonly IFarmBeatmapMetadataProvider? beatmapMetadataProvider;
     private readonly IExternalUrlLauncher urlLauncher;
     private readonly SettingsService? settings;
     private readonly SynchronizationContext? synchronizationContext;
     private bool restoringSavedFilters;
     private CancellationTokenSource? operationCancellation;
     private CancellationTokenSource? countdownCancellation;
+    private CancellationTokenSource? selectedMapDetailsCancellation;
     private DateTimeOffset progressPhaseStartedAt;
     private FarmFinderProgressPhase? currentProgressPhase;
     private int progressPhaseStartCurrent;
@@ -119,9 +122,12 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     private string estimatedTimeRemainingText = "";
     private string rateLimitText = "";
     private string resumableJobText = "";
+    private string repairScoreMetadataMenuText = "Repair cached score data";
     private double progressValue;
     private double progressMaximum = 1;
     private FarmMapResult? selectedResult;
+    private bool isLoadingSelectedMapDetails;
+    private string selectedMapDetailsStatus = "";
     private FarmSortField sortField = FarmSortField.UniquePlayers;
     private FarmSortDirection sortDirection = FarmSortDirection.Descending;
 
@@ -133,13 +139,15 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
         IRankedModCatalog rankedMods,
         IExternalUrlLauncher urlLauncher,
         SettingsService? settings = null,
-        IFarmFinderCacheInstaller? cacheInstaller = null)
+        IFarmFinderCacheInstaller? cacheInstaller = null,
+        IFarmBeatmapMetadataProvider? beatmapMetadataProvider = null)
     {
         this.service = service;
         this.repository = repository;
         this.credentials = credentials;
         this.apiClient = apiClient;
         this.cacheInstaller = cacheInstaller;
+        this.beatmapMetadataProvider = beatmapMetadataProvider;
         this.urlLauncher = urlLauncher;
         this.settings = settings;
         synchronizationContext = SynchronizationContext.Current;
@@ -170,6 +178,8 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
         SearchCommand = new AsyncRelayCommand(SearchAsync, () => !IsBusy);
         BuildFullIndexCommand =
             new AsyncRelayCommand(BuildFullIndexAsync, () => !IsBusy);
+        RepairScoreMetadataCommand =
+            new AsyncRelayCommand(RepairScoreMetadataAsync, () => !IsBusy);
         FetchCacheCommand =
             new AsyncRelayCommand(FetchCacheAsync, () => !IsBusy);
         UpdateCommand = BuildFullIndexCommand;
@@ -179,6 +189,8 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
         TestConnectionCommand = new AsyncRelayCommand(TestConnectionAsync, () => !IsBusy && HasCredentials);
         RemoveCredentialsCommand = new AsyncRelayCommand(RemoveCredentialsAsync, () => !IsBusy && HasCredentials);
         OpenBeatmapCommand = new RelayCommand<FarmMapResult>(
+            result => openUrl(result?.OsuDirectUrl));
+        OpenBeatmapInBrowserCommand = new RelayCommand<FarmMapResult>(
             result => openUrl(result?.BeatmapUrl));
         CopyBeatmapUrlCommand = new RelayCommand<FarmMapResult>(
             result => copyUrl(result?.BeatmapUrl));
@@ -193,6 +205,7 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     }
 
     public Func<int, int, Task<bool>>? ConfirmUpdateAsync { get; set; }
+    public Func<FarmScoreMetadataRepairStatus, Task<bool>>? ConfirmMetadataRepairAsync { get; set; }
     public Task Initialization { get; }
 
     public ObservableCollection<FarmModOptionViewModel> Mods { get; }
@@ -204,6 +217,7 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
 
     public IAsyncRelayCommand SearchCommand { get; }
     public IAsyncRelayCommand BuildFullIndexCommand { get; }
+    public IAsyncRelayCommand RepairScoreMetadataCommand { get; }
     public IAsyncRelayCommand FetchCacheCommand { get; }
     public IAsyncRelayCommand UpdateCommand { get; }
     public IRelayCommand CancelCommand { get; }
@@ -212,10 +226,16 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     public IAsyncRelayCommand TestConnectionCommand { get; }
     public IAsyncRelayCommand RemoveCredentialsCommand { get; }
     public IRelayCommand<FarmMapResult> OpenBeatmapCommand { get; }
+    public IRelayCommand<FarmMapResult> OpenBeatmapInBrowserCommand { get; }
     public IRelayCommand<FarmMapResult> CopyBeatmapUrlCommand { get; }
     public IRelayCommand<FarmScoreDetail> OpenPlayerCommand { get; }
     public IRelayCommand<FarmScoreDetail> OpenScoreCommand { get; }
     public IRelayCommand<string> SortCommand { get; }
+    public string RepairScoreMetadataMenuText
+    {
+        get => repairScoreMetadataMenuText;
+        private set => SetProperty(ref repairScoreMetadataMenuText, value);
+    }
 
     public string MinimumRankText { get => minimumRankText; set => SetProperty(ref minimumRankText, value); }
     public string MaximumRankText { get => maximumRankText; set => SetProperty(ref maximumRankText, value); }
@@ -284,7 +304,36 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     }
     public double ProgressPercentage =>
         ProgressMaximum <= 0 ? 0 : ProgressValue * 100d / ProgressMaximum;
-    public FarmMapResult? SelectedResult { get => selectedResult; set => SetProperty(ref selectedResult, value); }
+    public FarmMapResult? SelectedResult
+    {
+        get => selectedResult;
+        set
+        {
+            if (!SetProperty(ref selectedResult, value))
+                return;
+
+            selectedMapDetailsCancellation?.Cancel();
+            selectedMapDetailsCancellation?.Dispose();
+            selectedMapDetailsCancellation = null;
+            IsLoadingSelectedMapDetails = false;
+            SelectedMapDetailsStatus = "";
+            if (value is null || beatmapMetadataProvider is null || HasDifficultyStats(value.Beatmap))
+                return;
+
+            selectedMapDetailsCancellation = new CancellationTokenSource();
+            _ = EnrichSelectedMapAsync(value, selectedMapDetailsCancellation.Token);
+        }
+    }
+    public bool IsLoadingSelectedMapDetails
+    {
+        get => isLoadingSelectedMapDetails;
+        private set => SetProperty(ref isLoadingSelectedMapDetails, value);
+    }
+    public string SelectedMapDetailsStatus
+    {
+        get => selectedMapDetailsStatus;
+        private set => SetProperty(ref selectedMapDetailsStatus, value);
+    }
     public FarmSortField SortField { get => sortField; set => SetProperty(ref sortField, value); }
     public FarmSortDirection SortDirection { get => sortDirection; set => SetProperty(ref sortDirection, value); }
     public bool HasCredentials
@@ -354,6 +403,7 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
                 : $"Resumable update: ranks #{job.MinimumRank:N0}–#{job.MaximumRank:N0}, " +
                   $"{job.PlayersCompleted:N0} completed, {job.PlayersFailed:N0} failed.";
             OnPropertyChanged(nameof(HasResumableJob));
+            await refreshScoreMetadataRepairStatusAsync();
         }
         catch (Exception exception)
         {
@@ -372,9 +422,11 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
             {
                 StatusText = "Searching cached Farm Finder data…";
                 var result = await service.SearchCachedAsync(query!, createProgress(), token);
+                SelectedResult = null;
                 Results.Clear();
                 foreach (var item in result.Results)
                     Results.Add(item);
+                SelectedResult = Results.FirstOrDefault();
                 HasRankedDateFilter |= result.Results.Any(item => item.Beatmap.RankedAt is not null);
                 updateCoverage(result.Coverage);
                 StatusText = Results.Count == 0
@@ -392,6 +444,48 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     }
 
     public Task UpdateAsync() => BuildFullIndexAsync();
+
+    public async Task RepairScoreMetadataAsync()
+    {
+        var status = await repository.GetScoreMetadataRepairStatusAsync();
+        if (status.IsComplete)
+        {
+            StatusText = "Cached score metadata is already current.";
+            RepairScoreMetadataMenuText = "Score metadata is up to date";
+            return;
+        }
+        if (ConfirmMetadataRepairAsync is not null &&
+            !await ConfirmMetadataRepairAsync(status))
+            return;
+
+        await runOperationAsync(async token =>
+        {
+            IsUpdatingIndex = true;
+            try
+            {
+                StatusText =
+                    $"Repairing score metadata for {status.PendingPlayers:N0} cached players...";
+                ProgressDetailsText =
+                    "Refreshing top scores from Hinamizawa. Completed players are resumable.";
+                EstimatedTimeRemainingText = "";
+                var result = await service.RepairScoreMetadataAsync(
+                    createProgress(),
+                    token);
+                StatusText = result.PlayersFailed == 0
+                    ? $"Score metadata repaired for {result.PlayersCompleted:N0} players."
+                    : $"Score metadata repaired for {result.PlayersCompleted:N0} players; " +
+                      $"{result.PlayersFailed:N0} will retry next time.";
+                ProgressDetailsText =
+                    $"Refreshed {result.ScoresRefreshed:N0} top scores with origin, " +
+                    "Classic, score-total, legacy-ID, and client-build metadata.";
+            }
+            finally
+            {
+                IsUpdatingIndex = false;
+                await refreshScoreMetadataRepairStatusAsync(CancellationToken.None);
+            }
+        });
+    }
 
     public async Task FetchCacheAsync()
     {
@@ -458,9 +552,11 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
                     query,
                     createProgress(),
                     token);
+                SelectedResult = null;
                 Results.Clear();
                 foreach (var item in result.Results)
                     Results.Add(item);
+                SelectedResult = Results.FirstOrDefault();
                 updateCoverage(result.Coverage);
                 HasRankedDateFilter |= result.Results.Any(
                     item => item.Beatmap.RankedAt is not null);
@@ -528,9 +624,11 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
                 {
                     IsSearching = false;
                 }
+                SelectedResult = null;
                 Results.Clear();
                 foreach (var item in result.Results)
                     Results.Add(item);
+                SelectedResult = Results.FirstOrDefault();
                 HasRankedDateFilter |= result.Results.Any(
                     item => item.Beatmap.RankedAt is not null);
                 updateCoverage(result.Coverage);
@@ -652,6 +750,8 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
         operationCancellation?.Dispose();
         countdownCancellation?.Cancel();
         countdownCancellation?.Dispose();
+        selectedMapDetailsCancellation?.Cancel();
+        selectedMapDetailsCancellation?.Dispose();
         if (service is IDisposable disposableService)
             disposableService.Dispose();
         else
@@ -659,6 +759,57 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
         if (cacheInstaller is IDisposable disposableCacheInstaller)
             disposableCacheInstaller.Dispose();
     }
+
+    private async Task EnrichSelectedMapAsync(
+        FarmMapResult requested,
+        CancellationToken cancellationToken)
+    {
+        IsLoadingSelectedMapDetails = true;
+        SelectedMapDetailsStatus = "Loading map stats…";
+        try
+        {
+            var beatmap = await beatmapMetadataProvider!.EnrichAsync(
+                requested.Beatmap,
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(selectedResult, requested))
+                return;
+
+            if (!HasDifficultyStats(beatmap))
+            {
+                SelectedMapDetailsStatus = "Map stats unavailable";
+                return;
+            }
+
+            var enriched = requested with { Beatmap = beatmap };
+            var index = Results.IndexOf(requested);
+            if (index >= 0)
+                Results[index] = enriched;
+            IsLoadingSelectedMapDetails = false;
+            selectedResult = enriched;
+            OnPropertyChanged(nameof(SelectedResult));
+            SelectedMapDetailsStatus = "";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            if (ReferenceEquals(selectedResult, requested))
+                SelectedMapDetailsStatus = "Map stats unavailable";
+        }
+        finally
+        {
+            if (ReferenceEquals(selectedResult, requested))
+                IsLoadingSelectedMapDetails = false;
+        }
+    }
+
+    private static bool HasDifficultyStats(FarmBeatmap beatmap) =>
+        beatmap.CircleSize is not null &&
+        beatmap.ApproachRate is not null &&
+        beatmap.OverallDifficulty is not null &&
+        beatmap.DrainRate is not null;
 
     private async Task runOperationAsync(Func<CancellationToken, Task> action)
     {
@@ -966,6 +1117,15 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasResumableJob));
     }
 
+    private async Task refreshScoreMetadataRepairStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var status = await repository.GetScoreMetadataRepairStatusAsync(cancellationToken);
+        RepairScoreMetadataMenuText = status.IsComplete
+            ? "Score metadata is up to date"
+            : $"Repair cached score data ({status.PendingPlayers:N0} players)";
+    }
+
     private void openUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -1001,6 +1161,7 @@ public sealed class FarmFinderViewModel : ObservableObject, IDisposable
     {
         SearchCommand.NotifyCanExecuteChanged();
         BuildFullIndexCommand.NotifyCanExecuteChanged();
+        RepairScoreMetadataCommand.NotifyCanExecuteChanged();
         FetchCacheCommand.NotifyCanExecuteChanged();
         CancelCommand.NotifyCanExecuteChanged();
         ClearFiltersCommand.NotifyCanExecuteChanged();

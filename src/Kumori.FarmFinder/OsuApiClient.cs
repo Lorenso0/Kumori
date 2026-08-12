@@ -12,6 +12,7 @@ public sealed class OsuApiClient :
     IPlayerCohortProvider,
     IPlayerTopScoresProvider,
     IPlayerTopScoresProviderMetadata,
+    IOsuBeatmapScoreProvider,
     IOsuRateLimitSource,
     IDisposable
 {
@@ -57,6 +58,64 @@ public sealed class OsuApiClient :
     public string SourceName => "osu! API";
     public int RecommendedConcurrency => 2;
     public int RequestsPerMinute => 60;
+
+    public async Task<OsuBeatmapUserScore?> GetBeatmapUserScoreAsync(
+        long beatmapId,
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (beatmapId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(beatmapId));
+        if (userId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(userId));
+
+        using var response = await SendApiAsync(
+            () => new HttpRequestMessage(
+                HttpMethod.Get,
+                $"beatmaps/{beatmapId}/scores/users/{userId}?mode=osu&legacy_only=0"),
+            cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        BeatmapUserScoreResponse? payload;
+        try
+        {
+            payload = await JsonSerializer.DeserializeAsync<BeatmapUserScoreResponse>(
+                stream, jsonOptions, cancellationToken);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException(
+                "osu! returned a malformed beatmap-score response.",
+                exception);
+        }
+
+        if (payload?.Score is not { } score || payload.Position <= 0 || score.Id <= 0)
+            return null;
+        var endedAt = score.EndedAt ?? score.CreatedAt;
+        if (endedAt is null)
+            return null;
+        var statistics = score.Statistics;
+        return new OsuBeatmapUserScore(
+            payload.Position,
+            score.Id,
+            userId,
+            beatmapId,
+            endedAt.Value,
+            score.LegacyScoreId is not null
+                ? score.LegacyTotalScore ?? score.TotalScore ?? 0
+                : score.TotalScore ?? score.LegacyTotalScore ?? 0,
+            score.Accuracy,
+            score.Pp ?? 0,
+            score.MaxCombo,
+            statistics?.Count300 ?? 0,
+            statistics?.Count100 ?? 0,
+            statistics?.Count50 ?? 0,
+            statistics?.CountMiss ?? 0,
+            (score.Mods ?? [])
+                .Select(mod => mod.Acronym?.Trim().ToUpperInvariant())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Cast<string>()
+                .ToArray());
+    }
 
     public async Task<IReadOnlyList<string>> GetCountryCodesAsync(
         CancellationToken cancellationToken = default)
@@ -202,6 +261,20 @@ public sealed class OsuApiClient :
             }
             if (!eligible)
                 continue;
+            var isLegacy = value.LegacyScoreId is not null;
+            if (isLegacy && !actualMods.Any(mod =>
+                    mod.NormalizedAcronym.Equals("CL", StringComparison.OrdinalIgnoreCase)))
+            {
+                var classic = rankedMods.Evaluate(new FarmMod("CL"));
+                if (!classic.IsEligible)
+                    continue;
+                actualMods.Add(new FarmMod(
+                    classic.Acronym,
+                    classic.CanonicalSettingsJson));
+                canonicalParts.Add(classic.CanonicalSettingsJson == "{}"
+                    ? classic.Acronym
+                    : $"{classic.Acronym}:{classic.CanonicalSettingsJson}");
+            }
 
             var beatmapSet = value.Beatmapset ?? value.Beatmap.Beatmapset;
             var beatmap = new FarmBeatmap(
@@ -217,7 +290,13 @@ public sealed class OsuApiClient :
                 value.Beatmap.DifficultyRating,
                 value.Beatmap.Status ?? beatmapSet?.Status ?? "Unknown",
                 beatmapSet?.RankedDate,
-                beatmapSet?.Covers?.Card ?? beatmapSet?.Covers?.Cover ?? string.Empty);
+                beatmapSet?.Covers?.Card ?? beatmapSet?.Covers?.Cover ?? string.Empty)
+            {
+                CircleSize = value.Beatmap.CircleSize,
+                ApproachRate = value.Beatmap.ApproachRate,
+                OverallDifficulty = value.Beatmap.OverallDifficulty,
+                DrainRate = value.Beatmap.DrainRate,
+            };
             beatmaps[beatmap.BeatmapId] = beatmap;
 
             var endedAt = value.EndedAt ?? value.CreatedAt ?? DateTimeOffset.MinValue;
@@ -231,9 +310,15 @@ public sealed class OsuApiClient :
                 value.MaxCombo,
                 value.IsPerfectCombo ?? value.LegacyPerfect ?? false,
                 endedAt,
-                actualMods,
-                canonicalParts.Count == 0 ? "NM" : string.Join("+", canonicalParts.Order(StringComparer.Ordinal)),
-                clockRates.Calculate(actualMods)));
+                 actualMods,
+                 canonicalParts.Count == 0 ? "NM" : string.Join("+", canonicalParts.Order(StringComparer.Ordinal)),
+                 clockRates.Calculate(actualMods),
+                 isLegacy ? FarmScoreOrigin.Legacy : FarmScoreOrigin.Lazer,
+                 value.LegacyScoreId,
+                 value.TotalScore,
+                 value.LegacyTotalScore,
+                 value.BuildId,
+                 value.Type));
         }
 
         return new PlayerScoresPayload(
@@ -317,6 +402,40 @@ public sealed class OsuApiClient :
         using var response = await SendApiAsync(
             () => new HttpRequestMessage(HttpMethod.Get, "rankings/osu/performance"),
             cancellationToken);
+    }
+
+    public async Task<OsuUserProfileStats> GetUserProfileStatsAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(userId));
+
+        using var response = await SendApiAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, $"users/{userId}/osu?key=id"),
+            cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        UserProfileResponse payload;
+        try
+        {
+            payload = await JsonSerializer.DeserializeAsync<UserProfileResponse>(
+                          stream, jsonOptions, cancellationToken)
+                      ?? throw new InvalidDataException("osu! returned an empty user-profile response.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("osu! returned a malformed user-profile response.", exception);
+        }
+
+        var countryCode = payload.CountryCode?.Trim().ToUpperInvariant();
+        var coverUrl = payload.Cover?.Url ?? payload.CoverUrl;
+        return new OsuUserProfileStats(
+            payload.Statistics?.CountryRank is > 0 ? payload.Statistics.CountryRank : null,
+            countryCode is { Length: 2 } ? countryCode : null,
+            Uri.TryCreate(coverUrl, UriKind.Absolute, out var coverUri)
+            && coverUri.Scheme == Uri.UriSchemeHttps
+                ? coverUri.AbsoluteUri
+                : null);
     }
 
     public void InvalidateToken()
@@ -626,9 +745,26 @@ public sealed class OsuApiClient :
         [property: JsonPropertyName("id")] long Id,
         [property: JsonPropertyName("username")] string? Username);
 
+    private sealed record UserProfileResponse(
+        [property: JsonPropertyName("country_code")] string? CountryCode,
+        [property: JsonPropertyName("cover")] UserCoverResponse? Cover,
+        [property: JsonPropertyName("cover_url")] string? CoverUrl,
+        [property: JsonPropertyName("statistics")] UserStatisticsResponse? Statistics);
+
+    private sealed record UserCoverResponse(
+        [property: JsonPropertyName("url")] string? Url);
+
+    private sealed record UserStatisticsResponse(
+        [property: JsonPropertyName("country_rank")] long? CountryRank);
+
     private sealed record ScoreResponse
     {
         [JsonPropertyName("id")] public long Id { get; init; }
+        [JsonPropertyName("type")] public string? Type { get; init; }
+        [JsonPropertyName("build_id")] public int? BuildId { get; init; }
+        [JsonPropertyName("total_score")] public long? TotalScore { get; init; }
+        [JsonPropertyName("legacy_total_score")] public long? LegacyTotalScore { get; init; }
+        [JsonPropertyName("legacy_score_id")] public long? LegacyScoreId { get; init; }
         [JsonPropertyName("pp")] public double? Pp { get; init; }
         [JsonPropertyName("accuracy")] public double Accuracy { get; init; }
         [JsonPropertyName("max_combo")] public int MaxCombo { get; init; }
@@ -644,9 +780,24 @@ public sealed class OsuApiClient :
 
     private sealed record ScoreStatistics(
         [property: JsonPropertyName("miss")] int? Miss,
-        [property: JsonPropertyName("count_miss")] int? LegacyMiss)
+        [property: JsonPropertyName("count_miss")] int? LegacyMiss,
+        [property: JsonPropertyName("great")] int? Great,
+        [property: JsonPropertyName("count_300")] int? LegacyGreat,
+        [property: JsonPropertyName("ok")] int? Ok,
+        [property: JsonPropertyName("count_100")] int? LegacyOk,
+        [property: JsonPropertyName("meh")] int? Meh,
+        [property: JsonPropertyName("count_50")] int? LegacyMeh)
     {
         public int CountMiss => Miss ?? LegacyMiss ?? 0;
+        public int Count300 => Great ?? LegacyGreat ?? 0;
+        public int Count100 => Ok ?? LegacyOk ?? 0;
+        public int Count50 => Meh ?? LegacyMeh ?? 0;
+    }
+
+    private sealed record BeatmapUserScoreResponse
+    {
+        [JsonPropertyName("position")] public int Position { get; init; }
+        [JsonPropertyName("score")] public ScoreResponse? Score { get; init; }
     }
 
     private sealed record ApiMod(
@@ -669,6 +820,10 @@ public sealed class OsuApiClient :
         [JsonPropertyName("hit_length")] public int HitLength { get; init; }
         [JsonPropertyName("total_length")] public int TotalLength { get; init; }
         [JsonPropertyName("difficulty_rating")] public double DifficultyRating { get; init; }
+        [JsonPropertyName("cs")] public double? CircleSize { get; init; }
+        [JsonPropertyName("ar")] public double? ApproachRate { get; init; }
+        [JsonPropertyName("accuracy")] public double? OverallDifficulty { get; init; }
+        [JsonPropertyName("drain")] public double? DrainRate { get; init; }
         [JsonPropertyName("status")] public string? Status { get; init; }
         [JsonPropertyName("beatmapset")] public BeatmapsetResponse? Beatmapset { get; init; }
     }

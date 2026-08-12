@@ -13,6 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Kumori.App\Kumori.App.csproj" />
     <ProjectReference Include="..\..\src\Kumori.FarmFinder\Kumori.FarmFinder.csproj" />
+    <ProjectReference Include="..\..\src\Kumori.SkinStudio\Kumori.SkinStudio.csproj" />
+    <ProjectReference Include="..\..\src\Kumori.Skins\Kumori.Skins.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Fixtures\skin-compatibility-corpus.json"

@@ -452,6 +452,25 @@ public sealed class ReplayViewerContractService
         AppendViewerLog($"Launching {viewerExecutable} --contract {contractPath}");
 
         var process = Process.Start(start) ?? throw new InvalidOperationException("Replay viewer did not start.");
+        // Catch loader failures before handing the Process to the UI. Without
+        // this handshake, a viewer that exits immediately looks like it opened
+        // successfully and window placement later sees a detached Process.
+        if (process.WaitForExit(500))
+        {
+            string output = process.StandardOutput.ReadToEnd();
+            string error = process.StandardError.ReadToEnd();
+            int exitCode = process.ExitCode;
+            if (!string.IsNullOrWhiteSpace(output))
+                AppendViewerLog($"stdout:{Environment.NewLine}{output.Trim()}");
+            if (!string.IsNullOrWhiteSpace(error))
+                AppendViewerLog($"stderr:{Environment.NewLine}{error.Trim()}");
+            AppendViewerLog($"Exited during startup with code {exitCode}");
+            process.Dispose();
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(error)
+                    ? $"Replay Analyzer exited during startup with code {exitCode}."
+                    : error.Trim());
+        }
         _ = CaptureViewerOutputAsync(process);
         return process;
     }

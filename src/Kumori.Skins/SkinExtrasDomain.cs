@@ -4,10 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-
-namespace Kumori.App.Skins;
+namespace Kumori.Skins;
 
 public sealed record SkinExtraModeVisibility(
     bool ShowCatch = false,
@@ -52,7 +49,7 @@ public sealed class SkinExtraFamilyDefinition
     public string LegacyCategory { get; }
     public IReadOnlyList<SkinExtraIniKey> IniKeys { get; }
     internal IReadOnlyList<string> Prefixes { get; }
-    internal IReadOnlyList<string> ExactNames { get; }
+    public IReadOnlyList<string> ExactNames { get; }
 
     public bool Matches(string filename)
     {
@@ -206,7 +203,7 @@ public static class SkinExtraFamilyRegistry
 
     public static SkinExtraFamilyDefinition? ForFile(string filename)
     {
-        var isAudio = SkinElementCategorizer.IsAudio(filename);
+        var isAudio = SkinMediaTypes.IsAudio(filename);
         var families = isAudio
             ? All.Where(family => family.Area == "Audio")
             : All.Where(family => family.Area != "Audio");
@@ -267,12 +264,6 @@ public sealed record SkinExtraManifestFile(
     string ByteHash,
     string SemanticHash,
     string? SimilarityHash = null);
-
-public sealed record SkinExtraIniPatchEntry(
-    string Section,
-    string Key,
-    string? Value,
-    int? ManiaKeys = null);
 
 public sealed class SkinExtraPackManifest
 {
@@ -589,8 +580,8 @@ public static class SkinExtraFingerprint
         || (!string.IsNullOrWhiteSpace(left.ByteHash)
             && !string.IsNullOrWhiteSpace(right.ByteHash)
             && left.ByteHash.Equals(right.ByteHash, StringComparison.OrdinalIgnoreCase))
-        || (SkinElementCategorizer.IsAudio(left.TargetFilename)
-            && SkinElementCategorizer.IsAudio(right.TargetFilename)
+        || (SkinMediaTypes.IsAudio(left.TargetFilename)
+            && SkinMediaTypes.IsAudio(right.TargetFilename)
             && SkinAudioCanonicalizer.AreSimilar(
                 left.SimilarityHash,
                 right.SimilarityHash));
@@ -598,8 +589,8 @@ public static class SkinExtraFingerprint
     public static bool EquivalentTargetFilename(string left, string right)
     {
         var sameMediaKind =
-            SkinElementCategorizer.IsAudio(left) && SkinElementCategorizer.IsAudio(right)
-            || SkinElementCategorizer.IsImage(left) && SkinElementCategorizer.IsImage(right);
+            SkinMediaTypes.IsAudio(left) && SkinMediaTypes.IsAudio(right)
+            || SkinMediaTypes.IsImage(left) && SkinMediaTypes.IsImage(right);
         if (sameMediaKind)
             return Path.GetFileNameWithoutExtension(left).Equals(
                 Path.GetFileNameWithoutExtension(right),
@@ -623,17 +614,12 @@ public static class SkinExtraFingerprint
         var byteHash = Hex(SHA256.HashData(bytes));
         var semanticHash = byteHash;
         string? similarityHash = null;
-        if (SkinElementCategorizer.IsImage(targetFilename))
+        if (SkinMediaTypes.IsImage(targetFilename))
         {
             try
             {
-                var image = SkinImageTools.Decode(bytes);
-                var converted = new FormatConvertedBitmap(image, PixelFormats.Bgra32, null, 0);
-                converted.Freeze();
-                var stride = converted.PixelWidth * 4;
-                var pixels = new byte[stride * converted.PixelHeight];
-                converted.CopyPixels(pixels, stride, 0);
-                if (!SkinImageTools.HasVisiblePixels(pixels))
+                var image = SkinImageAnalysis.Decode(bytes);
+                if (!image.HasVisiblePixels)
                 {
                     semanticHash = Hex(SHA256.HashData(
                         Encoding.UTF8.GetBytes("kumori:fully-transparent-image")));
@@ -641,12 +627,8 @@ public static class SkinExtraFingerprint
                 }
                 else
                 {
-                    using var semantic = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    semantic.AppendData(BitConverter.GetBytes(converted.PixelWidth));
-                    semantic.AppendData(BitConverter.GetBytes(converted.PixelHeight));
-                    semantic.AppendData(pixels);
-                    semanticHash = Hex(semantic.GetHashAndReset());
-                    similarityHash = AverageHash(converted);
+                    semanticHash = image.SemanticHash();
+                    similarityHash = image.AverageHash;
                 }
             }
             catch
@@ -655,7 +637,7 @@ public static class SkinExtraFingerprint
                 // still be kept in an Extras pack for manual inspection.
             }
         }
-        else if (SkinElementCategorizer.IsAudio(targetFilename)
+        else if (SkinMediaTypes.IsAudio(targetFilename)
                  && SkinAudioCanonicalizer.TryHash(
                      bytes,
                      byteHash,
@@ -707,21 +689,6 @@ public static class SkinExtraFingerprint
         return SkinExtraFamilyRegistry.NormalizedStem(filename)
                + (filename.Contains("@2x", StringComparison.OrdinalIgnoreCase) ? "@2x" : "")
                + extension;
-    }
-
-    private static string AverageHash(BitmapSource image)
-    {
-        var scaled = new TransformedBitmap(
-            new FormatConvertedBitmap(image, PixelFormats.Gray8, null, 0),
-            new ScaleTransform(8d / image.PixelWidth, 8d / image.PixelHeight));
-        scaled.Freeze();
-        var pixels = new byte[64];
-        scaled.CopyPixels(pixels, 8, 0);
-        var average = pixels.Average(value => (double)value);
-        ulong bits = 0;
-        for (var index = 0; index < pixels.Length; index++)
-            if (pixels[index] >= average) bits |= 1UL << index;
-        return bits.ToString("x16");
     }
 
     private static bool TryGetWaveSemanticBytes(byte[] bytes, out byte[] data)
@@ -894,7 +861,7 @@ public sealed record SkinExtraPackDescriptor(
     SkinExtraPackManifest Manifest,
     bool IsLegacy);
 
-internal static class SkinExtrasMutationGate
+public static class SkinExtrasMutationGate
 {
     // Extraction and portable-package imports both mutate the same index,
     // object store, and pack tree. Serialising those transactions prevents
@@ -983,5 +950,5 @@ public static class SkinExtraPackIndex
     }
 
     private static bool IsAsset(string path) =>
-        SkinElementCategorizer.IsImage(path) || SkinElementCategorizer.IsAudio(path);
+        SkinMediaTypes.IsImage(path) || SkinMediaTypes.IsAudio(path);
 }

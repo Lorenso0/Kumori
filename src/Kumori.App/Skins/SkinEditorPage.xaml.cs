@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -68,12 +69,24 @@ public partial class SkinEditorPage : UserControl
         Color.FromRgb(0x00, 0xE5, 0xD0),
         Color.FromRgb(0xFF, 0xFF, 0xFF),
     ];
+    private static readonly IReadOnlyList<System.Windows.Point>
+        GameplaySliderPreviewPath = LegacySliderRenderer
+            .SampleSCurve(127, 177, 676, 102, segments: 128);
+    private static readonly IReadOnlyList<System.Windows.Point>
+        ElementSliderPreviewPath = BuildElementSliderPreviewPath();
+    private static readonly double GameplaySliderPreviewVelocity =
+        SkinPreviewAnimation.PolylineLength(GameplaySliderPreviewPath)
+        / SkinPreviewAnimation.SliderSpanMilliseconds;
+    private static readonly double ElementSliderPreviewVelocity =
+        SkinPreviewAnimation.PolylineLength(ElementSliderPreviewPath)
+        / SkinPreviewAnimation.SliderSpanMilliseconds;
 
     private static List<(string Filename, byte[] Bytes)> elementClipboard = [];
 
     private readonly SettingsService settings;
     private readonly ILazerSkinRealmService realmService;
     private readonly ILazerSkinReloadService? reloadService;
+    private readonly Func<Task>? openLazerEditor;
     private readonly List<FileSystemWatcher> externalWatchers = [];
     private readonly Dictionary<(string Section, string Key), IniRow> iniRows = [];
     private readonly Dictionary<string, FrameworkElement> iniSectionPanels =
@@ -89,10 +102,15 @@ public partial class SkinEditorPage : UserControl
         new(StringComparer.OrdinalIgnoreCase);
     private readonly List<System.Windows.Controls.Image> selectedCompositionLayers = [];
     private readonly List<ElementCompositionVisual> elementCompositionVisuals = [];
+    private readonly Dictionary<System.Windows.Controls.Image, PreviewVisualTransforms>
+        previewVisualTransforms = [];
+    private readonly List<System.Windows.Controls.Image> interactiveCursorTrailVisuals = [];
+    private readonly List<InteractiveCursorSample> interactiveCursorSamples = [];
     private static readonly object ElementCompositionDecorationTag = new();
     private static readonly DropShadowEffect ElementCompositionSelectionGlow =
         CreateElementCompositionSelectionGlow();
     private SkinElementCompositionKind? renderedElementCompositionKind;
+    private bool renderedCursorUsesSmoothTrail;
     private IReadOnlyDictionary<string, SkinDraftChange[]> draftChangesByStem =
         new Dictionary<string, SkinDraftChange[]>(StringComparer.OrdinalIgnoreCase);
     private IReadOnlySet<string> draftDeletedFilenames =
@@ -151,6 +169,28 @@ public partial class SkinEditorPage : UserControl
     private readonly Dictionary<SkinElementCompositionKind, IReadOnlyList<ElementLayerSpec>>
         elementCompositionCache = [];
     private long cachedElementCompositionDraftRevision = -1;
+    private readonly Stopwatch previewRenderClock = Stopwatch.StartNew();
+    private double previewAnimationElapsed;
+    private double previewLastRenderTime;
+    private double previewFrameDelta;
+    private double previewHealth = 1;
+    private bool previewRenderingSubscribed;
+    private bool previewAnimationsEnabled;
+    private bool interactiveCursorActive;
+    private double interactiveCursorLastSampleTime = double.NegativeInfinity;
+    private double interactiveCursorScale = 1;
+    private double interactiveCursorScaleFrom = 1;
+    private double interactiveCursorScaleTarget = 1;
+    private double interactiveCursorScaleStartTime;
+    private int interactiveCursorDownCount;
+    private System.Windows.Point? interactiveSmoothTrailAnchor;
+    private System.Windows.Point interactiveCursorPosition;
+    private Window? previewHostWindow;
+    private IReadOnlyList<BitmapSource> sliderBallAnimationFrames = [];
+    private IReadOnlyList<BitmapSource> sliderFollowAnimationFrames = [];
+    private IReadOnlyList<BitmapSource> followpointAnimationFrames = [];
+    private int previewAnimationFramerate = -1;
+    private decimal previewLegacySkinVersion = 2.7m;
     private IInputElement? focusBeforeBusy;
     private SkinEditorWorkspaceMode workspaceMode = SkinEditorWorkspaceMode.Elements;
     private SkinEditorCenterMode elementCenterMode = SkinEditorCenterMode.Asset;
@@ -162,18 +202,24 @@ public partial class SkinEditorPage : UserControl
     public SkinEditorPage(
         SettingsService settings,
         ILazerSkinRealmService? realmService = null)
-        : this(settings, realmService, reloadService: null)
+        : this(
+            settings,
+            realmService,
+            reloadService: null,
+            openLazerEditor: null)
     {
     }
 
     internal SkinEditorPage(
         SettingsService settings,
         ILazerSkinRealmService? realmService,
-        ILazerSkinReloadService? reloadService)
+        ILazerSkinReloadService? reloadService,
+        Func<Task>? openLazerEditor = null)
     {
         this.settings = settings;
         this.realmService = realmService ?? new LazerSkinRealmService();
         this.reloadService = reloadService;
+        this.openLazerEditor = openLazerEditor;
         extrasSyncService = SkinExtrasCatalogSyncService.Shared;
         extrasSyncService.ProgressChanged += ExtrasSyncService_ProgressChanged;
         extrasSyncService.LibraryChanged += ExtrasSyncService_LibraryChanged;
@@ -186,6 +232,10 @@ public partial class SkinEditorPage : UserControl
             Interval = TimeSpan.FromMilliseconds(33),
         };
         InitializeComponent();
+        OpenLazerEditorMenuItem.IsEnabled = openLazerEditor is not null;
+        previewAnimationsEnabled = settings.Current.SkinEditor.PreviewAnimationsEnabled;
+        PreviewPlaybackToggle.IsChecked = previewAnimationsEnabled;
+        UpdatePreviewPlaybackPresentation();
         elementSearchTimer.Tick += async (_, _) =>
         {
             elementSearchTimer.Stop();
@@ -224,8 +274,20 @@ public partial class SkinEditorPage : UserControl
         IntegratedSkinColorPicker.CloseRequested += () => SkinColorPickerPopup.IsOpen = false;
         BuildSwatches();
         SizeChanged += (_, _) => ApplyResponsiveLayout();
+        Loaded += SkinEditor_Loaded;
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible)
+                EndInteractiveCursorPreview();
+            UpdatePreviewAnimationSubscription();
+        };
         Unloaded += async (_, _) =>
         {
+            EndInteractiveCursorPreview();
+            StopPreviewRendering();
+            if (previewHostWindow is not null)
+                previewHostWindow.Deactivated -= PreviewHostWindow_Deactivated;
+            previewHostWindow = null;
             gameplayPreviewRefreshTimer.Stop();
             elementSearchTimer.Stop();
             elementRenderTimer.Stop();
@@ -1352,6 +1414,7 @@ public partial class SkinEditorPage : UserControl
         elementCompositionCache.Clear();
         cachedSliderPreviewKey = null;
         cachedSliderPreview = null;
+        ResetPreviewAnimation();
     }
 
     private async Task<IReadOnlyList<ElementLayerSpec>> BuildHitObjectCompositionAsync()
@@ -1367,10 +1430,38 @@ public partial class SkinEditorPage : UserControl
         var combo = ReadIniColor("Colours", "Combo1") ?? builtInSwatches[6];
         return CompactLayers(
         [
-            Layer(entries[0], 320, 240, 330, 330, Tinted(entries[0], combo)),
-            Layer(entries[1], 320, 240, 194, 194, Tinted(entries[1], combo)),
-            Layer(entries[2], 320, 240, 194, 194),
-            Layer(entries[3], 320, 240, 72, 92),
+            Layer(
+                entries[0],
+                320,
+                240,
+                330,
+                330,
+                Tinted(entries[0], combo),
+                role: SkinPreviewAnimationRole.ApproachCircle),
+            Layer(
+                entries[1],
+                320,
+                240,
+                194,
+                194,
+                Tinted(entries[1], combo),
+                role: SkinPreviewAnimationRole.HitCircle),
+            Layer(
+                entries[2],
+                320,
+                240,
+                194,
+                194,
+                role: SkinPreviewAnimationRole.HitCircle,
+                roleIndex: 1),
+            Layer(
+                entries[3],
+                320,
+                240,
+                72,
+                92,
+                role: SkinPreviewAnimationRole.HitCircle,
+                roleIndex: 2),
         ]);
     }
 
@@ -1382,29 +1473,43 @@ public partial class SkinEditorPage : UserControl
         if (entries.Count == 0)
             entries = [selected];
 
-        const int pointCount = 8;
+        const double spacing = 32;
+        var startPosition = new System.Windows.Point(80, 330);
+        var endPosition = new System.Windows.Point(560, 150);
+        var distanceVector = endPosition - startPosition;
+        var distance = (int)distanceVector.Length;
+        var rotation = Math.Atan2(
+            distanceVector.Y,
+            distanceVector.X) * 180 / Math.PI;
         var layers = new List<ElementLayerSpec>();
-        for (var index = 0; index < pointCount; index++)
+        var index = 0;
+        for (var travelled = (int)(spacing * 1.5);
+             travelled < distance - spacing;
+             travelled += (int)spacing)
         {
-            var progress = index / (double)(pointCount - 1);
-            var x = 78 + progress * 484;
-            var y = 314 - Math.Sin(progress * Math.PI) * 150;
+            var progress = travelled / (double)distance;
+            var position = startPosition + progress * distanceVector;
             var frame = entries[index % entries.Count];
             var selectedFrame = LogicalStem(frame.Filename).Equals(
                 LogicalStem(selected.Filename),
                 StringComparison.OrdinalIgnoreCase);
             layers.Add(Layer(
                 frame,
-                x,
-                y,
-                64,
-                64,
+                position.X,
+                position.Y,
+                48,
+                48,
                 contextOpacity: 0.46,
                 highlightEligible: selectedFrame && !layers.Any(layer =>
                     layer.HighlightEligible
                     && LogicalStem(layer.Entry?.Filename ?? "").Equals(
                         LogicalStem(selected.Filename),
-                        StringComparison.OrdinalIgnoreCase))));
+                        StringComparison.OrdinalIgnoreCase)),
+                role: SkinPreviewAnimationRole.Followpoint,
+                roleIndex: index,
+                roleProgress: progress,
+                rotationDegrees: rotation));
+            index++;
         }
         return layers;
     }
@@ -1420,7 +1525,8 @@ public partial class SkinEditorPage : UserControl
             FindAndLoadAsync($"{hitCirclePrefix}-1"),
             FindAndLoadAsync("sliderb0", "sliderb", "sliderball"),
             FindAndLoadAsync("sliderfollowcircle"),
-            FindAndLoadAsync("reversearrow"));
+            FindAndLoadAsync("reversearrow"),
+            FindAndLoadAsync("approachcircle"));
         var combos = Enumerable.Range(1, 8)
             .Select(index => ReadIniColor("Colours", $"Combo{index}"))
             .Where(color => color.HasValue)
@@ -1446,7 +1552,18 @@ public partial class SkinEditorPage : UserControl
                 geometry.BodyHeight,
                 0.82,
                 false,
+                0,
+                SkinPreviewAnimationRole.None,
+                0,
                 0),
+            Layer(
+                entries[6],
+                geometry.Start.X,
+                geometry.Start.Y,
+                geometry.CircleDiameter * 1.67,
+                geometry.CircleDiameter * 1.67,
+                Tinted(entries[6], combo),
+                role: SkinPreviewAnimationRole.ApproachCircle),
             Layer(
                 entries[0],
                 geometry.Start.X,
@@ -1480,19 +1597,22 @@ public partial class SkinEditorPage : UserControl
                 geometry.End.Y,
                 geometry.ReverseDiameter,
                 geometry.ReverseDiameter,
-                rotationDegrees: geometry.ReverseRotation),
+                rotationDegrees: geometry.ReverseRotation,
+                role: SkinPreviewAnimationRole.ReverseArrow),
             Layer(
                 entries[4],
                 geometry.Ball.X,
                 geometry.Ball.Y,
                 geometry.FollowDiameter,
-                geometry.FollowDiameter),
+                geometry.FollowDiameter,
+                role: SkinPreviewAnimationRole.SliderFollowCircle),
             Layer(
                 entries[3],
                 geometry.Ball.X,
                 geometry.Ball.Y,
                 geometry.BallDiameter,
-                geometry.BallDiameter),
+                geometry.BallDiameter,
+                role: SkinPreviewAnimationRole.SliderBall),
         ]);
     }
 
@@ -1531,6 +1651,22 @@ public partial class SkinEditorPage : UserControl
             reverseRotation);
     }
 
+    private static IReadOnlyList<System.Windows.Point>
+        BuildElementSliderPreviewPath()
+    {
+        const double bodyWidth = 590;
+        const double sourceWidth = 800;
+        const double sourceHeight = 300;
+        var bodyHeight = bodyWidth * sourceHeight / sourceWidth;
+        var bodyLeft = (SkinCursorPreview.CanvasWidth - bodyWidth) / 2;
+        var bodyTop = (SkinCursorPreview.CanvasHeight - bodyHeight) / 2;
+        return GameplaySliderPreviewPath
+            .Select(point => new System.Windows.Point(
+                bodyLeft + point.X / sourceWidth * bodyWidth,
+                bodyTop + point.Y / sourceHeight * bodyHeight))
+            .ToArray();
+    }
+
     private async Task<IReadOnlyList<ElementLayerSpec>> BuildCursorCompositionAsync()
     {
         if (currentSkin is null)
@@ -1540,6 +1676,7 @@ public partial class SkinEditorPage : UserControl
                     currentSkin.Files,
                     draft?.Changes ?? [])
                 .Select(file => file.Filename));
+        renderedCursorUsesSmoothTrail = assets.UsesSmoothTrail;
         var entries = await Task.WhenAll(
             FindAndLoadEffectiveFileAsync(assets.TrailFilename),
             FindAndLoadEffectiveFileAsync(assets.MiddleFilename),
@@ -1568,7 +1705,18 @@ public partial class SkinEditorPage : UserControl
                 contextOpacity: layer.Opacity,
                 highlightEligible: layer.Kind != SkinCursorPreviewLayerKind.Trail
                                    || layer.Equals(composition.Last(candidate =>
-                                       candidate.Kind == SkinCursorPreviewLayerKind.Trail))));
+                                       candidate.Kind == SkinCursorPreviewLayerKind.Trail)),
+                role: layer.Kind switch
+                {
+                    SkinCursorPreviewLayerKind.Trail =>
+                        SkinPreviewAnimationRole.CursorTrail,
+                    SkinCursorPreviewLayerKind.Middle =>
+                        SkinPreviewAnimationRole.CursorMiddle,
+                    _ => SkinPreviewAnimationRole.Cursor,
+                },
+                roleIndex: layer.Kind == SkinCursorPreviewLayerKind.Trail
+                    ? layers.Count
+                    : 0));
         }
         return CompactLayers(layers);
     }
@@ -1599,16 +1747,76 @@ public partial class SkinEditorPage : UserControl
         return CompactLayers(
         [
             Layer(entries[0], 320, 238, 360, 360, Tinted(entries[0], spinnerColour)),
-            Layer(entries[1], 320, 238, 360, 360),
-            Layer(entries[2], 320, 238, 360, 360),
-            Layer(entries[3], 320, 238, 360, 360),
-            Layer(entries[4], 320, 238, 360, 360),
-            Layer(entries[5], 320, 238, 360, 360),
-            Layer(entries[6], 320, 238, 360, 360),
-            Layer(entries[7], 320, 238, 420, 420),
-            Layer(entries[10], 116, 245, 200, 420),
-            Layer(entries[9], 320, 122, 250, 72),
-            Layer(entries[8], 320, 362, 250, 72),
+            Layer(
+                entries[1],
+                320,
+                238,
+                360,
+                360,
+                role: SkinPreviewAnimationRole.SpinnerCircle),
+            Layer(
+                entries[2],
+                320,
+                238,
+                360,
+                360,
+                role: SkinPreviewAnimationRole.SpinnerGlow),
+            Layer(
+                entries[3],
+                320,
+                238,
+                360,
+                360,
+                role: SkinPreviewAnimationRole.SpinnerBottom),
+            Layer(
+                entries[4],
+                320,
+                238,
+                360,
+                360,
+                role: SkinPreviewAnimationRole.SpinnerTop),
+            Layer(
+                entries[5],
+                320,
+                238,
+                360,
+                360,
+                role: SkinPreviewAnimationRole.SpinnerMiddle2),
+            Layer(
+                entries[6],
+                320,
+                238,
+                360,
+                360,
+                role: SkinPreviewAnimationRole.SpinnerMiddle),
+            Layer(
+                entries[7],
+                320,
+                238,
+                420,
+                420,
+                role: SkinPreviewAnimationRole.SpinnerApproach),
+            Layer(
+                entries[10],
+                116,
+                245,
+                200,
+                420,
+                role: SkinPreviewAnimationRole.SpinnerMetre),
+            Layer(
+                entries[9],
+                320,
+                122,
+                250,
+                72,
+                role: SkinPreviewAnimationRole.SpinnerClear),
+            Layer(
+                entries[8],
+                320,
+                362,
+                250,
+                72,
+                role: SkinPreviewAnimationRole.SpinnerSpin),
             Layer(entries[11], 488, 410, 118, 40),
         ]);
     }
@@ -1731,7 +1939,13 @@ public partial class SkinEditorPage : UserControl
         [
             Layer(entries[0], 320, 225, 560, 270, contextOpacity: 0.48),
             Layer(entries[1], 320, 225, 540, 250, contextOpacity: 0.62),
-            Layer(entries[2], 420, 225, 110, 110),
+            Layer(
+                entries[2],
+                420,
+                225,
+                110,
+                110,
+                role: SkinPreviewAnimationRole.ScorebarMarker),
         ]);
     }
 
@@ -1809,6 +2023,7 @@ public partial class SkinEditorPage : UserControl
             AddCompositionLayer(layer, selected: false);
         renderedElementCompositionKind = compositionKind;
         _ = TryUpdateElementCompositionSelection(compositionKind, selected);
+        RenderPreviewFrame();
     }
 
     private bool TryUpdateElementCompositionSelection(
@@ -2007,6 +2222,9 @@ public partial class SkinEditorPage : UserControl
     {
         if (ElementCompositionCanvas is null)
             return;
+        EndInteractiveCursorPreview(restoreComposition: false);
+        foreach (var visual in elementCompositionVisuals)
+            previewVisualTransforms.Remove(visual.Image);
         ElementCompositionCanvas.Children.Clear();
         selectedCompositionLayers.Clear();
         elementCompositionVisuals.Clear();
@@ -2041,7 +2259,10 @@ public partial class SkinEditorPage : UserControl
         BitmapSource? source = null,
         double contextOpacity = 0.34,
         bool highlightEligible = true,
-        double rotationDegrees = 0) =>
+        double rotationDegrees = 0,
+        SkinPreviewAnimationRole role = SkinPreviewAnimationRole.None,
+        int roleIndex = 0,
+        double roleProgress = 0) =>
         new(
             entry,
             source ?? entry?.Thumbnail,
@@ -2051,7 +2272,10 @@ public partial class SkinEditorPage : UserControl
             maxHeight,
             contextOpacity,
             highlightEligible,
-            rotationDegrees);
+            rotationDegrees,
+            role,
+            roleIndex,
+            roleProgress);
 
     private static IReadOnlyList<ElementLayerSpec> CompactLayers(
         IEnumerable<ElementLayerSpec> layers) =>
@@ -2068,7 +2292,10 @@ public partial class SkinEditorPage : UserControl
         double MaxHeight,
         double ContextOpacity,
         bool HighlightEligible,
-        double RotationDegrees);
+        double RotationDegrees,
+        SkinPreviewAnimationRole Role,
+        int RoleIndex,
+        double RoleProgress);
 
     private sealed record ElementCompositionVisual(
         System.Windows.Controls.Image Image,
@@ -2076,6 +2303,35 @@ public partial class SkinEditorPage : UserControl
         double Width,
         double Height,
         int BaseZIndex);
+
+    private sealed class PreviewVisualTransforms
+    {
+        public PreviewVisualTransforms(double baseRotation)
+        {
+            BaseRotation = baseRotation;
+            Group = new TransformGroup
+            {
+                Children =
+                {
+                    Scale,
+                    Rotate,
+                    Translate,
+                },
+            };
+        }
+
+        public double BaseRotation { get; }
+        public ScaleTransform Scale { get; } = new(1, 1);
+        public RotateTransform Rotate { get; } = new();
+        public TranslateTransform Translate { get; } = new();
+        public TransformGroup Group { get; }
+    }
+
+    private readonly record struct InteractiveCursorSample(
+        System.Windows.Point Position,
+        double Time,
+        double Scale,
+        double Rotation);
 
     internal readonly record struct SliderCompositionGeometry(
         double BodyWidth,
@@ -2855,6 +3111,32 @@ public partial class SkinEditorPage : UserControl
                 sliderBorder,
                 sliderTrack,
                 cancellationToken);
+            var allowBallTint =
+                iniDocument?.GetValue("General", "AllowSliderBallTint") == "1";
+            previewAnimationFramerate = int.TryParse(
+                iniDocument?.GetValue("General", "AnimationFramerate"),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var configuredFramerate)
+                ? configuredFramerate
+                : -1;
+            previewLegacySkinVersion = decimal.TryParse(
+                iniDocument?.GetValue("General", "Version"),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var configuredVersion)
+                ? configuredVersion
+                : 2.7m;
+            var animationFrames = await Task.WhenAll(
+                LoadAnimationFrameSourcesAsync(
+                    "sliderb",
+                    "",
+                    allowBallTint ? comboTail : null),
+                LoadAnimationFrameSourcesAsync("sliderfollowcircle", "-"),
+                LoadAnimationFrameSourcesAsync("followpoint", "-"));
+            sliderBallAnimationFrames = animationFrames[0];
+            sliderFollowAnimationFrames = animationFrames[1];
+            followpointAnimationFrames = animationFrames[2];
             if (version != gameplayRefreshVersion)
                 return;
 
@@ -2880,9 +3162,12 @@ public partial class SkinEditorPage : UserControl
             GameplayTailCircle.Source = Tinted(circle, comboTail);
             GameplayTailOverlay.Source = overlay?.Thumbnail;
             GameplayReverseArrow.Source = reverseArrow?.Thumbnail;
-            GameplayFollowCircle.Source = followCircle?.Thumbnail;
-            var allowBallTint = iniDocument?.GetValue("General", "AllowSliderBallTint") == "1";
-            GameplaySliderBall.Source = allowBallTint ? Tinted(ball, comboTail) : ball?.Thumbnail;
+            GameplayFollowCircle.Source =
+                sliderFollowAnimationFrames.FirstOrDefault()
+                ?? followCircle?.Thumbnail;
+            GameplaySliderBall.Source =
+                sliderBallAnimationFrames.FirstOrDefault()
+                ?? (allowBallTint ? Tinted(ball, comboTail) : ball?.Thumbnail);
             GameplayCursor.Source = cursor?.Thumbnail;
             GameplayCursorTrail.Source = cursorTrail?.Thumbnail;
             GameplayCursorTrailFar.Source = cursorTrail?.Thumbnail;
@@ -2955,6 +3240,7 @@ public partial class SkinEditorPage : UserControl
             GameplaySpinnerSpinFallback.Visibility = spinnerSpin is null ? Visibility.Visible : Visibility.Collapsed;
             GameplaySpinnerClearFallback.Visibility = Visibility.Collapsed;
             GameplayBackground.Visibility = Visibility.Collapsed;
+            ResetPreviewAnimation();
             _ = RefreshRichPreviewsAsync();
         }
         catch (OperationCanceledException)
@@ -3018,6 +3304,45 @@ public partial class SkinEditorPage : UserControl
         cachedSliderPreviewKey = key;
         cachedSliderPreview = rendered;
         return rendered;
+    }
+
+    private async Task<IReadOnlyList<BitmapSource>> LoadAnimationFrameSourcesAsync(
+        string baseStem,
+        string separator,
+        Color? tint = null)
+    {
+        if (currentSkin is null)
+            return [];
+        var filenames = SkinDraftProjection.EffectiveFiles(
+                currentSkin.Files,
+                draft?.Changes ?? [])
+            .Select(file => file.Filename);
+        var resolved = SkinPreviewAnimation.ResolveFrames(
+            filenames,
+            baseStem,
+            separator);
+        if (resolved.Count == 0)
+            return [];
+
+        var frames = new List<BitmapSource>(resolved.Count);
+        foreach (var filename in resolved)
+        {
+            try
+            {
+                var entry = await FindAndLoadEffectiveFileAsync(filename);
+                var source = tint.HasValue
+                    ? Tinted(entry, tint.Value)
+                    : entry?.Thumbnail;
+                if (source is null)
+                    break;
+                frames.Add(source);
+            }
+            catch
+            {
+                break;
+            }
+        }
+        return frames;
     }
 
     private async Task<SkinElementEntry?> FindAndLoadAsync(params string[] stems)
@@ -3438,10 +3763,1091 @@ public partial class SkinEditorPage : UserControl
         UpdateStudioState();
     }
 
+    private void SkinEditor_Loaded(object sender, RoutedEventArgs e)
+    {
+        var window = Window.GetWindow(this);
+        if (!ReferenceEquals(previewHostWindow, window))
+        {
+            if (previewHostWindow is not null)
+                previewHostWindow.Deactivated -= PreviewHostWindow_Deactivated;
+            previewHostWindow = window;
+            if (previewHostWindow is not null)
+                previewHostWindow.Deactivated += PreviewHostWindow_Deactivated;
+        }
+        UpdatePreviewAnimationSubscription();
+    }
+
+    private void PreviewHostWindow_Deactivated(object? sender, EventArgs e) =>
+        EndInteractiveCursorPreview();
+
+    private void PreviewPlaybackToggle_Click(object sender, RoutedEventArgs e)
+    {
+        SetPreviewAnimationsEnabled(PreviewPlaybackToggle.IsChecked == true);
+    }
+
+    private void SetPreviewAnimationsEnabled(bool enabled)
+    {
+        previewAnimationsEnabled = enabled;
+        settings.Update(value =>
+            value.SkinEditor.PreviewAnimationsEnabled = previewAnimationsEnabled);
+        UpdatePreviewPlaybackPresentation();
+        UpdatePreviewAnimationSubscription();
+        if (!previewAnimationsEnabled && !interactiveCursorActive)
+            RenderPreviewFrame();
+    }
+
+    private void UpdatePreviewPlaybackPresentation()
+    {
+        if (PreviewPlaybackToggle is null)
+            return;
+        PreviewPlaybackToggle.IsChecked = previewAnimationsEnabled;
+        PreviewPlaybackToggle.Content = previewAnimationsEnabled ? "Pause" : "Play";
+        AutomationProperties.SetName(
+            PreviewPlaybackToggle,
+            previewAnimationsEnabled
+                ? "Pause animated skin previews"
+                : "Play animated skin previews");
+    }
+
+    private void ResetPreviewAnimation()
+    {
+        previewAnimationElapsed = 0;
+        previewFrameDelta = 0;
+        previewHealth = 1;
+        previewLastRenderTime = previewRenderClock.Elapsed.TotalMilliseconds;
+        interactiveCursorSamples.Clear();
+        interactiveCursorLastSampleTime = double.NegativeInfinity;
+        interactiveSmoothTrailAnchor = interactiveCursorActive
+            ? interactiveCursorPosition
+            : null;
+        RenderPreviewFrame();
+    }
+
+    private void UpdatePreviewAnimationSubscription()
+    {
+        var shouldRender = SkinPreviewAnimation.ShouldRender(
+            IsVisible,
+            workspaceMode == SkinEditorWorkspaceMode.Elements
+            && ExtrasWorkspace.Visibility != Visibility.Visible,
+            previewAnimationsEnabled,
+            interactiveCursorActive);
+        if (shouldRender)
+        {
+            if (previewRenderingSubscribed)
+                return;
+            previewLastRenderTime = previewRenderClock.Elapsed.TotalMilliseconds;
+            CompositionTarget.Rendering += PreviewCompositionTarget_Rendering;
+            previewRenderingSubscribed = true;
+        }
+        else
+        {
+            StopPreviewRendering();
+        }
+    }
+
+    private void StopPreviewRendering()
+    {
+        if (!previewRenderingSubscribed)
+            return;
+        CompositionTarget.Rendering -= PreviewCompositionTarget_Rendering;
+        previewRenderingSubscribed = false;
+    }
+
+    private void PreviewCompositionTarget_Rendering(object? sender, EventArgs e)
+    {
+        var now = previewRenderClock.Elapsed.TotalMilliseconds;
+        var delta = Math.Clamp(now - previewLastRenderTime, 0, 100);
+        previewLastRenderTime = now;
+        if (previewAnimationsEnabled)
+        {
+            previewAnimationElapsed += delta;
+            previewFrameDelta = delta;
+        }
+        else
+        {
+            previewFrameDelta = 0;
+        }
+        RenderPreviewFrame(now);
+    }
+
+    private void RenderPreviewFrame(double? wallTime = null)
+    {
+        if (!IsLoaded || workspaceMode != SkinEditorWorkspaceMode.Elements)
+            return;
+        if (elementCenterMode == SkinEditorCenterMode.Gameplay)
+            AnimateGameplayPreview(previewAnimationElapsed);
+        else
+            AnimateElementComposition(previewAnimationElapsed);
+        if (interactiveCursorActive)
+            RenderInteractiveCursor(
+                wallTime ?? previewRenderClock.Elapsed.TotalMilliseconds);
+        previewFrameDelta = 0;
+    }
+
+    private void AnimateGameplayPreview(double elapsed)
+    {
+        var approach = SkinPreviewAnimation.Approach(elapsed);
+        ApplyPreviewTransform(
+            GameplayStandaloneApproach,
+            scale: approach.Scale);
+        ApplyPreviewTransform(GameplayApproach, scale: approach.Scale);
+        GameplayStandaloneApproach.Opacity = approach.Opacity;
+        GameplayApproach.Opacity = approach.Opacity;
+
+        var hitObject = SkinPreviewAnimation.HitObject(elapsed);
+        ApplyPreviewTransform(GameplayHitcircle, scale: hitObject.Scale);
+        ApplyPreviewTransform(GameplayOverlay, scale: hitObject.Scale);
+        GameplayHitcircle.Opacity = hitObject.Opacity;
+        GameplayOverlay.Opacity = hitObject.Opacity;
+        var hitNumber = SkinPreviewAnimation.HitObject(
+            elapsed,
+            shortNumberFade: previewLegacySkinVersion > 1);
+        ApplyPreviewTransform(GameplayNumber, scale: hitNumber.Scale);
+        GameplayNumber.Opacity = hitNumber.Opacity;
+
+        var slider = SkinPreviewAnimation.Slider(
+            elapsed,
+            legacyVersionOne: previewLegacySkinVersion <= 1);
+        var sliderPosition = SkinPreviewAnimation.SamplePolyline(
+            GameplaySliderPreviewPath,
+            slider.Progress);
+        var sliderRotation = SkinPreviewAnimation.PolylineRotation(
+            GameplaySliderPreviewPath,
+            slider.Progress,
+            slider.Reversed);
+        var sliderBallFlip =
+            ReadPreviewBoolean("General", "SliderBallFlip", defaultValue: true)
+            && slider.Reversed
+                ? -1d
+                : 1d;
+        ApplyPreviewTransform(
+            GameplaySliderBall,
+            sliderPosition.X - 431,
+            sliderPosition.Y - 145,
+            rotation: sliderRotation,
+            scaleX: sliderBallFlip);
+        GameplaySliderBall.Opacity = slider.BallOpacity;
+        ApplyPreviewTransform(
+            GameplayFollowCircle,
+            sliderPosition.X - 431,
+            sliderPosition.Y - 145,
+            scale: slider.FollowScale);
+        GameplayFollowCircle.Opacity = slider.FollowOpacity;
+        ApplyPreviewTransform(
+            GameplayReverseArrow,
+            scale: slider.ReverseScale,
+            rotation: SkinPreviewAnimation.PolylineRotation(
+                GameplaySliderPreviewPath,
+                1,
+                reversed: false) + 180 + slider.ReverseRotation);
+        GameplayReverseArrow.Opacity = slider.ReverseOpacity;
+
+        ApplyAnimationFrame(
+            GameplaySliderBall,
+            sliderBallAnimationFrames,
+            elapsed,
+            sliderBall: true,
+            sliderVelocity: GameplaySliderPreviewVelocity);
+        ApplyAnimationFrame(
+            GameplayFollowCircle,
+            sliderFollowAnimationFrames,
+            elapsed,
+            sliderBall: false);
+
+        var cursor = SkinPreviewAnimation.Cursor(
+            elapsed,
+            800,
+            210,
+            ReadPreviewBoolean("General", "CursorExpand", defaultValue: true),
+            ReadPreviewBoolean("General", "CursorRotate", defaultValue: true));
+        var cursorCentre = ReadPreviewBoolean(
+            "General",
+            "CursorCentre",
+            defaultValue: true);
+        PlaceInteractiveVisual(
+            GameplayCursor,
+            440,
+            94,
+            cursor.Position,
+            cursorCentre,
+            cursor.Scale,
+            cursor.Rotation);
+        PlaceInteractiveVisual(
+            GameplayCursorMiddle,
+            440,
+            94,
+            cursor.Position,
+            cursorCentre,
+            1,
+            0);
+        var smoothCursor = GameplayCursorMiddle.Source is not null;
+        AnimateGameplayTrail(
+            GameplayCursorTrail,
+            elapsed,
+            smoothCursor ? 90 : SkinPreviewAnimation
+                .DisjointTrailIntervalMilliseconds,
+            395,
+            102,
+            0.58,
+            smoothCursor);
+        AnimateGameplayTrail(
+            GameplayCursorTrailFar,
+            elapsed,
+            smoothCursor
+                ? 260
+                : SkinPreviewAnimation.DisjointTrailIntervalMilliseconds * 3,
+            350,
+            112,
+            0.28,
+            smoothCursor);
+
+        var spinner = SkinPreviewAnimation.Spinner(
+            elapsed,
+            noBlink: ReadPreviewBoolean(
+                "General",
+                "SpinnerNoBlink",
+                defaultValue: false));
+        GameplayOldSpinnerLayers.Opacity = spinner.BodyOpacity;
+        GameplayNewSpinnerLayers.Opacity = spinner.BodyOpacity;
+        GameplaySpinnerFallbackLayers.Opacity = spinner.BodyOpacity;
+        ApplyPreviewTransform(GameplaySpinnerCircle, rotation: spinner.Rotation);
+        var spinnerTopRatio =
+            GameplaySpinnerMiddle2.Source is not null ? 0.5 : 1;
+        ApplyPreviewTransform(
+            GameplaySpinnerTop,
+            scale: spinner.BodyScale,
+            rotation: spinner.Rotation * spinnerTopRatio);
+        ApplyPreviewTransform(
+            GameplaySpinnerBottom,
+            scale: spinner.BodyScale,
+            rotation: spinner.Rotation * spinnerTopRatio / 3);
+        ApplyPreviewTransform(
+            GameplaySpinnerMiddle2,
+            scale: spinner.BodyScale,
+            rotation: spinner.Rotation);
+        ApplyPreviewTransform(
+            GameplaySpinnerMiddle,
+            scale: spinner.BodyScale);
+        ApplyPreviewTransform(
+            GameplaySpinnerGlow,
+            scale: spinner.BodyScale);
+        GameplaySpinnerGlow.Opacity = spinner.GlowOpacity;
+        ApplyPreviewTransform(
+            GameplaySpinnerApproach,
+            scale: spinner.ApproachScale);
+        ApplyPreviewTransform(
+            GameplaySpinnerMetre,
+            scaleY: spinner.MetreFill);
+        GameplaySpinnerMetre.RenderTransformOrigin =
+            new System.Windows.Point(0.5, 1);
+        GameplaySpinnerMetre.Opacity = spinner.BodyOpacity;
+        var showClear = spinner.ClearOpacity > 0.001;
+        GameplaySpinnerClear.Visibility = showClear
+                                          && GameplaySpinnerClear.Source is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        GameplaySpinnerClearFallback.Visibility = showClear
+                                                  && GameplaySpinnerClear.Source is null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ApplyPreviewTransform(
+            GameplaySpinnerClear,
+            scale: spinner.ClearScale);
+        GameplaySpinnerClear.Opacity = spinner.ClearOpacity;
+        GameplaySpinnerClearFallback.Opacity = spinner.ClearOpacity;
+        GameplaySpinnerSpin.Opacity = spinner.SpinOpacity;
+        GameplaySpinnerSpinFallback.Opacity = spinner.SpinOpacity;
+
+        previewHealth = SkinPreviewAnimation.SmoothHealth(
+            previewHealth,
+            SkinPreviewAnimation.HealthTarget(elapsed),
+            previewFrameDelta);
+        ApplyPreviewTransform(
+            GameplayScorebarMarker,
+            SkinPreviewAnimation.ScorebarOffsetFromHealth(previewHealth),
+            0);
+    }
+
+    private void AnimateGameplayTrail(
+        System.Windows.Controls.Image image,
+        double elapsed,
+        double age,
+        double baseX,
+        double baseY,
+        double baseOpacity,
+        bool smooth)
+    {
+        var state = SkinPreviewAnimation.Cursor(
+            elapsed - age,
+            800,
+            210,
+            ReadPreviewBoolean(
+                "General",
+                "CursorExpand",
+                defaultValue: true),
+            rotate: true);
+        PlaceInteractiveVisual(
+            image,
+            baseX,
+            baseY,
+            state.Position,
+            smooth || ReadPreviewBoolean(
+                "General",
+                "CursorCentre",
+                defaultValue: true),
+            state.Scale * SkinPreviewAnimation.LegacyTrailTextureScale,
+            ReadPreviewBoolean(
+                "General",
+                "CursorTrailRotate",
+                defaultValue: true)
+                ? state.Rotation
+                : 0);
+        image.Opacity = baseOpacity
+                        * SkinPreviewAnimation.TrailOpacity(age, smooth);
+    }
+
+    private void AnimateElementComposition(double elapsed)
+    {
+        if (elementCompositionVisuals.Count == 0)
+            return;
+        var approach = SkinPreviewAnimation.Approach(elapsed);
+        var slider = SkinPreviewAnimation.Slider(
+            elapsed,
+            legacyVersionOne: previewLegacySkinVersion <= 1);
+        var sliderPosition = SkinPreviewAnimation.SamplePolyline(
+            ElementSliderPreviewPath,
+            slider.Progress);
+        var sliderRotation = SkinPreviewAnimation.PolylineRotation(
+            ElementSliderPreviewPath,
+            slider.Progress,
+            slider.Reversed);
+        var spinner = SkinPreviewAnimation.Spinner(
+            elapsed,
+            noBlink: ReadPreviewBoolean(
+                "General",
+                "SpinnerNoBlink",
+                defaultValue: false));
+        var cursor = SkinPreviewAnimation.Cursor(
+            elapsed,
+            640,
+            480,
+            ReadPreviewBoolean("General", "CursorExpand", defaultValue: true),
+            ReadPreviewBoolean("General", "CursorRotate", defaultValue: true));
+        var smoothCursor = renderedCursorUsesSmoothTrail;
+        var trailVisuals = elementCompositionVisuals
+            .Where(visual =>
+                visual.Layer.Role == SkinPreviewAnimationRole.CursorTrail)
+            .ToArray();
+        var followpointVisuals = elementCompositionVisuals
+            .Where(visual =>
+                visual.Layer.Role == SkinPreviewAnimationRole.Followpoint)
+            .OrderBy(visual => visual.Layer.RoleIndex)
+            .ToArray();
+        var followpointProgressSpan = followpointVisuals.Length > 1
+            ? followpointVisuals[^1].Layer.RoleProgress
+              - followpointVisuals[0].Layer.RoleProgress
+            : 0;
+        var followpointVector =
+            followpointVisuals.Length > 1
+            && followpointProgressSpan > double.Epsilon
+                ? new System.Windows.Vector(
+                    (followpointVisuals[^1].Layer.CentreX
+                     - followpointVisuals[0].Layer.CentreX)
+                    / followpointProgressSpan,
+                    (followpointVisuals[^1].Layer.CentreY
+                     - followpointVisuals[0].Layer.CentreY)
+                    / followpointProgressSpan)
+                : default;
+        var hasSpinnerMiddle2 = elementCompositionVisuals.Any(visual =>
+            visual.Layer.Role == SkinPreviewAnimationRole.SpinnerMiddle2);
+        var spinnerTopRatio = hasSpinnerMiddle2 ? 0.5 : 1;
+
+        foreach (var visual in elementCompositionVisuals)
+        {
+            var image = visual.Image;
+            var baseOpacity = CompositionBaseOpacity(visual);
+            switch (visual.Layer.Role)
+            {
+                case SkinPreviewAnimationRole.ApproachCircle:
+                    ApplyPreviewTransform(
+                        image,
+                        scale: approach.Scale);
+                    image.Opacity = baseOpacity * approach.Opacity;
+                    break;
+
+                case SkinPreviewAnimationRole.HitCircle:
+                    var hit = SkinPreviewAnimation.HitObject(
+                        elapsed,
+                        shortNumberFade:
+                            visual.Layer.RoleIndex == 2
+                            && previewLegacySkinVersion > 1);
+                    ApplyPreviewTransform(image, scale: hit.Scale);
+                    image.Opacity = baseOpacity * hit.Opacity;
+                    break;
+
+                case SkinPreviewAnimationRole.Followpoint:
+                    var followpoint = SkinPreviewAnimation.Followpoint(
+                        elapsed,
+                        visual.Layer.RoleProgress);
+                    ApplyPreviewTransform(
+                        image,
+                        -followpointVector.X
+                        * 0.1
+                        * (1 - followpoint.TravelProgress),
+                        -followpointVector.Y
+                        * 0.1
+                        * (1 - followpoint.TravelProgress),
+                        followpoint.Scale);
+                    image.Opacity = baseOpacity * followpoint.Opacity;
+                    ApplyAnimationFrame(
+                        image,
+                        followpointAnimationFrames,
+                        followpoint.AnimationTime,
+                        sliderBall: false);
+                    break;
+
+                case SkinPreviewAnimationRole.SliderBall:
+                    ApplyPreviewTransform(
+                        image,
+                        sliderPosition.X - visual.Layer.CentreX,
+                        sliderPosition.Y - visual.Layer.CentreY,
+                        rotation: sliderRotation,
+                        scaleX: ReadPreviewBoolean(
+                            "General",
+                            "SliderBallFlip",
+                            defaultValue: true) && slider.Reversed
+                                ? -1
+                                : 1);
+                    ApplyAnimationFrame(
+                        image,
+                        sliderBallAnimationFrames,
+                        elapsed,
+                        sliderBall: true,
+                        sliderVelocity: ElementSliderPreviewVelocity);
+                    image.Opacity = baseOpacity * slider.BallOpacity;
+                    break;
+
+                case SkinPreviewAnimationRole.SliderFollowCircle:
+                    ApplyPreviewTransform(
+                        image,
+                        sliderPosition.X - visual.Layer.CentreX,
+                        sliderPosition.Y - visual.Layer.CentreY,
+                        slider.FollowScale);
+                    ApplyAnimationFrame(
+                        image,
+                        sliderFollowAnimationFrames,
+                        elapsed,
+                        sliderBall: false);
+                    image.Opacity = baseOpacity * slider.FollowOpacity;
+                    break;
+
+                case SkinPreviewAnimationRole.ReverseArrow:
+                    ApplyPreviewTransform(
+                        image,
+                        scale: slider.ReverseScale,
+                        rotation: slider.ReverseRotation);
+                    image.Opacity = baseOpacity * slider.ReverseOpacity;
+                    break;
+
+                case SkinPreviewAnimationRole.Cursor:
+                    if (!interactiveCursorActive)
+                    {
+                        PlaceInteractiveVisual(
+                            image,
+                            visual.Layer.CentreX,
+                            visual.Layer.CentreY,
+                            cursor.Position,
+                            ReadPreviewBoolean(
+                                "General",
+                                "CursorCentre",
+                                defaultValue: true),
+                            cursor.Scale,
+                            cursor.Rotation);
+                        image.Opacity = baseOpacity;
+                    }
+                    break;
+
+                case SkinPreviewAnimationRole.CursorMiddle:
+                    if (!interactiveCursorActive)
+                    {
+                        PlaceInteractiveVisual(
+                            image,
+                            visual.Layer.CentreX,
+                            visual.Layer.CentreY,
+                            cursor.Position,
+                            ReadPreviewBoolean(
+                                "General",
+                                "CursorCentre",
+                                defaultValue: true),
+                            1,
+                            0);
+                        image.Opacity = baseOpacity;
+                    }
+                    break;
+
+                case SkinPreviewAnimationRole.CursorTrail:
+                    if (!interactiveCursorActive)
+                    {
+                        var reverseIndex =
+                            trailVisuals.Length - 1 - visual.Layer.RoleIndex;
+                        var fade = smoothCursor
+                            ? SkinPreviewAnimation.SmoothTrailFadeMilliseconds
+                            : SkinPreviewAnimation.DisjointTrailFadeMilliseconds;
+                        var age = Math.Max(0, reverseIndex)
+                                  * (smoothCursor
+                                      ? fade
+                                        / Math.Max(
+                                            1,
+                                            trailVisuals.Length - 1)
+                                      : SkinPreviewAnimation
+                                          .DisjointTrailIntervalMilliseconds);
+                        var trailState = SkinPreviewAnimation.Cursor(
+                            elapsed - age,
+                            640,
+                            480,
+                            ReadPreviewBoolean(
+                                "General",
+                                "CursorExpand",
+                                defaultValue: true),
+                            rotate: true);
+                        PlaceInteractiveVisual(
+                            image,
+                            visual.Layer.CentreX,
+                            visual.Layer.CentreY,
+                            trailState.Position,
+                            smoothCursor || ReadPreviewBoolean(
+                                "General",
+                                "CursorCentre",
+                                defaultValue: true),
+                            trailState.Scale
+                            * SkinPreviewAnimation.LegacyTrailTextureScale,
+                            ReadPreviewBoolean(
+                                "General",
+                                "CursorTrailRotate",
+                                defaultValue: true)
+                                ? trailState.Rotation
+                                : 0);
+                        image.Opacity = baseOpacity
+                                        * SkinPreviewAnimation.TrailOpacity(
+                                            age,
+                                            smoothCursor);
+                    }
+                    break;
+
+                case SkinPreviewAnimationRole.SpinnerCircle:
+                    ApplyPreviewTransform(image, rotation: spinner.Rotation);
+                    image.Opacity = baseOpacity * spinner.BodyOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerGlow:
+                    ApplyPreviewTransform(image, scale: spinner.BodyScale);
+                    image.Opacity = baseOpacity
+                                    * spinner.BodyOpacity
+                                    * spinner.GlowOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerBottom:
+                    ApplyPreviewTransform(
+                        image,
+                        scale: spinner.BodyScale,
+                        rotation: spinner.Rotation * spinnerTopRatio / 3);
+                    image.Opacity = baseOpacity * spinner.BodyOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerTop:
+                    ApplyPreviewTransform(
+                        image,
+                        scale: spinner.BodyScale,
+                        rotation: spinner.Rotation * spinnerTopRatio);
+                    image.Opacity = baseOpacity * spinner.BodyOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerMiddle2:
+                    ApplyPreviewTransform(
+                        image,
+                        scale: spinner.BodyScale,
+                        rotation: spinner.Rotation);
+                    image.Opacity = baseOpacity * spinner.BodyOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerMiddle:
+                    ApplyPreviewTransform(image, scale: spinner.BodyScale);
+                    image.Opacity = baseOpacity * spinner.BodyOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerApproach:
+                    ApplyPreviewTransform(image, scale: spinner.ApproachScale);
+                    image.Opacity = baseOpacity * spinner.BodyOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerMetre:
+                    ApplyPreviewTransform(
+                        image,
+                        scaleY: spinner.MetreFill);
+                    image.RenderTransformOrigin =
+                        new System.Windows.Point(0.5, 1);
+                    image.Opacity = baseOpacity * spinner.BodyOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerSpin:
+                    image.Opacity = baseOpacity * spinner.SpinOpacity;
+                    break;
+                case SkinPreviewAnimationRole.SpinnerClear:
+                    image.Visibility = spinner.ClearOpacity > 0.001
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+                    ApplyPreviewTransform(image, scale: spinner.ClearScale);
+                    image.Opacity = baseOpacity * spinner.ClearOpacity;
+                    break;
+                case SkinPreviewAnimationRole.ScorebarMarker:
+                    previewHealth = SkinPreviewAnimation.SmoothHealth(
+                        previewHealth,
+                        SkinPreviewAnimation.HealthTarget(elapsed),
+                        previewFrameDelta);
+                    ApplyPreviewTransform(
+                        image,
+                        SkinPreviewAnimation.ScorebarOffsetFromHealth(
+                            previewHealth),
+                        0);
+                    image.Opacity = baseOpacity;
+                    break;
+            }
+        }
+    }
+
+    private double CompositionBaseOpacity(ElementCompositionVisual visual)
+    {
+        if (showFullElementRender || selectedEntry is null)
+            return 1;
+        return IsSelectedCompositionLayer(
+            visual.Layer,
+            LogicalStem(selectedEntry.Filename))
+            ? 1
+            : visual.Layer.ContextOpacity;
+    }
+
+    private void ApplyAnimationFrame(
+        System.Windows.Controls.Image image,
+        IReadOnlyList<BitmapSource> frames,
+        double elapsed,
+        bool sliderBall,
+        double sliderVelocity = double.PositiveInfinity)
+    {
+        if (frames.Count <= 1)
+            return;
+        image.Source = frames[SkinPreviewAnimation.FrameIndex(
+            elapsed,
+            frames.Count,
+            previewAnimationFramerate,
+            sliderBall,
+            sliderVelocity)];
+    }
+
+    private void ApplyPreviewTransform(
+        System.Windows.Controls.Image image,
+        double translateX = 0,
+        double translateY = 0,
+        double scale = 1,
+        double rotation = 0,
+        double scaleX = 1,
+        double scaleY = 1)
+    {
+        if (!previewVisualTransforms.TryGetValue(image, out var transforms))
+        {
+            var baseRotation = image.RenderTransform switch
+            {
+                RotateTransform rotate => rotate.Angle,
+                _ => 0,
+            };
+            transforms = new PreviewVisualTransforms(baseRotation);
+            previewVisualTransforms[image] = transforms;
+            image.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
+            image.RenderTransform = transforms.Group;
+        }
+        transforms.Scale.ScaleX = scale * scaleX;
+        transforms.Scale.ScaleY = scale * scaleY;
+        transforms.Rotate.Angle = transforms.BaseRotation + rotation;
+        transforms.Translate.X = translateX;
+        transforms.Translate.Y = translateY;
+    }
+
+    private bool ReadPreviewBoolean(
+        string section,
+        string key,
+        bool defaultValue)
+    {
+        var value = iniDocument?.GetValue(section, key);
+        if (string.IsNullOrWhiteSpace(value))
+            return defaultValue;
+        return value.Trim() is "1" or "true" or "True";
+    }
+
+    private void ElementCompositionSurface_MouseEnter(
+        object sender,
+        MouseEventArgs e)
+    {
+        UpdateInteractiveCursorPosition(e);
+        TryBeginInteractiveCursorPreview();
+    }
+
+    private void ElementCompositionSurface_MouseMove(
+        object sender,
+        MouseEventArgs e)
+    {
+        UpdateInteractiveCursorPosition(e);
+        if (!interactiveCursorActive)
+            TryBeginInteractiveCursorPreview();
+    }
+
+    private void ElementCompositionSurface_MouseLeave(
+        object sender,
+        MouseEventArgs e) =>
+        EndInteractiveCursorPreview();
+
+    private void ElementCompositionSurface_MouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e) =>
+        BeginInteractiveCursorPress();
+
+    private void ElementCompositionSurface_MouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e) =>
+        EndInteractiveCursorPress();
+
+    private void ElementCompositionSurface_MouseRightButtonDown(
+        object sender,
+        MouseButtonEventArgs e) =>
+        BeginInteractiveCursorPress();
+
+    private void ElementCompositionSurface_MouseRightButtonUp(
+        object sender,
+        MouseButtonEventArgs e) =>
+        EndInteractiveCursorPress();
+
+    private void BeginInteractiveCursorPress()
+    {
+        if (!interactiveCursorActive)
+            return;
+        interactiveCursorDownCount++;
+        if (interactiveCursorDownCount != 1)
+            return;
+        BeginInteractiveCursorScaleTransition(
+            ReadPreviewBoolean(
+                "General",
+                "CursorExpand",
+                defaultValue: true)
+                ? 1.3
+                : 1);
+    }
+
+    private void EndInteractiveCursorPress()
+    {
+        if (!interactiveCursorActive)
+            return;
+        interactiveCursorDownCount = Math.Max(
+            0,
+            interactiveCursorDownCount - 1);
+        if (interactiveCursorDownCount == 0)
+            BeginInteractiveCursorScaleTransition(1);
+    }
+
+    private void UpdateInteractiveCursorPosition(MouseEventArgs e)
+    {
+        if (ElementCompositionCanvas is null)
+            return;
+        var point = e.GetPosition(ElementCompositionCanvas);
+        var nextPosition = new System.Windows.Point(
+            Math.Clamp(point.X, 0, SkinCursorPreview.CanvasWidth),
+            Math.Clamp(point.Y, 0, SkinCursorPreview.CanvasHeight));
+        interactiveCursorPosition = nextPosition;
+        if (interactiveCursorActive && InteractiveCursorUsesSmoothTrail())
+        {
+            AppendInteractiveSmoothTrail(
+                nextPosition,
+                previewRenderClock.Elapsed.TotalMilliseconds);
+        }
+    }
+
+    private void TryBeginInteractiveCursorPreview()
+    {
+        if (interactiveCursorActive)
+            return;
+        var cursorVisual = elementCompositionVisuals.FirstOrDefault(visual =>
+            visual.Layer.Role == SkinPreviewAnimationRole.Cursor
+            && visual.Image.Source is not null
+            && visual.Image.Visibility == Visibility.Visible);
+        if (!SkinPreviewAnimation.CanActivateInteractiveCursor(
+                elementCenterMode == SkinEditorCenterMode.Asset,
+                renderedElementCompositionKind == SkinElementCompositionKind.Cursor,
+                cursorVisual is not null))
+            return;
+
+        interactiveCursorActive = true;
+        interactiveCursorSamples.Clear();
+        interactiveCursorLastSampleTime = double.NegativeInfinity;
+        interactiveCursorScale = 1;
+        interactiveCursorScaleFrom = 1;
+        interactiveCursorScaleTarget = 1;
+        interactiveCursorScaleStartTime =
+            previewRenderClock.Elapsed.TotalMilliseconds;
+        interactiveCursorDownCount = 0;
+        interactiveSmoothTrailAnchor = interactiveCursorPosition;
+        ElementCompositionSurface.Cursor = Cursors.None;
+        foreach (var decoration in ElementCompositionCanvas.Children
+                     .OfType<FrameworkElement>()
+                     .Where(child => ReferenceEquals(
+                         child.Tag,
+                         ElementCompositionDecorationTag)))
+            decoration.Visibility = Visibility.Collapsed;
+
+        var existingTrails = elementCompositionVisuals
+            .Where(visual =>
+                visual.Layer.Role == SkinPreviewAnimationRole.CursorTrail)
+            .Select(visual => visual.Image)
+            .ToArray();
+        interactiveCursorTrailVisuals.AddRange(existingTrails);
+        var smooth = elementCompositionVisuals.Any(visual =>
+            visual.Layer.Role == SkinPreviewAnimationRole.CursorMiddle);
+        var desiredCount = smooth ? 32 : 10;
+        var sourceTrail = existingTrails.LastOrDefault();
+        while (sourceTrail is not null
+               && interactiveCursorTrailVisuals.Count < desiredCount)
+        {
+            var clone = new System.Windows.Controls.Image
+            {
+                Source = sourceTrail.Source,
+                Width = sourceTrail.Width,
+                Height = sourceTrail.Height,
+                Stretch = Stretch.Fill,
+                IsHitTestVisible = false,
+                RenderTransformOrigin = new System.Windows.Point(0.5, 0.5),
+            };
+            Canvas.SetLeft(clone, Canvas.GetLeft(sourceTrail));
+            Canvas.SetTop(clone, Canvas.GetTop(sourceTrail));
+            Panel.SetZIndex(clone, 9);
+            ElementCompositionCanvas.Children.Add(clone);
+            interactiveCursorTrailVisuals.Add(clone);
+        }
+        UpdatePreviewAnimationSubscription();
+        RenderInteractiveCursor(previewRenderClock.Elapsed.TotalMilliseconds);
+    }
+
+    private void RenderInteractiveCursor(double wallTime)
+    {
+        if (!interactiveCursorActive)
+            return;
+        var smooth = InteractiveCursorUsesSmoothTrail();
+        interactiveCursorScale = SkinPreviewAnimation.CursorTransitionScale(
+            interactiveCursorScaleFrom,
+            interactiveCursorScaleTarget,
+            wallTime - interactiveCursorScaleStartTime);
+        var cursorRotation = ReadPreviewBoolean(
+                                 "General",
+                                 "CursorRotate",
+                                 defaultValue: true)
+            ? previewAnimationElapsed
+              % SkinPreviewAnimation.CursorRevolutionMilliseconds
+              / SkinPreviewAnimation.CursorRevolutionMilliseconds * 360
+            : 0;
+        if (!smooth
+            && wallTime - interactiveCursorLastSampleTime
+            >= SkinPreviewAnimation.DisjointTrailIntervalMilliseconds)
+        {
+            interactiveCursorSamples.Add(new InteractiveCursorSample(
+                interactiveCursorPosition,
+                wallTime,
+                interactiveCursorScale,
+                cursorRotation));
+            interactiveCursorLastSampleTime = wallTime;
+            TrimInteractiveCursorSamples();
+        }
+        var fade = smooth
+            ? SkinPreviewAnimation.SmoothTrailFadeMilliseconds
+            : SkinPreviewAnimation.DisjointTrailFadeMilliseconds;
+        interactiveCursorSamples.RemoveAll(sample =>
+            wallTime - sample.Time > fade);
+
+        var cursorCentre = ReadPreviewBoolean(
+            "General",
+            "CursorCentre",
+            defaultValue: true);
+        foreach (var visual in elementCompositionVisuals.Where(visual =>
+                     visual.Layer.Role is SkinPreviewAnimationRole.Cursor
+                         or SkinPreviewAnimationRole.CursorMiddle))
+        {
+            PlaceInteractiveVisual(
+                visual.Image,
+                visual.Layer.CentreX,
+                visual.Layer.CentreY,
+                interactiveCursorPosition,
+                cursorCentre,
+                visual.Layer.Role == SkinPreviewAnimationRole.Cursor
+                    ? interactiveCursorScale
+                    : 1,
+                visual.Layer.Role == SkinPreviewAnimationRole.Cursor
+                    ? cursorRotation
+                    : 0);
+            visual.Image.Opacity = 1;
+        }
+
+        for (var index = 0; index < interactiveCursorTrailVisuals.Count; index++)
+        {
+            var image = interactiveCursorTrailVisuals[index];
+            var sampleIndex = interactiveCursorSamples.Count - 1 - index;
+            if (sampleIndex < 0)
+            {
+                image.Visibility = Visibility.Collapsed;
+                continue;
+            }
+            var sample = interactiveCursorSamples[sampleIndex];
+            image.Visibility = Visibility.Visible;
+            PlaceInteractiveVisual(
+                image,
+                Canvas.GetLeft(image) + image.Width / 2,
+                Canvas.GetTop(image) + image.Height / 2,
+                sample.Position,
+                smooth || cursorCentre,
+                sample.Scale
+                * SkinPreviewAnimation.LegacyTrailTextureScale,
+                ReadPreviewBoolean(
+                    "General",
+                    "CursorTrailRotate",
+                    defaultValue: true)
+                    ? sample.Rotation
+                    : 0);
+            image.Opacity = SkinPreviewAnimation.TrailOpacity(
+                wallTime - sample.Time,
+                smooth);
+        }
+    }
+
+    private bool InteractiveCursorUsesSmoothTrail() =>
+        renderedCursorUsesSmoothTrail;
+
+    private void BeginInteractiveCursorScaleTransition(double target)
+    {
+        var now = previewRenderClock.Elapsed.TotalMilliseconds;
+        interactiveCursorScale = SkinPreviewAnimation.CursorTransitionScale(
+            interactiveCursorScaleFrom,
+            interactiveCursorScaleTarget,
+            now - interactiveCursorScaleStartTime);
+        interactiveCursorScaleFrom = interactiveCursorScale;
+        interactiveCursorScaleTarget = target;
+        interactiveCursorScaleStartTime = now;
+    }
+
+    private void AppendInteractiveSmoothTrail(
+        System.Windows.Point position,
+        double wallTime)
+    {
+        if (!interactiveSmoothTrailAnchor.HasValue)
+        {
+            interactiveSmoothTrailAnchor = position;
+            return;
+        }
+        var sourceTrail = interactiveCursorTrailVisuals.LastOrDefault();
+        var displayWidth = (sourceTrail?.Width ?? 52)
+                           * SkinPreviewAnimation.LegacyTrailTextureScale;
+        var interval = SkinPreviewAnimation.TrailInterval(displayWidth);
+        var parts = SkinPreviewAnimation.SmoothTrailParts(
+            interactiveSmoothTrailAnchor.Value,
+            position,
+            interval);
+        if (parts.Count == 0)
+            return;
+        interactiveCursorScale = SkinPreviewAnimation.CursorTransitionScale(
+            interactiveCursorScaleFrom,
+            interactiveCursorScaleTarget,
+            wallTime - interactiveCursorScaleStartTime);
+        var rotation = ReadPreviewBoolean(
+                           "General",
+                           "CursorRotate",
+                           defaultValue: true)
+            ? previewAnimationElapsed
+              % SkinPreviewAnimation.CursorRevolutionMilliseconds
+              / SkinPreviewAnimation.CursorRevolutionMilliseconds * 360
+            : 0;
+        foreach (var part in parts)
+        {
+            interactiveCursorSamples.Add(new InteractiveCursorSample(
+                part,
+                wallTime,
+                interactiveCursorScale,
+                rotation));
+        }
+        interactiveSmoothTrailAnchor = parts[^1];
+        interactiveCursorLastSampleTime = wallTime;
+        TrimInteractiveCursorSamples();
+    }
+
+    private void TrimInteractiveCursorSamples()
+    {
+        const int maxTrailParts = 32;
+        if (interactiveCursorSamples.Count <= maxTrailParts)
+            return;
+        interactiveCursorSamples.RemoveRange(
+            0,
+            interactiveCursorSamples.Count - maxTrailParts);
+    }
+
+    private void PlaceInteractiveVisual(
+        System.Windows.Controls.Image image,
+        double baselineCentreX,
+        double baselineCentreY,
+        System.Windows.Point position,
+        bool centred,
+        double scale,
+        double rotation)
+    {
+        var baselineLeft = baselineCentreX - image.Width / 2;
+        var baselineTop = baselineCentreY - image.Height / 2;
+        var desiredLeft = centred ? position.X - image.Width / 2 : position.X;
+        var desiredTop = centred ? position.Y - image.Height / 2 : position.Y;
+        ApplyPreviewTransform(
+            image,
+            desiredLeft - baselineLeft,
+            desiredTop - baselineTop,
+            scale,
+            rotation);
+        image.RenderTransformOrigin = centred
+            ? new System.Windows.Point(0.5, 0.5)
+            : new System.Windows.Point(0, 0);
+    }
+
+    private void EndInteractiveCursorPreview(bool restoreComposition = true)
+    {
+        if (!interactiveCursorActive)
+            return;
+        interactiveCursorActive = false;
+        interactiveCursorSamples.Clear();
+        interactiveCursorLastSampleTime = double.NegativeInfinity;
+        interactiveSmoothTrailAnchor = null;
+        interactiveCursorScale = 1;
+        interactiveCursorScaleFrom = 1;
+        interactiveCursorScaleTarget = 1;
+        interactiveCursorDownCount = 0;
+        if (ElementCompositionSurface is not null)
+            ElementCompositionSurface.Cursor = null;
+
+        var compositionImages = elementCompositionVisuals
+            .Select(visual => visual.Image)
+            .ToHashSet();
+        foreach (var image in interactiveCursorTrailVisuals
+                     .Where(image => !compositionImages.Contains(image))
+                     .ToArray())
+        {
+            previewVisualTransforms.Remove(image);
+            ElementCompositionCanvas.Children.Remove(image);
+        }
+        interactiveCursorTrailVisuals.Clear();
+        if (restoreComposition && selectedEntry is not null)
+            TryUpdateElementCompositionSelection(
+                SkinElementCompositionKind.Cursor,
+                selectedEntry);
+        UpdatePreviewAnimationSubscription();
+        if (restoreComposition)
+            AnimateElementComposition(previewAnimationElapsed);
+    }
+
     private void SetWorkspaceMode(SkinEditorWorkspaceMode mode)
     {
+        if (mode != SkinEditorWorkspaceMode.Elements)
+            EndInteractiveCursorPreview();
         workspaceMode = mode;
         UpdateStudioState();
+        UpdatePreviewAnimationSubscription();
         if (mode == SkinEditorWorkspaceMode.SkinIni)
         {
             UpdateComboStrip();
@@ -3454,8 +4860,12 @@ public partial class SkinEditorPage : UserControl
     {
         if (mode is not SkinEditorCenterMode.Asset and not SkinEditorCenterMode.Gameplay)
             return;
+        if (mode != SkinEditorCenterMode.Asset)
+            EndInteractiveCursorPreview();
         elementCenterMode = mode;
         UpdateStudioState();
+        UpdatePreviewAnimationSubscription();
+        RenderPreviewFrame();
     }
 
     private void SetIniCenterMode(SkinEditorCenterMode mode)
@@ -4762,13 +6172,16 @@ public partial class SkinEditorPage : UserControl
                 selection => StageExtrasSelectionAsync(
                     selection,
                     picker!.LazerUsedOnly,
-                    Window.GetWindow(this)));
+                    Window.GetWindow(this)),
+                previewAnimationsEnabled,
+                SetPreviewAnimationsEnabled);
             embeddedExtras = picker;
             if (lastExtrasSyncProgress is not null)
                 picker.UpdateCatalogSyncProgress(lastExtrasSyncProgress);
             picker.CloseRequested += (_, _) => CloseExtrasWorkspace();
             ExtrasHost.Content = picker;
             ExtrasWorkspace.Visibility = Visibility.Visible;
+            UpdatePreviewAnimationSubscription();
             picker.Focus();
         }
         catch (Exception ex)
@@ -5066,6 +6479,7 @@ public partial class SkinEditorPage : UserControl
         ExtrasWorkspace.Visibility = Visibility.Collapsed;
         ExtrasHost.Content = null;
         picker?.Dispose();
+        UpdatePreviewAnimationSubscription();
     }
 
     private SkinExtrasCurrentSkinSource CreateExtrasCurrentSkinSource()
@@ -5367,6 +6781,27 @@ public partial class SkinEditorPage : UserControl
         {
             menu.PlacementTarget = button;
             menu.IsOpen = true;
+        }
+    }
+
+    private async void OpenLazerEditor_Click(object sender, RoutedEventArgs e)
+    {
+        if (openLazerEditor is null)
+            return;
+
+        try
+        {
+            await openLazerEditor();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Could not open the new lazer editor: {ex.Message}";
+            KumoriDialog.Show(
+                Window.GetWindow(this),
+                StatusText.Text,
+                "Skin Studio",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
     }
 

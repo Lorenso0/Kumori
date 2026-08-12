@@ -25,7 +25,7 @@ public class AnalyticsRepositoryTests : IDisposable
             );
             INSERT INTO attempts VALUES
                 (1, '2026-07-06T10:00:00', 'completed', 98.0, 100.0, 1000),
-                (2, '2026-07-06T11:00:00', 'failed', 50.0, 20.0, 500),
+                (2, '2026-07-06T11:00:00', 'failed', 50.0, 999.0, 500),
                 (3, '2026-07-07T10:00:00', 'completed', 99.0, 120.0, 2000);
             """;
         cmd.ExecuteNonQuery();
@@ -45,6 +45,143 @@ public class AnalyticsRepositoryTests : IDisposable
         Assert.Equal(3500, summary.TotalScore);
         Assert.Equal(2, summary.Daily.Count);
         Assert.Equal("2026-07-07", summary.Daily[0].Day);
+        Assert.Equal(120.0, summary.Daily[0].BestPp);
+        Assert.Equal(100.0, summary.Daily[1].BestPp);
+    }
+
+    [Fact]
+    public void GetSummary_ReturnsOverallAndDailyActivityMetrics()
+    {
+        using (var con = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            con.Open();
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = """
+                ALTER TABLE attempts ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN z_count INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN x_count INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN misses INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN n300 INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN n100 INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN n50 INTEGER NOT NULL DEFAULT 0;
+                UPDATE attempts SET
+                    duration_seconds = CASE id WHEN 1 THEN 120 WHEN 2 THEN 60 ELSE 180 END,
+                    z_count = id * 100,
+                    x_count = id * 50,
+                    misses = id;
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        var summary = new AnalyticsRepository(
+            new SqliteConnectionFactory(_dbPath, readOnly: true)).GetSummary();
+
+        Assert.Equal(360, summary.TotalDurationSeconds);
+        Assert.Equal(900, summary.ZTotal + summary.XTotal);
+        Assert.Equal(6, summary.TotalMisses);
+        Assert.Equal(180, summary.Daily[0].TotalDurationSeconds);
+        Assert.Equal(450, summary.Daily[0].ZTotal + summary.Daily[0].XTotal);
+        Assert.Equal(3, summary.Daily[0].TotalMisses);
+    }
+
+    [Fact]
+    public void GetDailyProgress_ReturnsAccountAndMapHighlights()
+    {
+        using (var con = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            con.Open();
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = """
+                ALTER TABLE attempts ADD COLUMN beatmap_id INTEGER;
+                ALTER TABLE attempts ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN z_count INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN x_count INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN misses INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN n300 INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN n100 INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN n50 INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN combo INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN slider_breaks INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE attempts ADD COLUMN mods_key TEXT NOT NULL DEFAULT 'NM';
+                ALTER TABLE attempts ADD COLUMN player_name TEXT;
+                CREATE TABLE beatmaps(
+                    id INTEGER PRIMARY KEY, beatmap_id INTEGER, set_id INTEGER,
+                    artist TEXT, title TEXT, difficulty TEXT, bpm REAL,
+                    stars REAL, ar REAL, od REAL, cs REAL,
+                    max_combo INTEGER NOT NULL DEFAULT 0);
+                INSERT INTO beatmaps VALUES
+                    (10, 1010, 100, 'Artist A', 'Song A', 'Hard', 160, 4.2, 9, 8, 4, 800),
+                    (20, 2020, 200, 'Artist B', 'Song B', 'Insane', 180, 5.8, 9.5, 8.7, 4, 1200);
+                UPDATE attempts SET beatmap_id = CASE id WHEN 3 THEN 20 ELSE 10 END,
+                    duration_seconds = id * 60,
+                    z_count = id * 100,
+                    x_count = id * 50,
+                    misses = id,
+                    n300 = id * 100,
+                    n100 = id * 10,
+                    n50 = id,
+                    combo = id * 200,
+                    slider_breaks = id - 1,
+                    mods_key = CASE id WHEN 3 THEN 'HD,DA,BPM' ELSE 'NM' END,
+                    player_name = 'Lorenzo';
+                CREATE TABLE attempt_mods(
+                    attempt_id INTEGER NOT NULL, acronym TEXT NOT NULL, settings_json TEXT NOT NULL);
+                INSERT INTO attempt_mods VALUES(3, 'BPM', '{"target_bpm":180}');
+                CREATE TABLE profile_snapshots(
+                    id INTEGER PRIMARY KEY, captured_at TEXT NOT NULL, player_id INTEGER,
+                    player_name TEXT, country_code TEXT, total_pp REAL,
+                    global_rank INTEGER, play_count INTEGER, country_rank INTEGER);
+                INSERT INTO profile_snapshots VALUES
+                    (1, '2026-07-06T20:00:00+00:00', 99, 'Lorenzo', 'NL', 1000, 500, 10, 30),
+                    (2, '2026-07-07T10:00:00+00:00', 99, 'Lorenzo', 'NL', 1005, 490, 11, 29),
+                    (3, '2026-07-07T20:00:00+00:00', 99, 'Lorenzo', 'NL', 1010, 480, 12, 27);
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        var report = new AnalyticsRepository(
+            new SqliteConnectionFactory(_dbPath, readOnly: true))
+            .GetDailyProgress("2026-07-07");
+
+        Assert.NotNull(report);
+        Assert.Equal("Lorenzo", report!.PlayerName);
+        Assert.Equal(1, report.Summary.Attempts);
+        Assert.Equal(1, report.Summary.DistinctMaps);
+        Assert.Equal(2_000, report.Summary.TotalScore);
+        Assert.Equal(180, report.Summary.TotalDurationSeconds);
+        Assert.Equal("Song B", report.MostPlayedMap!.Title);
+        Assert.Equal(1, report.MostPlayedMap.Plays);
+        Assert.Equal(2020, report.MostPlayedMap.BeatmapId);
+        Assert.Equal(200, report.MostPlayedMap.BeatmapSetId);
+        Assert.Equal(5.8, report.MostPlayedMap.Stars);
+        Assert.Equal(180, report.MostPlayedMap.Bpm);
+        Assert.Equal(120, report.BestPlay!.Pp);
+        Assert.Equal(600, report.BestPlay.Combo);
+        Assert.Equal(1200, report.BestPlay.MaxCombo);
+        Assert.Equal(30, report.BestPlay.N100);
+        Assert.Equal(3, report.BestPlay.N50);
+        Assert.Equal(2, report.BestPlay.SliderBreaks);
+        Assert.Equal(5.8, report.BestPlay.BaseStars);
+        Assert.Equal(9.5, report.BestPlay.BaseAr);
+        Assert.Equal(2020, report.BestPlay.BeatmapId);
+        Assert.Equal(200, report.BestPlay.BeatmapSetId);
+        Assert.Equal("HD,DA,BPM", report.BestPlay.ModsKey);
+        Assert.Equal(180, report.BestPlay.Bpm);
+        Assert.False(report.BestPlay.UsedBpmAdjust);
+        Assert.Collection(
+            report.MostUsedModCombinations,
+            combination =>
+            {
+                Assert.Equal("HD,DA", combination.ModsKey);
+                Assert.Equal(1, combination.Plays);
+            });
+        Assert.Equal(99, report.Account!.PlayerId);
+        Assert.Equal(10, report.Account.OldPlayCount);
+        Assert.Equal(12, report.Account.NewPlayCount);
+        Assert.Equal(500, report.Account.OldGlobalRank);
+        Assert.Equal(480, report.Account.NewGlobalRank);
+        Assert.Equal(30, report.Account.OldCountryRank);
+        Assert.Equal(27, report.Account.NewCountryRank);
     }
 
     [Fact]

@@ -56,6 +56,18 @@ public enum FarmFinderProgressPhase
     Completed,
 }
 
+public enum FarmScoreOrigin
+{
+    Unknown = 0,
+    Legacy = 1,
+    Lazer = 2,
+}
+
+public static class FarmScoreMetadata
+{
+    public const int CurrentVersion = 1;
+}
+
 public sealed record FarmModFilter(string Acronym, ModRequirement Requirement);
 
 public sealed record FarmMod(string Acronym, string SettingsJson = "{}")
@@ -96,7 +108,8 @@ public sealed record FarmPlayer(
     int GlobalRank,
     double TotalPp,
     DateTimeOffset RankUpdatedAt,
-    DateTimeOffset? ScoresUpdatedAt = null);
+    DateTimeOffset? ScoresUpdatedAt = null,
+    int ScoreMetadataVersion = 0);
 
 public sealed record FarmBeatmap(
     long BeatmapId,
@@ -111,7 +124,13 @@ public sealed record FarmBeatmap(
     double StarRating,
     string Status,
     DateTimeOffset? RankedAt,
-    string CoverUrl);
+    string CoverUrl)
+{
+    public double? CircleSize { get; init; }
+    public double? ApproachRate { get; init; }
+    public double? OverallDifficulty { get; init; }
+    public double? DrainRate { get; init; }
+}
 
 public sealed record FarmScore(
     long ScoreId,
@@ -125,7 +144,25 @@ public sealed record FarmScore(
     DateTimeOffset EndedAt,
     IReadOnlyList<FarmMod> ActualMods,
     string CanonicalModSignature,
-    double ClockRate);
+    double ClockRate,
+    FarmScoreOrigin Origin = FarmScoreOrigin.Unknown,
+    long? LegacyScoreId = null,
+    long? TotalScore = null,
+    long? LegacyTotalScore = null,
+    int? BuildId = null,
+    string? SourceType = null)
+{
+    public bool UsesClassicScoring =>
+        Origin == FarmScoreOrigin.Legacy ||
+        ActualMods.Any(mod =>
+            mod.NormalizedAcronym.Equals("CL", StringComparison.OrdinalIgnoreCase));
+
+    public string ScoringModeText => UsesClassicScoring
+        ? "Classic"
+        : Origin == FarmScoreOrigin.Lazer
+            ? "Lazer"
+            : "Unknown";
+}
 
 public sealed record FarmScoreCandidate(FarmPlayer Player, FarmScore Score, FarmBeatmap Beatmap);
 
@@ -144,16 +181,132 @@ public sealed record FarmScoreDetail(
 {
     /// <summary>Difficulty id for the played beatmap when available.</summary>
     public long? BeatmapId { get; init; }
+    public int LeaderboardRank { get; init; }
+    public FarmScoreOrigin Origin { get; init; }
+    public long? LegacyScoreId { get; init; }
+    public long? TotalScore { get; init; }
+    public long? LegacyTotalScore { get; init; }
+    public int? BuildId { get; init; }
+    public string? SourceType { get; init; }
 
     public string ModsText => ActualMods.Count == 0
         ? "NM"
         : string.Concat(ActualMods.Select(mod => mod.NormalizedAcronym));
+    public IReadOnlyList<string> ModAcronyms => ActualMods.Count == 0
+        ? ["NM"]
+        : ActualMods.Select(mod => mod.NormalizedAcronym).ToArray();
+    public bool UsesClassicScoring =>
+        Origin == FarmScoreOrigin.Legacy ||
+        ActualMods.Any(mod =>
+            mod.NormalizedAcronym.Equals("CL", StringComparison.OrdinalIgnoreCase));
+    public string ScoringModeText => UsesClassicScoring
+        ? "Classic"
+        : Origin == FarmScoreOrigin.Lazer
+            ? "Lazer"
+            : "Unknown";
     public string PlayerUrl => $"https://osu.ppy.sh/users/{UserId}";
     public string ScoreUrl => $"https://osu.ppy.sh/scores/{ScoreId}";
     public string? BeatmapUrl => BeatmapId is { } id
         ? $"https://osu.ppy.sh/beatmaps/{id}"
         : null;
 }
+
+/// <summary>
+/// A leaderboard row that keeps players with an identical visible performance
+/// together. Player identity, score id, and play date deliberately do not form
+/// part of the identity so the row can be expanded to reveal every player who
+/// set that same performance.
+/// </summary>
+public sealed record FarmScoreGroup
+{
+    private FarmScoreGroup(IReadOnlyList<FarmScoreDetail> players)
+    {
+        Players = players;
+    }
+
+    public IReadOnlyList<FarmScoreDetail> Players { get; }
+    public FarmScoreDetail Representative => Players[0];
+    public int Count => Players.Count;
+    public bool HasMultipleScores => Count > 1;
+    public string RankText => $"#{Representative.LeaderboardRank}";
+    public string PlayerText => HasMultipleScores
+        ? "Identical scores"
+        : Representative.Username;
+    public string PlayerSubtitle => HasMultipleScores
+        ? "Expand to view every player"
+        : $"Player rank #{Representative.GlobalRank:N0}";
+    public string CountText => $"{Count:N0}";
+    public double Pp => Representative.Pp;
+    public double Accuracy => Representative.Accuracy;
+    public int MissCount => Representative.MissCount;
+    public int MaxCombo => Representative.MaxCombo;
+    public bool IsFullCombo => Representative.IsFullCombo;
+    public IReadOnlyList<string> ModAcronyms => Representative.ModAcronyms;
+    public string ScoringModeText => Representative.ScoringModeText;
+
+    public static IReadOnlyList<FarmScoreGroup> Create(
+        IReadOnlyList<FarmScoreDetail> scores)
+    {
+        if (scores.Count == 0)
+            return [];
+
+        var groups = new Dictionary<ScoreIdentity, List<FarmScoreDetail>>();
+        var orderedGroups = new List<List<FarmScoreDetail>>();
+        foreach (var score in scores)
+        {
+            var identity = ScoreIdentity.From(score);
+            if (!groups.TryGetValue(identity, out var players))
+            {
+                players = [];
+                groups.Add(identity, players);
+                orderedGroups.Add(players);
+            }
+            players.Add(score);
+        }
+
+        return orderedGroups
+            .Select(players => new FarmScoreGroup(players.ToArray()))
+            .ToArray();
+    }
+
+    private sealed record ScoreIdentity(
+        long PpBits,
+        long AccuracyBits,
+        int MissCount,
+        int MaxCombo,
+        bool IsFullCombo,
+        FarmScoreOrigin Origin,
+        string Mods)
+    {
+        public static ScoreIdentity From(FarmScoreDetail score) => new(
+            BitConverter.DoubleToInt64Bits(score.Pp),
+            BitConverter.DoubleToInt64Bits(score.Accuracy),
+            score.MissCount,
+            score.MaxCombo,
+            score.IsFullCombo,
+            score.Origin,
+            string.Join(
+                '\u001e',
+                score.ActualMods
+                    .OrderBy(mod => mod.NormalizedAcronym, StringComparer.Ordinal)
+                    .ThenBy(mod => mod.SettingsJson, StringComparer.Ordinal)
+                    .Select(mod => $"{mod.NormalizedAcronym}\u001f{mod.SettingsJson}")));
+    }
+}
+
+public sealed record FarmScoreMetadataRepairStatus(
+    int TotalPlayers,
+    int PendingPlayers)
+{
+    public int CompletedPlayers => Math.Max(0, TotalPlayers - PendingPlayers);
+    public bool IsComplete => PendingPlayers == 0;
+}
+
+public sealed record FarmScoreMetadataRepairResult(
+    int PlayersRequested,
+    int PlayersCompleted,
+    int PlayersFailed,
+    int ScoresRefreshed);
 
 public sealed record FarmMapResult
 {
@@ -178,7 +331,11 @@ public sealed record FarmMapResult
     public required DateTimeOffset MostRecentScoreDate { get; init; }
     public required IReadOnlyList<FarmScoreDetail> Players { get; init; }
 
+    public IReadOnlyList<FarmScoreGroup> ScoreGroups =>
+        FarmScoreGroup.Create(Players);
+
     public string BeatmapUrl => $"https://osu.ppy.sh/beatmaps/{Beatmap.BeatmapId}";
+    public string OsuDirectUrl => $"osu://b/{Beatmap.BeatmapId}";
     public string EffectiveBpmText => $"{EffectiveBpm:0.#} BPM";
     public string BaseBpmText => $"Base: {Beatmap.BaseBpm:0.#} BPM";
     public string EffectiveLengthText => TimeSpan.FromSeconds(Math.Round(EffectiveLengthSeconds)).ToString(@"m\:ss");
@@ -191,6 +348,61 @@ public sealed record FarmMapResult
     public string EffectiveStarRatingText => HasCalculatedStarRating
         ? $"{EffectiveStarRating:0.##} ★"
         : $"{Beatmap.StarRating:0.##} ★ base";
+    public string CircleSizeText => DifficultyText(Beatmap.CircleSize, ApplyDifficultyMods(Beatmap.CircleSize, 1.3));
+    public string ApproachRateText => DifficultyText(
+        Beatmap.ApproachRate,
+        ApplyApproachRateClock(ApplyDifficultyMods(Beatmap.ApproachRate, 1.4), ClockRate));
+    public string OverallDifficultyText => DifficultyText(
+        Beatmap.OverallDifficulty,
+        ApplyOverallDifficultyClock(ApplyDifficultyMods(Beatmap.OverallDifficulty, 1.4), ClockRate));
+    public string DrainRateText => DifficultyText(Beatmap.DrainRate, ApplyDifficultyMods(Beatmap.DrainRate, 1.4));
+
+    private double? ApplyDifficultyMods(double? value, double hardRockMultiplier)
+    {
+        if (value is null || !double.IsFinite(value.Value))
+            return null;
+
+        var adjusted = value.Value;
+        if (ModAcronyms.Contains("EZ", StringComparer.OrdinalIgnoreCase))
+            adjusted *= 0.5;
+        if (ModAcronyms.Contains("HR", StringComparer.OrdinalIgnoreCase))
+            adjusted *= hardRockMultiplier;
+        return Math.Clamp(adjusted, 0, 10);
+    }
+
+    private static double? ApplyApproachRateClock(double? approachRate, double clockRate)
+    {
+        if (approachRate is null || clockRate <= 0 || Math.Abs(clockRate - 1) < 0.0001)
+            return approachRate;
+
+        var milliseconds = approachRate.Value < 5
+            ? 1800 - 120 * approachRate.Value
+            : 1200 - 150 * (approachRate.Value - 5);
+        milliseconds /= clockRate;
+        return milliseconds > 1200
+            ? (1800 - milliseconds) / 120
+            : 5 + (1200 - milliseconds) / 150;
+    }
+
+    private static double? ApplyOverallDifficultyClock(double? overallDifficulty, double clockRate)
+    {
+        if (overallDifficulty is null || clockRate <= 0 || Math.Abs(clockRate - 1) < 0.0001)
+            return overallDifficulty;
+
+        var hitWindow = (80 - 6 * overallDifficulty.Value) / clockRate;
+        return (80 - hitWindow) / 6;
+    }
+
+    private static string DifficultyText(double? original, double? adjusted)
+    {
+        if (original is null || adjusted is null ||
+            !double.IsFinite(original.Value) || !double.IsFinite(adjusted.Value))
+            return "—";
+
+        return Math.Abs(original.Value - adjusted.Value) < 0.005
+            ? FormattableString.Invariant($"{adjusted.Value:0.##}")
+            : FormattableString.Invariant($"{adjusted.Value:0.##} ({original.Value:0.##})");
+    }
 }
 
 public sealed record CoverageSummary(
@@ -306,6 +518,27 @@ public sealed record OsuApiCredentials(long ClientId, string ClientSecret)
 {
     public bool IsConfigured => ClientId > 0 && !string.IsNullOrWhiteSpace(ClientSecret);
 }
+
+public sealed record OsuUserProfileStats(
+    long? CountryRank,
+    string? CountryCode,
+    string? CoverUrl = null);
+
+public sealed record OsuBeatmapUserScore(
+    int Position,
+    long ScoreId,
+    long UserId,
+    long BeatmapId,
+    DateTimeOffset EndedAt,
+    long TotalScore,
+    double Accuracy,
+    double Pp,
+    int MaxCombo,
+    int N300,
+    int N100,
+    int N50,
+    int Misses,
+    IReadOnlyList<string> Mods);
 
 public sealed class OsuApiAuthenticationException(string message) : Exception(message);
 

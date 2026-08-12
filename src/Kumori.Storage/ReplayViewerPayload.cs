@@ -16,6 +16,10 @@ internal static class ReplayViewerPayload
 
     public static string? TryEnsureExtracted()
     {
+        var nativeToolsViewer = NativeToolsPayload.TryEnsureReplayViewerExtracted();
+        if (nativeToolsViewer is not null)
+            return nativeToolsViewer;
+
         var assembly = System.Reflection.Assembly.GetEntryAssembly() ?? typeof(ReplayViewerPayload).Assembly;
         if (assembly.GetManifestResourceInfo(ResourceName) is null)
         {

@@ -121,8 +121,9 @@ public sealed class FarmFinderPagePresentationTests
         var resultsGrid = Assert.Single(
             document.Descendants(presentation + "DataGrid"));
         Assert.Equal(
-            "{StaticResource FarmGridHeader}",
-            (string?)resultsGrid.Attribute("ColumnHeaderStyle"));
+            "None",
+            (string?)resultsGrid.Attribute("HeadersVisibility"));
+        Assert.Null(resultsGrid.Attribute("ColumnHeaderStyle"));
         Assert.Equal(
             "{StaticResource FarmGridRow}",
             (string?)resultsGrid.Attribute("RowStyle"));
@@ -182,11 +183,29 @@ public sealed class FarmFinderPagePresentationTests
         Assert.Empty(mods.Descendants(presentation + "ComboBox"));
 
         var resultMods = document.Descendants(presentation + "ItemsControl")
-            .Single(element =>
+            .Where(element =>
                 (string?)element.Attribute("ItemsSource") ==
-                "{Binding ModAcronyms, Mode=OneWay}");
+                "{Binding ModAcronyms, Mode=OneWay}")
+            .ToArray();
+        Assert.NotEmpty(resultMods);
+        Assert.All(
+            resultMods,
+            element => Assert.Equal(
+                "{StaticResource FarmResultModTemplate}",
+                (string?)element.Attribute("ItemTemplate")));
+        var resultModTemplate = document.Descendants(presentation + "DataTemplate")
+            .Single(element =>
+                (string?)element.Attribute(
+                    XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml") + "Key") ==
+                "FarmResultModTemplate");
+        Assert.Empty(resultModTemplate.Descendants(presentation + "Border"));
+        var resultIcon = Assert.Single(
+            resultModTemplate.Descendants(presentation + "Rectangle"));
+        Assert.Equal("16", (string?)resultIcon.Attribute("Width"));
+        Assert.Equal("16", (string?)resultIcon.Attribute("Height"));
+        Assert.Equal("HighQuality", (string?)resultIcon.Attribute("RenderOptions.BitmapScalingMode"));
         Assert.Contains(
-            resultMods.Descendants(presentation + "ImageBrush"),
+            resultModTemplate.Descendants(presentation + "ImageBrush"),
             element => ((string?)element.Attribute("ImageSource"))?.Contains(
                 "ModAcronymToIconSourceConverter",
                 StringComparison.Ordinal) == true);
@@ -242,6 +261,13 @@ public sealed class FarmFinderPagePresentationTests
         Assert.Equal(
             "{Binding BuildFullIndexCommand}",
             (string?)build.Attribute("Command"));
+        var repair = document.Descendants(presentation + "MenuItem")
+            .Single(element =>
+                (string?)element.Attribute("Header") ==
+                "{Binding RepairScoreMetadataMenuText}");
+        Assert.Equal(
+            "{Binding RepairScoreMetadataCommand}",
+            (string?)repair.Attribute("Command"));
         Assert.DoesNotContain(
             document.Descendants(presentation + "Button"),
             element => (string?)element.Attribute("Content") is
@@ -366,40 +392,61 @@ public sealed class FarmFinderPagePresentationTests
     }
 
     [Fact]
-    public void ResultRowsOpenOsuWithoutExpandingInAppDetails()
+    public void ResultRowsOpenDetailsBeforeExplicitOsuActions()
     {
         var document = LoadPage();
         XNamespace presentation =
             "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
 
         var resultsGrid = Assert.Single(
             document.Descendants(presentation + "DataGrid"));
         Assert.Equal(
             "Collapsed",
             (string?)resultsGrid.Attribute("RowDetailsVisibilityMode"));
+        Assert.Empty(
+            resultsGrid.Elements(presentation + "DataGrid.RowDetailsTemplate"));
         Assert.Equal(
-            "ResultsGrid_PreviewMouseLeftButtonUp",
-            (string?)resultsGrid.Attribute("PreviewMouseLeftButtonUp"));
-        Assert.Null(resultsGrid.Attribute("SelectedItem"));
+            "{Binding SelectedResult, Mode=TwoWay}",
+            (string?)resultsGrid.Attribute("SelectedItem"));
+        Assert.Null(resultsGrid.Attribute("PreviewMouseLeftButtonUp"));
+        Assert.Null(resultsGrid.Attribute("LoadingRow"));
+
+        var inspector = Assert.Single(
+            document.Descendants(presentation + "Border"),
+            element =>
+                (string?)element.Attribute(xaml + "Name") == "FarmInspectorPane");
+        Assert.Equal("2", (string?)inspector.Attribute("Grid.Column"));
+        Assert.Contains(
+            document.Descendants(presentation + "GridSplitter"),
+            splitter => (string?)splitter.Attribute("Grid.Column") == "1");
+        var directButton = Assert.Single(
+            inspector.Descendants(presentation + "Button"),
+            button => (string?)button.Attribute("Content") == "Open in osu!");
+        Assert.Contains(
+            "OpenBeatmapCommand",
+            (string?)directButton.Attribute("Command"));
+
+        var browserMenuItem = Assert.Single(
+            document.Descendants(presentation + "MenuItem"),
+            menuItem => (string?)menuItem.Attribute("Header") == "Open in browser");
+        Assert.Contains(
+            "OpenBeatmapInBrowserCommand",
+            (string?)browserMenuItem.Attribute("Command"));
+        Assert.Contains(
+            "PlacementTarget.DataContext",
+            (string?)browserMenuItem.Attribute("CommandParameter"));
 
         Assert.Contains(
             resultsGrid.Descendants(presentation + "Run"),
             run =>
                 (string?)run.Attribute("Text") ==
                 "{Binding Beatmap.Mapper, Mode=OneWay}");
-        var metadataRuns = resultsGrid
-            .Descendants(presentation + "Run")
-            .Where(run =>
-                (string?)run.Attribute("Text") is
-                    "{Binding Beatmap.Mapper, Mode=OneWay}" or
-                    "{Binding Beatmap.Artist, Mode=OneWay}")
-            .ToArray();
-        Assert.Equal(
-            "{Binding Beatmap.Mapper, Mode=OneWay}",
-            (string?)metadataRuns[0].Attribute("Text"));
-        Assert.Equal(
-            "{Binding Beatmap.Artist, Mode=OneWay}",
-            (string?)metadataRuns[1].Attribute("Text"));
+        Assert.Contains(
+            resultsGrid.Descendants(presentation + "TextBlock"),
+            text =>
+                (string?)text.Attribute("Text") ==
+                "{Binding Beatmap.Artist, Mode=OneWay}");
         var resultCountRun = resultsGrid.Parent!.Parent!
             .Descendants(presentation + "Run")
             .Single(run =>
@@ -418,33 +465,137 @@ public sealed class FarmFinderPagePresentationTests
     }
 
     [Fact]
-    public void ResultColumnsGroupRelatedMetrics()
+    public void ResultRowsUseTheMainScoresCardLanguage()
     {
         var document = LoadPage();
         XNamespace presentation =
             "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
 
         var results = document.Descendants(presentation + "DataGrid").Single();
+        Assert.Equal("None", (string?)results.Attribute("HeadersVisibility"));
+        Assert.Equal("None", (string?)results.Attribute("GridLinesVisibility"));
+
         var columns = results
             .Element(presentation + "DataGrid.Columns")!
             .Elements()
-            .Select(element => (string?)element.Attribute("Header"))
             .ToArray();
+        Assert.Single(columns);
+        Assert.Equal("*", (string?)columns[0].Attribute("Width"));
 
+        var resultCard = Assert.Single(
+            results.Descendants(presentation + "Border"),
+            border =>
+                (string?)border.Attribute("Style") ==
+                "{StaticResource FarmResultCard}");
+        var metricLabels = resultCard
+            .Descendants(presentation + "TextBlock")
+            .Select(text => (string?)text.Attribute("Text"))
+            .Where(text => text is not null)
+            .ToArray();
+        Assert.Contains("PP PROFILE", metricLabels);
+        Assert.DoesNotContain("PLAYERS", metricLabels);
+        Assert.DoesNotContain("MAP STATS", metricLabels);
+        Assert.DoesNotContain("SCORE QUALITY", metricLabels);
+
+        var cardColumns = resultCard
+            .Element(presentation + "Grid")!
+            .Element(presentation + "Grid.ColumnDefinitions")!
+            .Elements(presentation + "ColumnDefinition")
+            .Select(column => (string?)column.Attribute("Width"))
+            .ToArray();
+        Assert.Equal(new string?[] { "58", "*", "72", "154" }, cardColumns);
+        var ppProfile = Assert.Single(
+            resultCard.Descendants(presentation + "Border"),
+            border => (string?)border.Attribute(xaml + "Name") == "ResultPpProfile");
+        Assert.Equal("1,0,0,0", (string?)ppProfile.Attribute("BorderThickness"));
+        var average = Assert.Single(
+            ppProfile.Descendants(presentation + "TextBlock"),
+            text => ((string?)text.Attribute("Text"))?.Contains(
+                "AveragePp",
+                StringComparison.Ordinal) == true);
+        Assert.Equal("NoWrap", (string?)average.Attribute("TextWrapping"));
+        Assert.Equal("Right", (string?)average.Attribute("TextAlignment"));
+
+        var inspectorLabels = document.Descendants(presentation + "TextBlock")
+            .Select(text => (string?)text.Attribute("Text"))
+            .Where(text => text is not null)
+            .ToArray();
+        Assert.Contains("PLAYERS", inspectorLabels);
+        Assert.Contains("MAP STATS", inspectorLabels);
+        Assert.Contains("SCORE QUALITY", inspectorLabels);
+        Assert.Contains("CS", inspectorLabels);
+        Assert.Contains("AR", inspectorLabels);
+        Assert.Contains("OD", inspectorLabels);
+        Assert.Contains("HP", inspectorLabels);
+        Assert.Contains("LENGTH", inspectorLabels);
+        Assert.Contains("BPM", inspectorLabels);
+        Assert.Contains("DIFFICULTY", inspectorLabels);
+    }
+
+    [Fact]
+    public void ResultDetailsContainAVirtualizedPpLeaderboard()
+    {
+        var document = LoadPage();
+        XNamespace presentation =
+            "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var inspector = document.Descendants(presentation + "Border")
+            .Single(element =>
+                (string?)element.Attribute(xaml + "Name") == "FarmInspectorPane");
+        Assert.Contains(
+            inspector.Descendants(presentation + "Run"),
+            run => (string?)run.Attribute("Text") == "Fetched player leaderboard");
+
+        var leaderboard = Assert.Single(
+            inspector.Descendants(presentation + "ListBox"));
         Assert.Equal(
-            new string?[]
-            {
-                "Beatmap",
-                "Mods",
-                "Players ↓",
-                "PP profile",
-                "Map stats",
-                "Score quality",
-            },
-            columns);
-        Assert.DoesNotContain("PP range", columns);
-        Assert.DoesNotContain("Median acc.", columns);
-        Assert.DoesNotContain("FC", columns);
+            "{Binding ScoreGroups, Mode=OneWay}",
+            (string?)leaderboard.Attribute("ItemsSource"));
+        Assert.Equal(
+            "True",
+            (string?)leaderboard.Attribute("VirtualizingPanel.IsVirtualizing"));
+        Assert.Equal(
+            "Recycling",
+            (string?)leaderboard.Attribute("VirtualizingPanel.VirtualizationMode"));
+
+        var bindings = leaderboard
+            .Descendants()
+            .Attributes("Text")
+            .Select(attribute => attribute.Value)
+            .ToArray();
+        Assert.Contains(bindings, binding => binding.Contains("LeaderboardRank"));
+        Assert.Contains(bindings, binding => binding.Contains("Username"));
+        Assert.Contains(bindings, binding => binding.Contains("CountText"));
+        Assert.Contains(bindings, binding => binding.Contains("Pp"));
+        Assert.Contains(bindings, binding => binding.Contains("Accuracy"));
+        Assert.Contains(bindings, binding => binding.Contains("MaxCombo"));
+        Assert.Contains(bindings, binding => binding.Contains("MissCount"));
+        Assert.Contains(bindings, binding => binding.Contains("ScoringModeText"));
+        Assert.Contains(
+            leaderboard.Descendants(presentation + "ItemsControl"),
+            items =>
+                (string?)items.Attribute("ItemsSource") ==
+                "{Binding ModAcronyms, Mode=OneWay}");
+        Assert.Contains(
+            leaderboard.Descendants(presentation + "ToggleButton"),
+            toggle =>
+                (string?)toggle.Attribute("ToolTip") ==
+                "Show players with this score");
+        Assert.Contains(
+            leaderboard.Descendants(presentation + "ItemsControl"),
+            items =>
+                (string?)items.Attribute("ItemsSource") ==
+                "{Binding Players, Mode=OneWay}" &&
+                (string?)items.Attribute("Visibility") == "Collapsed");
+        Assert.Contains(
+            leaderboard.Descendants(presentation + "DataTrigger"),
+            trigger =>
+                ((string?)trigger.Attribute("Binding"))?.Contains(
+                    "ExpandScoresButton",
+                    StringComparison.Ordinal) == true &&
+                (string?)trigger.Attribute("Value") == "True");
     }
 
     [Fact]

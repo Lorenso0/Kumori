@@ -13,7 +13,10 @@ namespace Kumori.Storage;
 public sealed class PlaySharePackageService
 {
     public const string FormatName = "kumori-shared-play";
-    public const int CurrentFormatVersion = 1;
+    public const int CurrentFormatVersion = 2;
+    public const int LegacyFormatVersion = 1;
+    public const string FullPortableProfile = "full_portable";
+    public const string CompactDiscordProfile = "compact_discord";
     public const string FileExtension = ".kumori";
 
     private const long MaxPackageBytes = 512L * 1024 * 1024;
@@ -40,6 +43,7 @@ public sealed class PlaySharePackageService
     private readonly string assetsDirectory;
     private readonly string stagingDirectory;
     private readonly Func<SharedPlayV1, IReadOnlyList<string>>? localAssetCandidates;
+    private readonly Func<SharedPlayV1, CancellationToken, Task<IReadOnlyList<ShareMediaFile>>>? compactMediaResolver;
     private readonly object schemaGate = new();
     private bool schemaReady;
 
@@ -50,7 +54,8 @@ public sealed class PlaySharePackageService
         string? importsDatabase = null,
         string? assetsDirectory = null,
         string? stagingDirectory = null,
-        Func<SharedPlayV1, IReadOnlyList<string>>? localAssetCandidates = null)
+        Func<SharedPlayV1, IReadOnlyList<string>>? localAssetCandidates = null,
+        Func<SharedPlayV1, CancellationToken, Task<IReadOnlyList<ShareMediaFile>>>? compactMediaResolver = null)
     {
         this.details = details;
         this.movement = movement;
@@ -59,6 +64,7 @@ public sealed class PlaySharePackageService
         this.assetsDirectory = assetsDirectory ?? AppPaths.ImportedAssetsDir;
         this.stagingDirectory = stagingDirectory ?? AppPaths.ImportStagingDir;
         this.localAssetCandidates = localAssetCandidates;
+        this.compactMediaResolver = compactMediaResolver;
     }
 
     public string? GetPlayerName(long attemptId) => sessions.GetPlayerNameForAttempt(attemptId);
@@ -72,6 +78,7 @@ public sealed class PlaySharePackageService
         string destination,
         IReadOnlyList<ShareMediaFile> mediaFiles,
         IReadOnlyList<string>? optionalMediaOmissions = null,
+        KumoriPackageProfile profile = KumoriPackageProfile.FullPortable,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(playerName))
@@ -90,6 +97,12 @@ public sealed class PlaySharePackageService
             throw new InvalidDataException("The captured replay sample count is inconsistent.");
 
         var normalizedMedia = NormalizeExportMedia(mediaFiles);
+        if (profile == KumoriPackageProfile.CompactDiscord)
+        {
+            normalizedMedia = normalizedMedia
+                .Where(file => file.Role is "beatmap" or "audio")
+                .ToList();
+        }
         if (!normalizedMedia.Any(file => file.Role == "beatmap"))
             throw new InvalidOperationException("The .osu beatmap file is required for a portable share.");
         if (!normalizedMedia.Any(file => file.Role == "audio"))
@@ -147,6 +160,9 @@ public sealed class PlaySharePackageService
             Movement = encodedMovement.Select(item => item.Descriptor).ToArray(),
             Assets = assetDescriptors,
             OptionalMediaOmissions = optionalMediaOmissions?.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct().ToArray() ?? [],
+            MediaProfile = profile == KumoriPackageProfile.CompactDiscord
+                ? CompactDiscordProfile
+                : FullPortableProfile,
         };
 
         string fullDestination = Path.GetFullPath(destination);
@@ -196,7 +212,8 @@ public sealed class PlaySharePackageService
             package.Play,
             package.Manifest.ExportedAt,
             new FileInfo(packagePath).Length,
-            package.Manifest.OptionalMediaOmissions);
+            package.Manifest.OptionalMediaOmissions,
+            package.Manifest.MediaProfile);
     }
 
     public async Task<KumoriImportResult> ImportAsync(
@@ -204,6 +221,32 @@ public sealed class PlaySharePackageService
         CancellationToken cancellationToken = default)
     {
         ValidatedPackage package = await ValidatePackageAsync(packagePath, decodeMovement: true, cancellationToken);
+        var importAssets = package.Manifest.Assets.ToList();
+        var externalAssetPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (IsCompact(package.Manifest)
+            && !package.Manifest.Assets.Any(asset => asset.Role == "audio"))
+        {
+            IReadOnlyList<ShareMediaFile> resolved = await ResolveCompactMediaAsync(
+                packagePath,
+                package,
+                cancellationToken);
+            foreach (ShareMediaFile file in resolved.Where(file => file.Role != "beatmap"))
+            {
+                var info = new FileInfo(file.Path);
+                if (!info.Exists || info.Length is <= 0 or > MaxAssetBytes)
+                    throw new InvalidDataException($"Resolved media '{file.LogicalName}' has an unsupported size.");
+                string hash = await HashFileAsync(info.FullName, cancellationToken);
+                importAssets.Add(new KumoriPackageAssetV1
+                {
+                    Entry = "",
+                    LogicalName = file.LogicalName,
+                    Role = file.Role,
+                    Size = info.Length,
+                    Sha256 = hash,
+                });
+                externalAssetPaths[hash] = info.FullName;
+            }
+        }
         EnsureImportSchema();
         using (SqliteConnection connection = OpenImports(readOnly: false))
         {
@@ -224,7 +267,7 @@ public sealed class PlaySharePackageService
         long reusedLocalAssetBytes = 0;
         try
         {
-            IGrouping<string, KumoriPackageAssetV1>[] assetGroups = package.Manifest.Assets
+            IGrouping<string, KumoriPackageAssetV1>[] assetGroups = importAssets
                 .GroupBy(asset => asset.Sha256, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             IReadOnlyDictionary<string, string> localMatches =
@@ -240,7 +283,14 @@ public sealed class PlaySharePackageService
                 KumoriPackageAssetV1 asset = assetGroup.First();
                 string extension = Path.GetExtension(asset.LogicalName);
                 string target = Path.Combine(assetsDirectory, asset.Sha256 + extension.ToLowerInvariant());
-                if (File.Exists(target))
+                if (externalAssetPaths.TryGetValue(asset.Sha256, out string? externalPath))
+                {
+                    target = externalPath;
+                    assetManaged[asset.Sha256] = false;
+                    reusedLocalAssetCount++;
+                    reusedLocalAssetBytes = checked(reusedLocalAssetBytes + asset.Size);
+                }
+                else if (File.Exists(target))
                 {
                     if (!string.Equals(
                             await HashFileAsync(target, cancellationToken),
@@ -337,7 +387,7 @@ public sealed class PlaySharePackageService
                 }
 
                 foreach (IGrouping<string, KumoriPackageAssetV1> assetGroup in
-                         package.Manifest.Assets.GroupBy(asset => asset.Sha256, StringComparer.OrdinalIgnoreCase))
+                         importAssets.GroupBy(asset => asset.Sha256, StringComparer.OrdinalIgnoreCase))
                 {
                     KumoriPackageAssetV1 asset = assetGroup.First();
                     using var upsert = connection.CreateCommand();
@@ -354,7 +404,7 @@ public sealed class PlaySharePackageService
                     upsert.Parameters.AddWithValue("@is_managed", assetManaged[asset.Sha256] ? 1 : 0);
                     upsert.ExecuteNonQuery();
                 }
-                foreach (KumoriPackageAssetV1 asset in package.Manifest.Assets)
+                foreach (KumoriPackageAssetV1 asset in importAssets)
                 {
                     using var insertAsset = connection.CreateCommand();
                     insertAsset.Transaction = transaction;
@@ -677,15 +727,27 @@ public sealed class PlaySharePackageService
                 throw new InvalidDataException($"Asset '{asset.LogicalName}' failed its integrity check.");
         }
 
+        var compact = IsCompact(manifest);
+        int audioCount = manifest.Assets.Count(asset => asset.Role == "audio");
         if (manifest.Assets.Count(asset => asset.Role == "beatmap") != 1
-            || manifest.Assets.Count(asset => asset.Role == "audio") != 1)
-            throw new InvalidDataException("The package must contain exactly one beatmap and one audio file.");
+            || (!compact && audioCount != 1)
+            || (compact && (audioCount > 1
+                            || manifest.Assets.Any(asset => asset.Role is not ("beatmap" or "audio")))))
+        {
+            throw new InvalidDataException(compact
+                ? "A compact package must contain one beatmap and at most one audio file."
+                : "The package must contain exactly one beatmap and one audio file.");
+        }
         KumoriPackageAssetV1 beatmap = manifest.Assets.Single(asset => asset.Role == "beatmap");
-        KumoriPackageAssetV1 audio = manifest.Assets.Single(asset => asset.Role == "audio");
         byte[] beatmapBytes = await ReadEntryAsync(entries[beatmap.Entry], MaxAssetBytes, cancellationToken);
         string referencedAudio = ReadAudioFilename(beatmapBytes);
-        if (string.IsNullOrWhiteSpace(referencedAudio)
-            || !string.Equals(referencedAudio, audio.LogicalName, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(referencedAudio))
+            throw new InvalidDataException("The packaged .osu file does not declare an audio file.");
+        if ((!compact || audioCount == 1)
+            && !string.Equals(
+                referencedAudio,
+                manifest.Assets.Single(asset => asset.Role == "audio").LogicalName,
+                StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The packaged .osu file does not reference the packaged audio.");
 
         string fingerprint = ComputeFingerprint(manifest.PlaySha256, manifest.Movement, manifest.Assets);
@@ -703,8 +765,14 @@ public sealed class PlaySharePackageService
             || manifest.Assets.Any(item => item is null))
             throw new InvalidDataException("The package manifest is incomplete.");
         if (!string.Equals(manifest.Format, FormatName, StringComparison.Ordinal)
-            || manifest.Version != CurrentFormatVersion)
+            || manifest.Version is < LegacyFormatVersion or > CurrentFormatVersion)
             throw new InvalidDataException("This .kumori format version is not supported.");
+        if (manifest.Version == LegacyFormatVersion
+            && !string.Equals(manifest.MediaProfile, FullPortableProfile, StringComparison.Ordinal))
+            throw new InvalidDataException("Legacy .kumori packages must be fully portable.");
+        if (manifest.Version >= 2
+            && manifest.MediaProfile is not FullPortableProfile and not CompactDiscordProfile)
+            throw new InvalidDataException("The package media profile is not supported.");
         if (manifest.ExportedAt > DateTimeOffset.UtcNow.AddMinutes(5))
             throw new InvalidDataException("The package export time is invalid.");
         if (string.IsNullOrWhiteSpace(manifest.PlayerName) || manifest.PlayerName.Length > 80)
@@ -713,9 +781,14 @@ public sealed class PlaySharePackageService
         ValidateHash(manifest.Fingerprint, "package fingerprint");
         if (manifest.Movement.Count is < 1 or > MovementRepository.MaxChunksPerAttempt)
             throw new InvalidDataException("The package movement entry count is invalid.");
-        if (manifest.Assets.Count is < 2 or > MaxEntries - 3)
+        var minimumAssets = IsCompact(manifest) ? 1 : 2;
+        if (manifest.Assets.Count < minimumAssets || manifest.Assets.Count > MaxEntries - 3)
             throw new InvalidDataException("The package asset count is invalid.");
     }
+
+    private static bool IsCompact(KumoriPackageManifestV1 manifest) =>
+        manifest.Version >= 2
+        && string.Equals(manifest.MediaProfile, CompactDiscordProfile, StringComparison.Ordinal);
 
     private static void ValidatePlay(SharedPlayV1 play)
     {
@@ -853,7 +926,9 @@ public sealed class PlaySharePackageService
         ValidateHash(asset.Sha256, asset.LogicalName);
     }
 
-    private static List<ShareMediaFile> NormalizeExportMedia(IReadOnlyList<ShareMediaFile> mediaFiles)
+    private static List<ShareMediaFile> NormalizeExportMedia(
+        IReadOnlyList<ShareMediaFile> mediaFiles,
+        bool requireAudio = true)
     {
         var result = new List<ShareMediaFile>();
         var logicalNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -868,8 +943,12 @@ public sealed class PlaySharePackageService
             result.Add(new ShareMediaFile(logical, role, Path.GetFullPath(item.Path)));
         }
         if (result.Count(file => file.Role == "beatmap") != 1
-            || result.Count(file => file.Role == "audio") != 1)
-            throw new InvalidDataException("A share must contain exactly one beatmap and one audio file.");
+            || (requireAudio && result.Count(file => file.Role == "audio") != 1))
+        {
+            throw new InvalidDataException(requireAudio
+                ? "A share must contain exactly one beatmap and one audio file."
+                : "A compact share must contain exactly one beatmap file.");
+        }
         return result;
     }
 
@@ -1045,6 +1124,42 @@ public sealed class PlaySharePackageService
             }
         }
         return matches;
+    }
+
+    private async Task<IReadOnlyList<ShareMediaFile>> ResolveCompactMediaAsync(
+        string packagePath,
+        ValidatedPackage package,
+        CancellationToken cancellationToken)
+    {
+        if (compactMediaResolver is null)
+            throw new InvalidOperationException(
+                "This compact replay needs beatmap media, but media resolution is unavailable.");
+
+        IReadOnlyList<ShareMediaFile> resolved = NormalizeExportMedia(
+            await compactMediaResolver(package.Play, cancellationToken));
+        ShareMediaFile? audio = resolved.SingleOrDefault(file => file.Role == "audio");
+        if (audio is null)
+            throw new InvalidOperationException(
+                "Kumori could not locate or download the audio required by this compact replay.");
+
+        KumoriPackageAssetV1 beatmap = package.Manifest.Assets.Single(asset => asset.Role == "beatmap");
+        ShareMediaFile resolvedBeatmap = resolved.Single(file => file.Role == "beatmap");
+        if (!FixedHashEquals(
+                await HashFileAsync(resolvedBeatmap.Path, cancellationToken),
+                beatmap.Sha256))
+        {
+            throw new InvalidDataException(
+                "Resolved beatmap media does not match the compact package.");
+        }
+        using ZipArchive archive = ZipFile.OpenRead(packagePath);
+        ZipArchiveEntry entry = archive.GetEntry(beatmap.Entry)
+            ?? throw new InvalidDataException("The compact package beatmap is missing.");
+        byte[] beatmapBytes = await ReadEntryAsync(entry, MaxAssetBytes, cancellationToken);
+        string referencedAudio = ReadAudioFilename(beatmapBytes);
+        if (!string.Equals(referencedAudio, audio.LogicalName, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(
+                "Resolved beatmap audio does not match the compact package.");
+        return resolved;
     }
 
     private static AssetLookup LoadAssets(SqliteConnection connection, long importId)

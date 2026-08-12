@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.8.0",
+    "date": "2026-08-12",
+    "major": [
+      "Added real-time Discord PP/PB play posts and daily performance summaries as polished Kumori cards, with separate webhooks and shareable replay attachments",
+      "Rebuilt Skin Studio around osu!lazer's native renderer for authentic gameplay, animation, ruleset, and hitsound previews"
+    ],
+    "features": [
+      "Added durable osu! score verification, leaderboard placement, profile progress, mod-aware map statistics, and compact .kumori replay packages with beatmap audio",
+      "Added a redesigned Farm Finder results browser with map cards, grouped player scoreboards, scoring-client metadata, osu!direct links, and resumable metadata repair",
+      "Added safe native skin drafts, live-preview publishing, automatic backups, and complete portable skin exports"
+    ],
+    "improvements": [
+      "Redesigned daily and PP cards with official mod icons, lazer-style grades, artwork, profile imagery, key balance, judgements, rank and PP changes, and responsive map titles",
+      "Made Replay Analyzer imports open as one focusable window and reuse or securely resolve the media required by compact replay packages",
+      "Improved development builds, shutdown handling, profile telemetry, Farm Finder filtering, and Skin Studio responsiveness"
+    ],
+    "fixes": [
+      "Prevented ambiguous telemetry from displaying a BPM Adjust mod unless the completed score confirms it",
+      "Fixed duplicate or unfocusable imported replay windows, settings tab seams, webhook attachment fallback, and several Skin Studio preview and asset-handling issues"
+    ]
+  },
+  {
     "version": "0.7.0",
     "date": "2026-07-31",
     "major": [

@@ -109,8 +109,47 @@ public sealed class FarmFinderCacheInstallerTests : IDisposable
         using var version = connection.CreateCommand();
         version.CommandText =
             "SELECT value FROM farm_metadata WHERE key='schema_version'";
-        Assert.Equal("5", version.ExecuteScalar());
+        Assert.Equal("6", version.ExecuteScalar());
         Assert.False(File.Exists(destinationPath + ".previous"));
+    }
+
+    [Fact]
+    public async Task VersionFiveDownload_IsMigratedBeforeItReplacesCurrentCache()
+    {
+        Directory.CreateDirectory(root);
+        var sourcePath = Path.Combine(root, "source-v5.sqlite3");
+        var destinationPath = Path.Combine(root, "destination.sqlite3");
+        await CreatePopulatedDatabaseAsync(sourcePath);
+        DowngradeToVersionFive(sourcePath);
+        await CreatePopulatedDatabaseAsync(destinationPath);
+        var destination = new FarmFinderRepository(destinationPath);
+        var payload = File.ReadAllBytes(sourcePath);
+        using var installer = new FarmFinderCacheInstaller(
+            destinationPath,
+            destination,
+            "https://cache.example.test/manifest.json",
+            new Version(1, 0),
+            new HttpClient(new CacheHandler(
+                Manifest(payload, schemaVersion: 5),
+                payload)));
+
+        var result = await installer.FetchAndInstallAsync();
+
+        Assert.Equal(6, result.SchemaVersion);
+        using var connection = OpenReadOnly(destinationPath);
+        using var version = connection.CreateCommand();
+        version.CommandText =
+            "SELECT value FROM farm_metadata WHERE key='schema_version'";
+        Assert.Equal("6", version.ExecuteScalar());
+        using var columns = connection.CreateCommand();
+        columns.CommandText =
+            "SELECT COUNT(*) FROM pragma_table_info('farm_scores') WHERE name='score_origin'";
+        Assert.Equal(1L, columns.ExecuteScalar());
+        Assert.Equal(
+            1,
+            (await destination.GetScoreMetadataRepairStatusAsync()).PendingPlayers);
+        Assert.Single(
+            await destination.QueryCandidatesAsync(new FarmFinderQuery()));
     }
 
     [Fact]
@@ -145,7 +184,7 @@ public sealed class FarmFinderCacheInstallerTests : IDisposable
         var destination = new FarmFinderRepository(destinationPath);
         await destination.InitializeAsync();
         var payload = new byte[] { 1 };
-        var futureSchema = Manifest(payload, schemaVersion: 6);
+        var futureSchema = Manifest(payload, schemaVersion: 7);
         using var schemaInstaller = new FarmFinderCacheInstaller(
             destinationPath,
             destination,
@@ -271,7 +310,7 @@ public sealed class FarmFinderCacheInstallerTests : IDisposable
     private static string Manifest(
         byte[] database,
         string? sha256 = null,
-        int schemaVersion = 5,
+        int schemaVersion = FarmFinderRepository.CurrentSchemaVersion,
         string? minimumAppVersion = null) =>
         JsonSerializer.Serialize(new
         {
@@ -284,6 +323,33 @@ public sealed class FarmFinderCacheInstallerTests : IDisposable
             generatedAt = "2026-07-30T12:00:00Z",
             minimumAppVersion,
         });
+
+    private static void DowngradeToVersionFive(string path)
+    {
+        SqliteConnection.ClearAllPools();
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false,
+            }.ConnectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            DROP INDEX idx_farm_players_score_metadata;
+            ALTER TABLE farm_players DROP COLUMN score_metadata_version;
+            ALTER TABLE farm_scores DROP COLUMN score_origin;
+            ALTER TABLE farm_scores DROP COLUMN legacy_score_id;
+            ALTER TABLE farm_scores DROP COLUMN total_score;
+            ALTER TABLE farm_scores DROP COLUMN legacy_total_score;
+            ALTER TABLE farm_scores DROP COLUMN build_id;
+            ALTER TABLE farm_scores DROP COLUMN source_type;
+            UPDATE farm_metadata SET value='5' WHERE key='schema_version';
+            """;
+        command.ExecuteNonQuery();
+        SqliteConnection.ClearAllPools();
+    }
 
     private static SqliteConnection OpenReadOnly(string path)
     {

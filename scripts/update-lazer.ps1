@@ -6,6 +6,8 @@ $ErrorActionPreference = "Stop"
 $Checkout = [IO.Path]::GetFullPath($Checkout)
 $PinnedCommit = "5da71008b082d1a77e4bb301dc98886f1f24b895"
 $PinnedRelease = "2026.726.0-lazer"
+$RendererPatch = [IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot "..\patches\osu-skin-studio-renderer.patch"))
 
 if (-not (Test-Path (Join-Path $Checkout ".git"))) {
     New-Item -ItemType Directory -Path $Checkout -Force | Out-Null
@@ -51,5 +53,39 @@ if (-not [string]::Equals($head, $PinnedCommit, [StringComparison]::OrdinalIgnor
 if (-not (Test-Path (Join-Path $Checkout "osu.Game/osu.Game.csproj"))) {
     throw "The osu! source checkout is incomplete: osu.Game.csproj was not found."
 }
+if (-not (Test-Path $RendererPatch)) {
+    throw "The Skin Studio renderer patch was not found at $RendererPatch."
+}
 
-Write-Output "Using osu! $PinnedRelease ($PinnedCommit)"
+function Test-GitPatch([switch]$Reverse) {
+    $arguments = @('-c', "safe.directory=$Checkout", '-C', $Checkout, 'apply')
+    if ($Reverse) {
+        $arguments += '--reverse'
+    }
+    $arguments += @('--check', $RendererPatch)
+
+    # Both outcomes are expected here: a reverse check succeeds when the patch
+    # is already present, while a forward check succeeds on a clean checkout.
+    # Keep native stderr from becoming a terminating PowerShell error.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & git @arguments 2>$null
+        return $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+if (-not (Test-GitPatch -Reverse)) {
+    if (-not (Test-GitPatch)) {
+        throw "The Skin Studio renderer patch does not apply cleanly to $PinnedRelease."
+    }
+    git -c "safe.directory=$Checkout" -C $Checkout apply $RendererPatch
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not apply the Skin Studio renderer patch."
+    }
+}
+
+Write-Output "Using osu! $PinnedRelease ($PinnedCommit) with the Kumori renderer patch"

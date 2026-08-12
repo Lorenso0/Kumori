@@ -271,6 +271,10 @@
                             AutomationProperties.Name="Skin editor actions">
                         <Button.ContextMenu>
                             <ContextMenu>
+                                <MenuItem x:Name="OpenLazerEditorMenuItem"
+                                          Header="Open new lazer editor (preview)…"
+                                          Click="OpenLazerEditor_Click" />
+                                <Separator />
                                 <MenuItem Header="Change lazer folder…" Click="ChangeFolder_Click" />
                                 <MenuItem Header="Refresh skin library" Click="Refresh_Click" />
                                 <MenuItem Header="Duplicate skin&#x2026;" Click="DuplicateSkin_Click" />
@@ -731,33 +735,51 @@
                                                        FontSize="9"
                                                        Foreground="{DynamicResource Brush.TextMuted}" />
                                         </StackPanel>
-                                        <Border HorizontalAlignment="Right"
-                                                Style="{StaticResource SkinSegmentGroup}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <ToggleButton x:Name="AssetCanvasButton"
-                                                              Content="Asset"
-                                                              Tag="Asset"
-                                                              Style="{StaticResource SkinSegment}"
-                                                              Click="ElementCenterMode_Click"
-                                                              IsChecked="True" />
-                                                <ToggleButton x:Name="GameplayCanvasButton"
-                                                              Content="Gameplay"
-                                                              Tag="Gameplay"
-                                                              Style="{StaticResource SkinSegment}"
-                                                              Click="ElementCenterMode_Click" />
-                                            </StackPanel>
-                                        </Border>
+                                        <StackPanel HorizontalAlignment="Right"
+                                                    Orientation="Horizontal">
+                                            <ToggleButton x:Name="PreviewPlaybackToggle"
+                                                          Width="66"
+                                                          Margin="0,0,7,0"
+                                                          Content="Pause"
+                                                          IsChecked="True"
+                                                          Style="{StaticResource SkinSegment}"
+                                                          Click="PreviewPlaybackToggle_Click"
+                                                          AutomationProperties.Name="Pause animated skin previews" />
+                                            <Border Style="{StaticResource SkinSegmentGroup}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <ToggleButton x:Name="AssetCanvasButton"
+                                                                  Content="Asset"
+                                                                  Tag="Asset"
+                                                                  Style="{StaticResource SkinSegment}"
+                                                                  Click="ElementCenterMode_Click"
+                                                                  IsChecked="True" />
+                                                    <ToggleButton x:Name="GameplayCanvasButton"
+                                                                  Content="Gameplay"
+                                                                  Tag="Gameplay"
+                                                                  Style="{StaticResource SkinSegment}"
+                                                                  Click="ElementCenterMode_Click" />
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
 
                                 <Grid Grid.Row="1">
                                     <Grid x:Name="AssetCanvasPanel"
                                           Margin="12">
-                                        <Border Background="{StaticResource TransparencyGridBrush}"
+                                        <Border x:Name="ElementCompositionSurface"
+                                                Background="{StaticResource TransparencyGridBrush}"
                                                 BorderBrush="{DynamicResource Brush.BorderSubtle}"
                                                 BorderThickness="1"
                                                 CornerRadius="8"
-                                                ClipToBounds="True">
+                                                ClipToBounds="True"
+                                                MouseEnter="ElementCompositionSurface_MouseEnter"
+                                                MouseLeave="ElementCompositionSurface_MouseLeave"
+                                                MouseMove="ElementCompositionSurface_MouseMove"
+                                                PreviewMouseLeftButtonDown="ElementCompositionSurface_MouseLeftButtonDown"
+                                                PreviewMouseLeftButtonUp="ElementCompositionSurface_MouseLeftButtonUp"
+                                                PreviewMouseRightButtonDown="ElementCompositionSurface_MouseRightButtonDown"
+                                                PreviewMouseRightButtonUp="ElementCompositionSurface_MouseRightButtonUp">
                                             <Grid>
                                                 <Viewbox Margin="28"
                                                          Stretch="Uniform">

@@ -138,7 +138,7 @@ jobs:
       - name: Probe replay viewer
         shell: pwsh
         run: |
-          $probe = & 'artifacts/viewer-release/Kumori.ReplayViewer.exe' --probe | ConvertFrom-Json
+          $probe = & 'artifacts/native-tools-release/Kumori.ReplayViewer.exe' --probe | ConvertFrom-Json
           if ($probe.status -ne 'ok' -or $probe.contract_version -ne 1 -or $probe.automapper_compatible -ne $true) {
             throw "Replay viewer probe failed"
           }

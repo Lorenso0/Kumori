@@ -17,6 +17,7 @@ public sealed record AttemptSummary
     public int Misses { get; init; }
     public int Key1Count { get; init; }
     public int Key2Count { get; init; }
+    public double DurationSeconds { get; init; }
     public string ModsKey { get; init; } = "NM";
     public IReadOnlyList<ModEntry> Mods { get; init; } = Array.Empty<ModEntry>();
     public string Artist { get; init; } = "";

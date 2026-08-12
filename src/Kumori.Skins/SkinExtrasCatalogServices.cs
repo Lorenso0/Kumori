@@ -9,7 +9,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Kumori.Core;
 
-namespace Kumori.App.Skins;
+namespace Kumori.Skins;
 
 public sealed class SkinExtrasRemoteCatalog
 {
@@ -71,20 +71,20 @@ public sealed class SkinExtrasCatalogSignature
     public required string Signature { get; init; }
 }
 
-internal sealed record SkinExtrasCatalogFetchResult(
+public sealed record SkinExtrasCatalogFetchResult(
     SkinExtrasRemoteCatalog Catalog,
     string ReleaseTag,
     bool UsedCachedCatalog,
     string Message);
 
-internal static class SkinExtrasCatalogTrust
+public static class SkinExtrasCatalogTrust
 {
     public const string KeyId = "kumori-extras-2026-01";
     public const string PublicKeySubjectPublicKeyInfoBase64 =
         "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEB7/jWKNZL6xAVfNyMIHLAVb/V5mBz8nJXTNAV9LIyhapCdJEOxP+icLenEh8icPSjX/PZ8Zsw9IhThUn/sj+Mg==";
 }
 
-internal sealed class SkinExtrasCatalogClient
+public sealed class SkinExtrasCatalogClient
 {
     internal const string RepositoryRoot = "https://github.com/Lorenso0/Kumori-Extras";
     internal const string LatestReleaseUrl = RepositoryRoot + "/releases/latest";
@@ -202,7 +202,7 @@ internal sealed class SkinExtrasCatalogClient
         }
     }
 
-    internal SkinExtrasRemoteCatalog ParseAndVerify(byte[] catalogBytes, byte[] signatureBytes)
+    public SkinExtrasRemoteCatalog ParseAndVerify(byte[] catalogBytes, byte[] signatureBytes)
     {
         var signature = JsonSerializer.Deserialize<SkinExtrasCatalogSignature>(
                             signatureBytes,
@@ -241,7 +241,7 @@ internal sealed class SkinExtrasCatalogClient
         return catalog;
     }
 
-    internal static string BuildReleaseAssetUrl(string releaseTag, string assetName)
+    public static string BuildReleaseAssetUrl(string releaseTag, string assetName)
     {
         if (!SafeTagPattern.IsMatch(releaseTag) || !SafeAssetPattern.IsMatch(assetName))
             throw new InvalidDataException("The Extras catalog contains an unsafe release asset reference.");
@@ -467,9 +467,9 @@ internal sealed class SkinExtrasCatalogClient
         DateTimeOffset? LastModifiedUtc);
 }
 
-internal sealed record SkinExtrasDownloadProgress(long BytesReceived, long TotalBytes);
+public sealed record SkinExtrasDownloadProgress(long BytesReceived, long TotalBytes);
 
-internal sealed class SkinExtrasPackageDownloader
+public sealed class SkinExtrasPackageDownloader
 {
     private readonly object verifiedFilesGate = new();
     private readonly HttpClient http;
@@ -748,7 +748,7 @@ internal sealed class SkinExtrasPackageDownloader
     }
 }
 
-internal sealed class SkinExtrasRemoteInstall
+public sealed class SkinExtrasRemoteInstall
 {
     public required Guid PackId { get; init; }
     public required int Revision { get; set; }
@@ -760,13 +760,13 @@ internal sealed class SkinExtrasRemoteInstall
     public bool LocallyModified { get; set; }
 }
 
-internal sealed class SkinExtrasRemoteRegistry
+public sealed class SkinExtrasRemoteRegistry
 {
     public int SchemaVersion { get; init; } = 1;
     public Dictionary<Guid, SkinExtrasRemoteInstall> Installs { get; init; } = [];
 }
 
-internal static class SkinExtrasRemoteRegistryStore
+public static class SkinExtrasRemoteRegistryStore
 {
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -815,7 +815,7 @@ internal static class SkinExtrasRemoteRegistryStore
         Path.Combine(extrasRoot, ".kumori", "remote-installs.json");
 }
 
-internal sealed class SkinExtrasSyncJournal
+public sealed class SkinExtrasSyncJournal
 {
     public int SchemaVersion { get; init; } = 1;
     public required string CatalogVersion { get; init; }
@@ -827,7 +827,7 @@ internal sealed class SkinExtrasSyncJournal
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
-internal static class SkinExtrasSyncJournalStore
+public static class SkinExtrasSyncJournalStore
 {
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -881,7 +881,7 @@ internal static class SkinExtrasSyncJournalStore
         System.IO.Path.Combine(extrasRoot, ".kumori", "catalog-sync-journal.json");
 }
 
-internal enum SkinExtrasSyncStage
+public enum SkinExtrasSyncStage
 {
     Checking,
     Planning,
@@ -893,7 +893,7 @@ internal enum SkinExtrasSyncStage
     Failed,
 }
 
-internal sealed record SkinExtrasSyncProgress(
+public sealed record SkinExtrasSyncProgress(
     SkinExtrasSyncStage Stage,
     string Message,
     int CompletedPacks = 0,
@@ -902,7 +902,7 @@ internal sealed record SkinExtrasSyncProgress(
     long TotalBytes = 0,
     bool IsManual = false);
 
-internal sealed record SkinExtrasSyncResult(
+public sealed record SkinExtrasSyncResult(
     int Installed,
     int Updated,
     int Adopted,
@@ -910,7 +910,7 @@ internal sealed record SkinExtrasSyncResult(
     int Unchanged,
     string Message);
 
-internal sealed class SkinExtrasCatalogSyncService
+public sealed class SkinExtrasCatalogSyncService
 {
     private const long FreeSpaceSafetyBytes = 1024L * 1024 * 1024;
     private static readonly Lazy<SkinExtrasCatalogSyncService> SharedLazy =
@@ -918,18 +918,32 @@ internal sealed class SkinExtrasCatalogSyncService
     private readonly object activeRunGate = new();
     private readonly SkinExtrasCatalogClient catalogClient;
     private readonly SkinExtrasPackageDownloader downloader;
+    private readonly string extrasRoot;
+    private readonly string revisionBackupsDirectory;
     private Task<SkinExtrasSyncResult>? activeRun;
     private CancellationTokenSource? activeRunCancellation;
     private bool activeRunIsManual;
 
     public static SkinExtrasCatalogSyncService Shared => SharedLazy.Value;
 
-    internal SkinExtrasCatalogSyncService(
+    public SkinExtrasCatalogSyncService(
         SkinExtrasCatalogClient? catalogClient = null,
-        SkinExtrasPackageDownloader? downloader = null)
+        SkinExtrasPackageDownloader? downloader = null,
+        string? extrasRoot = null,
+        string? revisionBackupsDirectory = null)
     {
         this.catalogClient = catalogClient ?? new SkinExtrasCatalogClient();
         this.downloader = downloader ?? new SkinExtrasPackageDownloader();
+        this.extrasRoot = Path.GetFullPath(
+            extrasRoot ?? AppPaths.SkinExtrasDir);
+        this.revisionBackupsDirectory = Path.GetFullPath(
+            revisionBackupsDirectory
+            ?? (extrasRoot is null
+                ? AppPaths.SkinExtrasRevisionBackupsDir
+                : Path.Combine(
+                    this.extrasRoot,
+                    ".kumori",
+                    "revision-backups")));
     }
 
     public event EventHandler<SkinExtrasSyncProgress>? ProgressChanged;
@@ -996,7 +1010,6 @@ internal sealed class SkinExtrasCatalogSyncService
         bool manual,
         CancellationToken cancellationToken)
     {
-        var extrasRoot = AppPaths.SkinExtrasDir;
         Directory.CreateDirectory(extrasRoot);
         Report(SkinExtrasSyncStage.Checking, manual
             ? "Checking Extras for updates…"
@@ -1194,7 +1207,15 @@ internal sealed class SkinExtrasCatalogSyncService
             ? "Extras are up to date."
             : $"Extras synchronized: {installed} installed, {updated} updated, "
               + $"{adopted} adopted, {withdrawn} withdrawn.";
-        Report(SkinExtrasSyncStage.UpToDate, summary, pending.Count, pending.Count);
+        Report(
+            fetched.UsedCachedCatalog
+                ? SkinExtrasSyncStage.Offline
+                : SkinExtrasSyncStage.UpToDate,
+            fetched.UsedCachedCatalog
+                ? $"{summary} Using the last verified catalog because the network is unavailable."
+                : summary,
+            pending.Count,
+            pending.Count);
         return new SkinExtrasSyncResult(
             installed,
             updated,
@@ -1204,7 +1225,7 @@ internal sealed class SkinExtrasCatalogSyncService
             summary);
     }
 
-    private static SkinExtraPackDescriptor InstallPack(
+    private SkinExtraPackDescriptor InstallPack(
         string extrasRoot,
         SkinExtrasCatalogPack catalogPack,
         SkinExtraPackDescriptor? existing,
@@ -1288,12 +1309,12 @@ internal sealed class SkinExtrasCatalogSyncService
         }
     }
 
-    private static string BackupExistingPack(
+    private string BackupExistingPack(
         SkinExtrasCatalogPack pack,
         SkinExtraPackDescriptor existing)
     {
         var directory = Path.Combine(
-            AppPaths.SkinExtrasRevisionBackupsDir,
+            revisionBackupsDirectory,
             pack.PackId.ToString("D"));
         Directory.CreateDirectory(directory);
         var destination = Path.Combine(
@@ -1307,10 +1328,10 @@ internal sealed class SkinExtrasCatalogSyncService
         return destination;
     }
 
-    private static void PruneBackups(Guid packId)
+    private void PruneBackups(Guid packId)
     {
         var directory = Path.Combine(
-            AppPaths.SkinExtrasRevisionBackupsDir,
+            revisionBackupsDirectory,
             packId.ToString("D"));
         if (!Directory.Exists(directory)) return;
         foreach (var obsolete in Directory.EnumerateFiles(directory, "*.zip")

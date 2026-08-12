@@ -30,8 +30,10 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
     private List<LazerReplayFrame> _frames = new();
     private readonly List<LazerReplayFrame> _recentFrames = new();
     private readonly List<Task> _persistenceTasks = new();
+    private readonly object _disposeGate = new();
     private Task? _readerTask;
     private Task? _healthTask;
+    private Task? _disposeTask;
     private long? _activeAttemptId;
     private long _receivedFrames;
     private LazerReplayFrame? _lastReceivedFrame;
@@ -753,7 +755,20 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
         });
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
+    {
+        lock (_disposeGate)
+        {
+            // Teardown sources can include native process and pipe cleanup.
+            // Start it away from the caller so even a synchronous native wait
+            // cannot freeze WPF's shutdown dispatcher. Repeated shutdown paths
+            // share exactly one teardown operation.
+            _disposeTask ??= Task.Run(disposeCoreAsync);
+            return new ValueTask(_disposeTask);
+        }
+    }
+
+    private async Task disposeCoreAsync()
     {
         _cts.Cancel();
         foreach (var task in new[] { _readerTask, _healthTask })

@@ -25,6 +25,7 @@ public sealed class KumoriSettings
     public BackupSettings Backup { get; set; } = new();
     public DeveloperSettings Developer { get; set; } = new();
     public FarmFinderSettings FarmFinder { get; set; } = new();
+    public DailyWebhookSettings DailyWebhook { get; set; } = new();
 
     public sealed class TrackingSettings
     {
@@ -86,6 +87,7 @@ public sealed class KumoriSettings
         public List<string> CustomSwatches { get; set; } = new();
         public bool HideEmptyElements { get; set; }
         public bool AutoBackupElements { get; set; } = true;
+        public bool PreviewAnimationsEnabled { get; set; } = true;
         public bool ShowCatchExtras { get; set; }
         public bool ShowTaikoExtras { get; set; }
         public bool ShowManiaExtras { get; set; }
@@ -129,6 +131,14 @@ public sealed class KumoriSettings
         /// same replay recovery path as a tosu result-data failure.
         /// </summary>
         public bool ForceReplayRecoveryNextPlay { get; set; }
+    }
+
+    public sealed class DailyWebhookSettings
+    {
+        public bool Enabled { get; set; }
+        public bool ScoreAlertsEnabled { get; set; }
+        public string WebhookUrl { get; set; } = "";
+        public string ScoreAlertsWebhookUrl { get; set; } = "";
     }
 
     public sealed class FarmFinderSettings

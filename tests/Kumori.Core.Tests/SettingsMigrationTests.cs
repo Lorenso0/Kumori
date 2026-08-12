@@ -117,7 +117,7 @@ public class SettingsMigrationTests
         try
         {
             var path = Path.Combine(dir.FullName, "settings.v2.json");
-            File.WriteAllText(path, """{"Tracking":null,"OpenTabletDriver":null,"Startup":null,"Appearance":null}""");
+            File.WriteAllText(path, """{"Tracking":null,"OpenTabletDriver":null,"Startup":null,"Appearance":null,"DailyWebhook":null}""");
 
             var loaded = new SettingsService(path, Path.Combine(dir.FullName, "missing.json")).Load();
 
@@ -126,6 +126,11 @@ public class SettingsMigrationTests
             Assert.NotNull(loaded.Startup);
             Assert.NotNull(loaded.Appearance);
             Assert.NotNull(loaded.Appearance.CustomTheme);
+            Assert.NotNull(loaded.DailyWebhook);
+            Assert.False(loaded.DailyWebhook.Enabled);
+            Assert.False(loaded.DailyWebhook.ScoreAlertsEnabled);
+            Assert.Empty(loaded.DailyWebhook.WebhookUrl);
+            Assert.Empty(loaded.DailyWebhook.ScoreAlertsWebhookUrl);
         }
         finally
         {

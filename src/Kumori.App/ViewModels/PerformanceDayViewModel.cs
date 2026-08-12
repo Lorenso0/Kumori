@@ -50,6 +50,11 @@ public partial class PerformanceDayViewModel : ObservableObject
     public string CompletionText => Invariant($"{CompletionRate:0}%");
     public string AccuracyText => Invariant($"{Model.AverageAccuracy:0.00}%");
     public string BestPpText => Invariant($"{Model.BestPp:0.0}pp");
+    public string ResultStatsLine => Invariant(
+        $"{Model.Attempts:N0} plays  ·  {Model.Completed:N0} completed ({CompletionRate:0}%)  ·  {Model.AverageAccuracy:0.00}% avg  ·  {Model.BestPp:0.0}pp best");
+    public string ActivityStatsLine => Invariant(
+        $"{Model.ZTotal + Model.XTotal:N0} key presses  ·  {FormatPlaytime(Model.TotalDurationSeconds)} active playtime  ·  {Model.TotalMisses:N0} misses");
+    public string ChangeStatsLine => $"PP {PpChangeText}  ·  Rank {RankChangeText}";
     public string PpChangeText => Model.PpChange is { } change
         ? Invariant($"{change:+0.0;-0.0;0.0}pp")
         : "—";
@@ -103,4 +108,14 @@ public partial class PerformanceDayViewModel : ObservableObject
         CultureInfo.InvariantCulture,
         DateTimeStyles.None,
         out date);
+
+    private static string FormatPlaytime(double seconds)
+    {
+        var totalMinutes = Math.Max(0, (long)Math.Round(seconds / 60d));
+        var hours = totalMinutes / 60;
+        var minutes = totalMinutes % 60;
+        return hours > 0
+            ? Invariant($"{hours}h {minutes:00}m")
+            : Invariant($"{minutes}m");
+    }
 }

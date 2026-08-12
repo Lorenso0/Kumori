@@ -72,6 +72,8 @@ public static class AppPaths
 
     public static string ViewerRuntimeDir => Path.Combine(RuntimeDir, "replay-viewer");
 
+    public static string NativeToolsRuntimeDir => Path.Combine(RuntimeDir, "native-tools");
+
     public static string StableReplayComparisonsDir => Path.Combine(RuntimeDir, "debug", "stable-replay-comparisons");
 
     public static string FixturesDir => Path.Combine(RuntimeDir, "fixtures");
@@ -100,6 +102,8 @@ public static class AppPaths
         Path.Combine(CacheDir, "farm-finder", "beatmaps");
 
     public static string FarmFinderCredentialsFile => Path.Combine(ConfigDir, "farm-finder.credentials");
+
+    public static string DailyWebhookStateFile => Path.Combine(ConfigDir, "daily-webhook.state");
 
     public static string LogDir => Path.Combine(AppDataDir, "logs");
 

@@ -21,6 +21,7 @@ public sealed partial class TosuClient
             Name = name,
             TotalPp = GetDouble(profile, "performancePoints") ?? GetDouble(profile, "totalPp") ?? GetDouble(profile, "total_pp") ?? GetDouble(profile, "pp"),
             GlobalRank = GetLong(profile, "rank") ?? GetLong(profile, "globalRank") ?? GetLong(profile, "global_rank"),
+            CountryRank = GetLong(profile, "countryRank") ?? GetLong(profile, "country_rank"),
             Accuracy = GetDouble(profile, "accuracy"),
             PlayCount = GetLong(profile, "playCount") ?? GetLong(profile, "play_count"),
             Level = GetDouble(profile, "level"),
@@ -272,7 +273,10 @@ public sealed partial class TosuClient
     }
 
     private readonly record struct PerformanceValues(double? Current, double? Fc, double? Max);
-    private readonly record struct ParsedModPayload(IReadOnlyList<AttemptMod> Mods, bool IsExplicit);
+    private readonly record struct ParsedModPayload(
+        IReadOnlyList<AttemptMod> Mods,
+        bool IsExplicit,
+        bool IsAuthoritativeResult);
 
     private static bool TryGetObject(JsonElement root, string name, out JsonElement obj)
     {
@@ -360,8 +364,7 @@ public sealed partial class TosuClient
 
                 explicitPayloadSeen = true;
                 IReadOnlyList<AttemptMod> parsed = ParseMods(candidate);
-                if (parsed.Count > 0)
-                    return new ParsedModPayload(parsed, true);
+                return new ParsedModPayload(parsed, true, true);
             }
         }
 
@@ -370,10 +373,10 @@ public sealed partial class TosuClient
             explicitPayloadSeen = true;
             IReadOnlyList<AttemptMod> parsed = ParseMods(play);
             if (parsed.Count > 0)
-                return new ParsedModPayload(parsed, true);
+                return new ParsedModPayload(parsed, true, false);
         }
 
-        return new ParsedModPayload([], explicitPayloadSeen);
+        return new ParsedModPayload([], explicitPayloadSeen, false);
     }
 
     private static IEnumerable<JsonElement> ResultModSources(JsonElement root)
@@ -397,9 +400,12 @@ public sealed partial class TosuClient
         IReadOnlyList<AttemptMod> parsedMods,
         IReadOnlyList<AttemptMod> previousMods,
         OsuClientKind clientKind,
-        bool continuousAttemptTelemetry)
+        bool continuousAttemptTelemetry,
+        bool authoritativeResult)
     {
-        if (clientKind != OsuClientKind.Lazer || !continuousAttemptTelemetry)
+        if (clientKind != OsuClientKind.Lazer
+            || !continuousAttemptTelemetry
+            || authoritativeResult)
             return parsedMods;
 
         AttemptMod? previousBpm = previousMods.FirstOrDefault(IsBpmAdjust);

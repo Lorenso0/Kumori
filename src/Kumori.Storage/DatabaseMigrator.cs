@@ -5,7 +5,7 @@ namespace Kumori.Storage;
 /// <summary>Ordered, transactional migrations for additive application-owned schema changes.</summary>
 internal static class DatabaseMigrator
 {
-    private const int CurrentVersion = 3;
+    private const int CurrentVersion = 4;
 
     public static void Apply(SqliteConnection connection)
     {
@@ -22,6 +22,9 @@ internal static class DatabaseMigrator
                     break;
                 case 3:
                     ApplyVersion3(connection, transaction);
+                    break;
+                case 4:
+                    ApplyVersion4(connection, transaction);
                     break;
                 default:
                     throw new InvalidOperationException($"No database migration exists for version {next}.");
@@ -69,6 +72,34 @@ internal static class DatabaseMigrator
 
             CREATE INDEX IF NOT EXISTS idx_attempt_started_utc ON attempts(started_at_utc_ms DESC);
             CREATE INDEX IF NOT EXISTS idx_session_started_utc ON sessions(started_at_utc_ms DESC);
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static void ApplyVersion4(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS score_webhook_deliveries(
+                attempt_id INTEGER PRIMARY KEY REFERENCES attempts(id) ON DELETE CASCADE,
+                player_id INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'pending',
+                verification_attempts INTEGER NOT NULL DEFAULT 0,
+                api_failure_attempts INTEGER NOT NULL DEFAULT 0,
+                delivery_attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                confirmed_rank INTEGER,
+                confirmed_score_id INTEGER,
+                replay_deadline_at TEXT,
+                replay_status TEXT,
+                failure_category TEXT,
+                delivered_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_score_webhook_due
+                ON score_webhook_deliveries(state, next_attempt_at);
             """;
         command.ExecuteNonQuery();
     }

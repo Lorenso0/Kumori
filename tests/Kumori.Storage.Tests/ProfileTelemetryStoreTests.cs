@@ -90,6 +90,62 @@ public sealed class ProfileTelemetryStoreTests : IDisposable
     }
 
     [Fact]
+    public void CountryRank_IsMigratedAndStoredWithLatestProfileSnapshot()
+    {
+        var store = new ProfileTelemetryStore(new SqliteConnectionFactory(_path, readOnly: false));
+        store.Ingest(Snapshot(1, "First", 100, 1_000, 10));
+
+        Assert.True(store.RecordCountryRank(
+            1, 25, "nl", DateTimeOffset.FromUnixTimeSeconds(1_700_000_100)));
+
+        using var verify = new SqliteConnection($"Data Source={_path}");
+        verify.Open();
+        using var query = verify.CreateCommand();
+        query.CommandText = "SELECT country_rank, country_code FROM profile_snapshots ORDER BY id DESC LIMIT 1";
+        using var reader = query.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(25, reader.GetInt64(0));
+        Assert.Equal("NL", reader.GetString(1));
+    }
+
+    [Fact]
+    public void ExistingProfileSchema_GainsCountryRankWithoutLosingHistory()
+    {
+        using (var con = new SqliteConnection($"Data Source={_path}"))
+        {
+            con.Open();
+            using var command = con.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE profile_snapshots(
+                    id INTEGER PRIMARY KEY, captured_at TEXT NOT NULL,
+                    session_id INTEGER, player_id INTEGER, player_name TEXT,
+                    total_pp REAL, global_rank INTEGER, accuracy REAL,
+                    play_count INTEGER, level REAL, ranked_score INTEGER,
+                    country_code TEXT, fingerprint TEXT NOT NULL);
+                INSERT INTO profile_snapshots(
+                    captured_at, player_id, player_name, total_pp, global_rank,
+                    play_count, country_code, fingerprint)
+                VALUES('2026-08-10T20:00:00+00:00', 1, 'First', 100, 1000, 10, 'NL', '{}');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var store = new ProfileTelemetryStore(new SqliteConnectionFactory(_path, readOnly: false));
+
+        Assert.Equal(1, store.GetCurrentIdentity()!.PlayerId);
+        Assert.True(store.RecordCountryRank(1, 25, "NL", DateTimeOffset.UtcNow));
+
+        using var verify = new SqliteConnection($"Data Source={_path}");
+        verify.Open();
+        using var query = verify.CreateCommand();
+        query.CommandText = "SELECT COUNT(*), MAX(country_rank) FROM profile_snapshots";
+        using var reader = query.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(2, reader.GetInt64(0));
+        Assert.Equal(25, reader.GetInt64(1));
+    }
+
+    [Fact]
     public async Task DeferredPersistence_DoesNotTouchSqliteOnIngestThread()
     {
         Func<CancellationToken, Task>? deferred = null;

@@ -6,7 +6,7 @@ namespace Kumori.App.ViewModels;
 /// <summary>Calendar-day separator for the main play history.</summary>
 public sealed class DayRowViewModel : HistoryRowViewModel
 {
-    private readonly string _playStatsLine;
+    private readonly string _resultStatsLine;
     private double? _ppChange;
 
     public DayRowViewModel(
@@ -23,12 +23,21 @@ public sealed class DayRowViewModel : HistoryRowViewModel
         var completed = attempts.Count(attempt =>
             string.Equals(attempt.Model.Outcome, "completed", StringComparison.OrdinalIgnoreCase));
         var bestPp = attempts.Count == 0 ? 0 : attempts.Max(attempt => attempt.Model.Pp);
-        _playStatsLine = Invariant($"{attempts.Count:N0} plays  ·  {completed:N0} completed  ·  {bestPp:0.0}pp best");
+        var keyPresses = attempts.Sum(attempt =>
+            (long)attempt.Model.Key1Count + attempt.Model.Key2Count);
+        // Attempt duration is time actively spent in a map. Session gaps and
+        // idle time are deliberately not represented in this daily total.
+        var activePlaytime = FormatPlaytime(attempts.Sum(attempt =>
+            Math.Max(0, attempt.Model.DurationSeconds)));
+        _resultStatsLine = Invariant($"{attempts.Count:N0} plays  ·  {completed:N0} completed  ·  {bestPp:0.0}pp best");
+        ActivityStatsLine = Invariant($"{keyPresses:N0} key presses  ·  {activePlaytime} active playtime");
     }
 
     public string DayKey { get; }
     public string HeaderLine { get; }
-    public string StatsLine => $"PP gained {PpChangeText}  ·  {_playStatsLine}";
+    public string PrimaryStatsLine => $"PP gained {PpChangeText}  ·  {_resultStatsLine}";
+    public string ActivityStatsLine { get; }
+    public string StatsLine => $"{PrimaryStatsLine}  ·  {ActivityStatsLine}";
     public string PpChangeText => _ppChange is { } change
         ? Invariant($"{change:+0.0;-0.0;0.0}pp")
         : "—";
@@ -44,6 +53,17 @@ public sealed class DayRowViewModel : HistoryRowViewModel
 
         _ppChange = ppChange;
         OnPropertyChanged(nameof(PpChangeText));
+        OnPropertyChanged(nameof(PrimaryStatsLine));
         OnPropertyChanged(nameof(StatsLine));
+    }
+
+    private static string FormatPlaytime(double seconds)
+    {
+        var totalMinutes = Math.Max(0, (long)Math.Round(seconds / 60d));
+        var hours = totalMinutes / 60;
+        var minutes = totalMinutes % 60;
+        return hours > 0
+            ? Invariant($"{hours}h {minutes:00}m")
+            : Invariant($"{minutes}m");
     }
 }

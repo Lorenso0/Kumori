@@ -15,8 +15,10 @@ public sealed class DatabaseMigrationTests : IDisposable
         using var connection = factory.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT value FROM metadata WHERE key='schema_version'";
-        Assert.Equal("3", command.ExecuteScalar());
+        Assert.Equal("4", command.ExecuteScalar());
         command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('attempts') WHERE name='started_at_utc_ms'";
+        Assert.Equal(1L, command.ExecuteScalar());
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('score_webhook_deliveries') WHERE name='api_failure_attempts'";
         Assert.Equal(1L, command.ExecuteScalar());
     }
 
@@ -37,8 +39,10 @@ public sealed class DatabaseMigrationTests : IDisposable
         using var migrated = factory.Open();
         using var check = migrated.CreateCommand();
         check.CommandText = "SELECT value FROM metadata WHERE key = 'schema_version'";
-        Assert.Equal("3", check.ExecuteScalar());
+        Assert.Equal("4", check.ExecuteScalar());
         check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='ended_at_utc_ms'";
+        Assert.Equal(1L, check.ExecuteScalar());
+        check.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='score_webhook_deliveries'";
         Assert.Equal(1L, check.ExecuteScalar());
     }
 

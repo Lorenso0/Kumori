@@ -47,6 +47,82 @@
             <Setter Property="HorizontalContentAlignment" Value="Left" />
         </Style>
 
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="{DynamicResource Brush.AppBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TabPanel Grid.Row="0"
+                                      IsItemsHost="True"
+                                      Background="{TemplateBinding Background}"
+                                      Margin="4,0,0,-1"
+                                      KeyboardNavigation.TabIndex="1" />
+                            <Border Grid.Row="1"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="6">
+                                <ContentPresenter ContentSource="SelectedContent"
+                                                  Margin="0"
+                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextSecondary}" />
+            <Setter Property="Background" Value="{DynamicResource Brush.ControlBackground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.SubtleBorder}" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Panel.ZIndex" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="HeaderBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1,1,1,0"
+                                CornerRadius="5,5,0,0"
+                                Margin="0,0,0,-1"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource Brush.ControlHoverBackground}" />
+                                <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="{DynamicResource Brush.AccentPurple}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Brush.TextPrimary}" />
+                                <Setter Property="Panel.ZIndex" Value="2" />
+                                <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource Brush.AppBackground}" />
+                                <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="{DynamicResource Brush.AccentPink}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="Padding" Value="8,5" />
@@ -147,8 +223,15 @@
             </StackPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PanningMode="VerticalOnly">
-            <StackPanel Margin="14,16,10,16">
+        <TabControl Grid.Row="1"
+                    Margin="10,8,10,0"
+                    Background="{DynamicResource Brush.AppBackground}"
+                    AutomationProperties.Name="Settings categories">
+            <TabItem Header="General">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              PanningMode="VerticalOnly">
+                    <StackPanel Margin="4,12,0,16">
                 <Border Style="{StaticResource SettingsCard}">
                     <StackPanel>
                         <TextBlock Text="Appearance" Style="{StaticResource SettingsTitle}" />
@@ -536,8 +619,55 @@
                     </StackPanel>
                 </Border>
 
-            </StackPanel>
-        </ScrollViewer>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Webhooks">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              PanningMode="VerticalOnly">
+                    <StackPanel Margin="4,12,0,16">
+                        <Border Style="{StaticResource SettingsCard}">
+                            <StackPanel>
+                                <TextBlock Text="Discord Updates" Style="{StaticResource SettingsTitle}" />
+                                <TextBlock Text="Send daily performance summaries and confirmed online personal-best alerts to independent Discord webhooks."
+                                           Style="{StaticResource SettingsHint}" />
+                                <CheckBox x:Name="DailyWebhookEnabled" Content="Send daily progress updates" />
+                                <Label Content="Daily update webhook URL"
+                                       Target="{Binding ElementName=DailyWebhookUrl}"
+                                       Style="{StaticResource SettingsFieldLabel}" />
+                                <TextBox x:Name="DailyWebhookUrl"
+                                         AutomationProperties.Name="Daily Discord webhook URL"
+                                         AutomationProperties.HelpText="Paste a Discord webhook URL. The URL contains a secret; do not share it." />
+                                <Button x:Name="SendDailyWebhookTest"
+                                        Content="Test daily update"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,8,0,0"
+                                        Click="SendDailyWebhookTest_Click"
+                                        AutomationProperties.Name="Send a test daily Discord update" />
+                                <Separator Margin="0,14,0,12" />
+                                <CheckBox x:Name="ScoreWebhookEnabled"
+                                          Content="Send confirmed online PB alerts with replay attachments"
+                                          ToolTip="Requires osu! API credentials configured in Farm Finder." />
+                                <Label Content="PB alert webhook URL"
+                                       Target="{Binding ElementName=ScoreWebhookUrl}"
+                                       Style="{StaticResource SettingsFieldLabel}" />
+                                <TextBox x:Name="ScoreWebhookUrl"
+                                         AutomationProperties.Name="Personal best Discord webhook URL"
+                                         AutomationProperties.HelpText="Paste the separate Discord webhook URL used for PB alerts." />
+                                <Button x:Name="SendScoreWebhookTest"
+                                        Content="Test PB alert"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,8,0,0"
+                                        Click="SendScoreWebhookTest_Click"
+                                        AutomationProperties.Name="Send a test personal best Discord alert" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
 
         <Border Grid.Row="2" BorderBrush="{DynamicResource Brush.SubtleBorder}" BorderThickness="0,1,0,0" Padding="14,10">
             <Grid>

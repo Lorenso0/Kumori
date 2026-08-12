@@ -276,6 +276,32 @@ public sealed class ReplayFrameCaptureLifecycleTests : IDisposable
         Assert.Equal(100, metadata.SampleCount);
     }
 
+    [Fact]
+    public async Task Dispose_is_idempotent_and_never_runs_blocking_source_teardown_on_caller()
+    {
+        var source = new BlockingDisposeSource();
+        var capture = new LazerReplayFrameCaptureService(
+            new AppStateStore(),
+            new SqliteConnectionFactory(databasePath, readOnly: false),
+            () => null,
+            source);
+
+        var started = DateTime.UtcNow;
+        Task first = capture.DisposeAsync().AsTask();
+        Task second = capture.DisposeAsync().AsTask();
+
+        Assert.True(
+            DateTime.UtcNow - started < TimeSpan.FromSeconds(1),
+            "DisposeAsync synchronously blocked its caller.");
+        Assert.Same(first, second);
+        Assert.True(source.Entered.Wait(TimeSpan.FromSeconds(2)));
+        Assert.False(first.IsCompleted);
+
+        source.Release.Set();
+        await first.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(1, source.DisposeCalls);
+    }
+
     private static AttemptFinalization Finalization(AttemptStart start) => new(
         "completed",
         "results",
@@ -332,6 +358,30 @@ public sealed class ReplayFrameCaptureLifecycleTests : IDisposable
         {
             Finalized = true;
             return frames;
+        }
+    }
+
+    private sealed class BlockingDisposeSource
+        : ILazerReplayFrameSource, IAsyncDisposable
+    {
+        public ManualResetEventSlim Entered { get; } = new();
+        public ManualResetEventSlim Release { get; } = new();
+        public int DisposeCalls { get; private set; }
+
+        public async IAsyncEnumerable<LazerReplayFrame> ReadFramesAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation]
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            yield break;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCalls++;
+            Entered.Set();
+            Release.Wait();
+            return ValueTask.CompletedTask;
         }
     }
 

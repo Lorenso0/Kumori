@@ -7,7 +7,7 @@ namespace Kumori.Storage;
 
 public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatingCache
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     private static readonly JsonSerializerOptions jsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -411,7 +411,8 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
             using var connection = factory.Open();
             using var command = connection.CreateCommand();
             command.CommandText = """
-                SELECT user_id, username, global_rank, total_pp, rank_updated_at, scores_updated_at
+                SELECT user_id, username, global_rank, total_pp, rank_updated_at,
+                       scores_updated_at, score_metadata_version
                 FROM farm_players
                 WHERE global_rank BETWEEN @minimum AND @maximum
                 ORDER BY global_rank, user_id
@@ -430,9 +431,70 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                     DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
                     reader.IsDBNull(5)
                         ? null
-                        : DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture)));
+                        : DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture),
+                    reader.GetInt32(6)));
             }
             return results;
+        }, cancellationToken);
+    }
+
+    public async Task<FarmScoreMetadataRepairStatus> GetScoreMetadataRepairStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        return await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var connection = factory.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT COUNT(*),
+                       COALESCE(SUM(CASE WHEN score_metadata_version < @version THEN 1 ELSE 0 END), 0)
+                FROM farm_players
+                """;
+            command.Parameters.AddWithValue("@version", FarmScoreMetadata.CurrentVersion);
+            using var reader = command.ExecuteReader();
+            reader.Read();
+            return new FarmScoreMetadataRepairStatus(
+                reader.GetInt32(0),
+                reader.GetInt32(1));
+        }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<FarmPlayer>> GetPlayersNeedingScoreMetadataRepairAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        return await Task.Run<IReadOnlyList<FarmPlayer>>(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var connection = factory.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT user_id, username, global_rank, total_pp, rank_updated_at,
+                       scores_updated_at, score_metadata_version
+                FROM farm_players
+                WHERE score_metadata_version < @version
+                ORDER BY global_rank, user_id
+                """;
+            command.Parameters.AddWithValue("@version", FarmScoreMetadata.CurrentVersion);
+            using var reader = command.ExecuteReader();
+            var players = new List<FarmPlayer>();
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                players.Add(new FarmPlayer(
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    reader.GetInt32(2),
+                    reader.GetDouble(3),
+                    DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
+                    reader.IsDBNull(5)
+                        ? null
+                        : DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture),
+                    reader.GetInt32(6)));
+            }
+            return players;
         }, cancellationToken);
     }
 
@@ -454,11 +516,13 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                     INSERT INTO farm_beatmaps(
                         beatmap_id, beatmapset_id, artist, title, difficulty, mapper,
                         base_bpm, hit_length_seconds, total_length_seconds, star_rating,
-                        status, ranked_at, cover_url, updated_at)
+                        status, ranked_at, cover_url, circle_size, approach_rate,
+                        overall_difficulty, drain_rate, updated_at)
                     VALUES(
                         @beatmap_id, @beatmapset_id, @artist, @title, @difficulty, @mapper,
                         @base_bpm, @hit_length, @total_length, @stars,
-                        @status, @ranked_at, @cover_url, @updated_at)
+                        @status, @ranked_at, @cover_url, @circle_size, @approach_rate,
+                        @overall_difficulty, @drain_rate, @updated_at)
                     ON CONFLICT(beatmap_id) DO UPDATE SET
                         beatmapset_id=excluded.beatmapset_id,
                         artist=excluded.artist,
@@ -472,6 +536,10 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                         status=excluded.status,
                         ranked_at=excluded.ranked_at,
                         cover_url=excluded.cover_url,
+                        circle_size=excluded.circle_size,
+                        approach_rate=excluded.approach_rate,
+                        overall_difficulty=excluded.overall_difficulty,
+                        drain_rate=excluded.drain_rate,
                         updated_at=excluded.updated_at
                     """;
                 AddBeatmapParameters(command, beatmap);
@@ -495,11 +563,15 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                     INSERT INTO farm_scores(
                         score_id, user_id, beatmap_id, pp, accuracy, miss_count,
                         max_combo, is_full_combo, ended_at, actual_mods_json,
-                        canonical_mod_signature, clock_rate)
+                        canonical_mod_signature, clock_rate, score_origin,
+                        legacy_score_id, total_score, legacy_total_score, build_id,
+                        source_type)
                     VALUES(
                         @score_id, @user_id, @beatmap_id, @pp, @accuracy, @miss_count,
                         @max_combo, @is_full_combo, @ended_at, @actual_mods_json,
-                        @canonical_mod_signature, @clock_rate)
+                        @canonical_mod_signature, @clock_rate, @score_origin,
+                        @legacy_score_id, @total_score, @legacy_total_score, @build_id,
+                        @source_type)
                     """;
                 command.Parameters.AddWithValue("@score_id", score.ScoreId);
                 command.Parameters.AddWithValue("@user_id", score.UserId);
@@ -513,6 +585,12 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                 command.Parameters.AddWithValue("@actual_mods_json", JsonSerializer.Serialize(score.ActualMods, jsonOptions));
                 command.Parameters.AddWithValue("@canonical_mod_signature", score.CanonicalModSignature);
                 command.Parameters.AddWithValue("@clock_rate", score.ClockRate);
+                command.Parameters.AddWithValue("@score_origin", score.Origin.ToString().ToLowerInvariant());
+                AddNullable(command, "@legacy_score_id", score.LegacyScoreId);
+                AddNullable(command, "@total_score", score.TotalScore);
+                AddNullable(command, "@legacy_total_score", score.LegacyTotalScore);
+                AddNullable(command, "@build_id", score.BuildId);
+                AddNullable(command, "@source_type", score.SourceType);
                 command.ExecuteNonQuery();
             }
             using (var update = connection.CreateCommand())
@@ -520,11 +598,13 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                 update.Transaction = transaction;
                 update.CommandText = """
                     UPDATE farm_players
-                    SET scores_updated_at=@updated
+                    SET scores_updated_at=@updated,
+                        score_metadata_version=@metadata_version
                     WHERE user_id=@user_id
                     """;
                 update.Parameters.AddWithValue("@updated", (payload.Player.ScoresUpdatedAt ?? DateTimeOffset.UtcNow).ToUniversalTime().ToString("O"));
                 update.Parameters.AddWithValue("@user_id", payload.Player.UserId);
+                update.Parameters.AddWithValue("@metadata_version", FarmScoreMetadata.CurrentVersion);
                 update.ExecuteNonQuery();
             }
             transaction.Commit();
@@ -673,11 +753,15 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                 : $"WHERE {string.Join(Environment.NewLine + "  AND ", predicates)}";
             command.CommandText = $"""
                 SELECT
-                    p.user_id, p.username, p.global_rank, p.total_pp, p.rank_updated_at, p.scores_updated_at,
+                    p.user_id, p.username, p.global_rank, p.total_pp, p.rank_updated_at,
+                    p.scores_updated_at, p.score_metadata_version,
                     s.score_id, s.beatmap_id, s.pp, s.accuracy, s.miss_count, s.max_combo,
                     s.is_full_combo, s.ended_at, s.actual_mods_json, s.canonical_mod_signature, s.clock_rate,
+                    s.score_origin, s.legacy_score_id, s.total_score, s.legacy_total_score,
+                    s.build_id, s.source_type,
                     b.beatmapset_id, b.artist, b.title, b.difficulty, b.mapper, b.base_bpm,
-                    b.hit_length_seconds, b.total_length_seconds, b.star_rating, b.status, b.ranked_at, b.cover_url
+                    b.hit_length_seconds, b.total_length_seconds, b.star_rating, b.status, b.ranked_at, b.cover_url,
+                    b.circle_size, b.approach_rate, b.overall_difficulty, b.drain_rate
                 FROM farm_scores s
                 JOIN farm_players p ON p.user_id=s.user_id
                 JOIN farm_beatmaps b ON b.beatmap_id=s.beatmap_id
@@ -700,30 +784,43 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                         DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
                         reader.IsDBNull(5)
                             ? null
-                            : DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture));
+                            : DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture),
+                        reader.GetInt32(6));
                     players.Add(userId, player);
                 }
-                var modsJson = reader.GetString(14);
+                var modsJson = reader.GetString(15);
                 if (!modSets.TryGetValue(modsJson, out var mods))
                 {
                     mods = JsonSerializer.Deserialize<FarmMod[]>(modsJson, jsonOptions) ?? [];
                     modSets.Add(modsJson, mods);
                 }
                 var score = new FarmScore(
-                    reader.GetInt64(6), player.UserId, reader.GetInt64(7), reader.GetDouble(8),
-                    reader.GetDouble(9), reader.GetInt32(10), reader.GetInt32(11), reader.GetInt32(12) != 0,
-                    DateTimeOffset.Parse(reader.GetString(13), CultureInfo.InvariantCulture),
-                    mods, reader.GetString(15), reader.GetDouble(16));
+                    reader.GetInt64(7), player.UserId, reader.GetInt64(8), reader.GetDouble(9),
+                    reader.GetDouble(10), reader.GetInt32(11), reader.GetInt32(12), reader.GetInt32(13) != 0,
+                    DateTimeOffset.Parse(reader.GetString(14), CultureInfo.InvariantCulture),
+                    mods, reader.GetString(16), reader.GetDouble(17),
+                    ParseScoreOrigin(reader.GetString(18)),
+                    reader.IsDBNull(19) ? null : reader.GetInt64(19),
+                    reader.IsDBNull(20) ? null : reader.GetInt64(20),
+                    reader.IsDBNull(21) ? null : reader.GetInt64(21),
+                    reader.IsDBNull(22) ? null : reader.GetInt32(22),
+                    reader.IsDBNull(23) ? null : reader.GetString(23));
                 if (!beatmaps.TryGetValue(score.BeatmapId, out var beatmap))
                 {
                     beatmap = new FarmBeatmap(
-                        score.BeatmapId, reader.GetInt64(17), reader.GetString(18), reader.GetString(19),
-                        reader.GetString(20), reader.GetString(21), reader.GetDouble(22), reader.GetInt32(23),
-                        reader.GetInt32(24), reader.GetDouble(25), reader.GetString(26),
-                        reader.IsDBNull(27)
+                        score.BeatmapId, reader.GetInt64(24), reader.GetString(25), reader.GetString(26),
+                        reader.GetString(27), reader.GetString(28), reader.GetDouble(29), reader.GetInt32(30),
+                        reader.GetInt32(31), reader.GetDouble(32), reader.GetString(33),
+                        reader.IsDBNull(34)
                             ? null
-                            : DateTimeOffset.Parse(reader.GetString(27), CultureInfo.InvariantCulture),
-                        reader.GetString(28));
+                            : DateTimeOffset.Parse(reader.GetString(34), CultureInfo.InvariantCulture),
+                        reader.GetString(35))
+                    {
+                        CircleSize = reader.IsDBNull(36) ? null : reader.GetDouble(36),
+                        ApproachRate = reader.IsDBNull(37) ? null : reader.GetDouble(37),
+                        OverallDifficulty = reader.IsDBNull(38) ? null : reader.GetDouble(38),
+                        DrainRate = reader.IsDBNull(39) ? null : reader.GetDouble(39),
+                    };
                     beatmaps.Add(score.BeatmapId, beatmap);
                 }
                 results.Add(new FarmScoreCandidate(player, score, beatmap));
@@ -813,6 +910,28 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
         }, cancellationToken);
     }
 
+    public Task UpdateBeatmapDifficultyAsync(
+        FarmBeatmap beatmap,
+        CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            """
+            UPDATE farm_beatmaps
+            SET circle_size=@circle_size,
+                approach_rate=@approach_rate,
+                overall_difficulty=@overall_difficulty,
+                drain_rate=@drain_rate
+            WHERE beatmap_id=@beatmap_id
+            """,
+            command =>
+            {
+                command.Parameters.AddWithValue("@beatmap_id", beatmap.BeatmapId);
+                AddNullable(command, "@circle_size", beatmap.CircleSize);
+                AddNullable(command, "@approach_rate", beatmap.ApproachRate);
+                AddNullable(command, "@overall_difficulty", beatmap.OverallDifficulty);
+                AddNullable(command, "@drain_rate", beatmap.DrainRate);
+            },
+            cancellationToken);
+
     private async Task ExecuteAsync(
         string sql,
         Action<SqliteCommand> parameters,
@@ -857,7 +976,8 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                 global_rank INTEGER NOT NULL,
                 total_pp REAL NOT NULL,
                 rank_updated_at TEXT NOT NULL,
-                scores_updated_at TEXT
+                scores_updated_at TEXT,
+                score_metadata_version INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS farm_beatmaps(
                 beatmap_id INTEGER PRIMARY KEY,
@@ -873,6 +993,10 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                 status TEXT NOT NULL,
                 ranked_at TEXT,
                 cover_url TEXT NOT NULL,
+                circle_size REAL,
+                approach_rate REAL,
+                overall_difficulty REAL,
+                drain_rate REAL,
                 updated_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS farm_scores(
@@ -887,7 +1011,13 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                 ended_at TEXT NOT NULL,
                 actual_mods_json TEXT NOT NULL,
                 canonical_mod_signature TEXT NOT NULL,
-                clock_rate REAL NOT NULL
+                clock_rate REAL NOT NULL,
+                score_origin TEXT NOT NULL DEFAULT 'unknown',
+                legacy_score_id INTEGER,
+                total_score INTEGER,
+                legacy_total_score INTEGER,
+                build_id INTEGER,
+                source_type TEXT
             );
             CREATE TABLE IF NOT EXISTS farm_star_ratings(
                 beatmap_id INTEGER NOT NULL REFERENCES farm_beatmaps(beatmap_id) ON DELETE CASCADE,
@@ -966,10 +1096,30 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
                 FROM farm_metadata
                 WHERE key='schema_version'
             ), 0) < 3;
-            INSERT INTO farm_metadata(key, value) VALUES('schema_version', '5')
+            INSERT INTO farm_metadata(key, value) VALUES('schema_version', '6')
             ON CONFLICT(key) DO UPDATE SET value=excluded.value;
             """;
         command.ExecuteNonQuery();
+        EnsureColumn(connection, transaction, "farm_beatmaps", "circle_size", "REAL");
+        EnsureColumn(connection, transaction, "farm_beatmaps", "approach_rate", "REAL");
+        EnsureColumn(connection, transaction, "farm_beatmaps", "overall_difficulty", "REAL");
+        EnsureColumn(connection, transaction, "farm_beatmaps", "drain_rate", "REAL");
+        EnsureColumn(connection, transaction, "farm_players", "score_metadata_version", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(connection, transaction, "farm_scores", "score_origin", "TEXT NOT NULL DEFAULT 'unknown'");
+        EnsureColumn(connection, transaction, "farm_scores", "legacy_score_id", "INTEGER");
+        EnsureColumn(connection, transaction, "farm_scores", "total_score", "INTEGER");
+        EnsureColumn(connection, transaction, "farm_scores", "legacy_total_score", "INTEGER");
+        EnsureColumn(connection, transaction, "farm_scores", "build_id", "INTEGER");
+        EnsureColumn(connection, transaction, "farm_scores", "source_type", "TEXT");
+        using (var metadataIndex = connection.CreateCommand())
+        {
+            metadataIndex.Transaction = transaction;
+            metadataIndex.CommandText = """
+                CREATE INDEX IF NOT EXISTS idx_farm_players_score_metadata
+                ON farm_players(score_metadata_version, global_rank)
+                """;
+            metadataIndex.ExecuteNonQuery();
+        }
         cancellationToken.ThrowIfCancellationRequested();
         transaction.Commit();
     }
@@ -986,6 +1136,11 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
         DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
         DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture));
 
+    private static FarmScoreOrigin ParseScoreOrigin(string value) =>
+        Enum.TryParse<FarmScoreOrigin>(value, ignoreCase: true, out var origin)
+            ? origin
+            : FarmScoreOrigin.Unknown;
+
     private static void AddBeatmapParameters(SqliteCommand command, FarmBeatmap beatmap)
     {
         command.Parameters.AddWithValue("@beatmap_id", beatmap.BeatmapId);
@@ -1001,6 +1156,35 @@ public sealed class FarmFinderRepository : IFarmFinderRepository, IFarmStarRatin
         command.Parameters.AddWithValue("@status", beatmap.Status);
         command.Parameters.AddWithValue("@ranked_at", (object?)beatmap.RankedAt?.ToUniversalTime().ToString("O") ?? DBNull.Value);
         command.Parameters.AddWithValue("@cover_url", beatmap.CoverUrl);
+        AddNullable(command, "@circle_size", beatmap.CircleSize);
+        AddNullable(command, "@approach_rate", beatmap.ApproachRate);
+        AddNullable(command, "@overall_difficulty", beatmap.OverallDifficulty);
+        AddNullable(command, "@drain_rate", beatmap.DrainRate);
+    }
+
+    private static void EnsureColumn(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string table,
+        string column,
+        string definition)
+    {
+        using (var info = connection.CreateCommand())
+        {
+            info.Transaction = transaction;
+            info.CommandText = $"PRAGMA table_info({table})";
+            using var reader = info.ExecuteReader();
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.Transaction = transaction;
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        alter.ExecuteNonQuery();
     }
 
     private static void AppendSafeModPredicates(

@@ -153,7 +153,8 @@ This section is for developers. On Windows, install the [.NET 10 SDK](https://do
 The build script obtains the official osu! `2026.726.0-lazer` source at its
 exact release commit under the ignored `third_party\osu` directory. This
 source pin is used because matching `ppy.osu.Game` NuGet packages have not
-been published for that release.
+been published for that release. It then applies Kumori's tracked, narrowly
+scoped Skin Studio renderer patch.
 
 ```bat
 build-app.cmd
@@ -164,6 +165,12 @@ Build and launch Kumori without running tests:
 ```bat
 run.bat
 ```
+
+`run.bat` launches an unchanged Debug build immediately. When source files
+change, it rebuilds only affected projects and their dependants. Use
+`run.bat rebuild` when you explicitly need to rebuild the complete development
+graph. The command window stays attached while Kumori is running and returns to
+the prompt when the app closes.
 
 For a quick developer build without test and utility projects:
 

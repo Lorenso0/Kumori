@@ -108,7 +108,7 @@ public sealed class SessionRepository
                    COUNT(a.id),
                    SUM(CASE WHEN a.outcome = 'completed' THEN 1 ELSE 0 END),
                    {(hasKeys ? "s.z_count, s.x_count, s.key1_binding, s.key2_binding" : "0, 0, 'Z', 'X'")},
-                   COALESCE(MAX(a.pp), 0),
+                   COALESCE(MAX(CASE WHEN a.outcome='completed' THEN a.pp END), 0),
                    COALESCE(SUM(a.misses), 0),
                    AVG(CASE WHEN a.unstable_rate > 0 THEN a.unstable_rate END),
                    {(hasLegacy ? "s.legacy" : "0")},

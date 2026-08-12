@@ -24,6 +24,36 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
     /// <summary>Raised after profile data or an account-change delta is persisted.</summary>
     public event Action? ProfileUpdated;
 
+    public OsuProfileIdentity? GetCurrentIdentity()
+    {
+        lock (_gate)
+        {
+            ProfileReading? current = null;
+            foreach (var candidate in _latest.Values)
+            {
+                if (current is null || string.CompareOrdinal(candidate.CapturedAt, current.CapturedAt) > 0)
+                    current = candidate;
+            }
+            if (current is not null)
+                return new OsuProfileIdentity(current.PlayerId, current.PlayerName);
+        }
+
+        if (!_factory.DatabaseExists) return null;
+        using var con = _factory.Open();
+        EnsureSchema(con, CancellationToken.None);
+        using var command = con.CreateCommand();
+        command.CommandText = """
+            SELECT player_id, COALESCE(player_name, '')
+            FROM profile_snapshots
+            WHERE player_id IS NOT NULL
+            ORDER BY id DESC LIMIT 1
+            """;
+        using var reader = command.ExecuteReader();
+        return reader.Read()
+            ? new OsuProfileIdentity(reader.GetInt64(0), reader.GetString(1))
+            : null;
+    }
+
     public ProfileTelemetryStore(
         SqliteConnectionFactory factory,
         Func<string, Func<CancellationToken, Task>, Task>? deferPersistence = null)
@@ -67,7 +97,7 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             }
             var current = previous is not null && previous.Matches(profile)
                 ? previous
-                : ProfileReading.From(profile, snapshot.WallTime);
+                : ProfileReading.From(profile, snapshot.WallTime, previous?.CountryRank);
 
             // A profile update is attributed to the oldest completed attempt
             // awaiting an update for this same account. Never cross accounts.
@@ -112,6 +142,64 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             }
         }
         if (updated) ProfileUpdated?.Invoke();
+    }
+
+    /// <summary>
+    /// Adds an official osu! API country-rank observation to the latest local
+    /// profile reading without discarding account fields supplied by tosu.
+    /// </summary>
+    public bool RecordCountryRank(
+        long playerId,
+        long countryRank,
+        string? countryCode,
+        DateTimeOffset capturedAt,
+        CancellationToken cancellationToken = default)
+    {
+        if (playerId <= 0) throw new ArgumentOutOfRangeException(nameof(playerId));
+        if (countryRank <= 0) throw new ArgumentOutOfRangeException(nameof(countryRank));
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ProfileReading? previous;
+        lock (_gate)
+            _latest.TryGetValue(playerId, out previous);
+        previous ??= ReadLatest(playerId, cancellationToken);
+        if (previous is null) return false;
+
+        var normalizedCountry = countryCode?.Trim().ToUpperInvariant();
+        if (normalizedCountry is not { Length: 2 })
+            normalizedCountry = previous.CountryCode;
+        var alreadyObservedToday = DateTimeOffset.TryParse(previous.CapturedAt, out var previousCapturedAt)
+                                   && previousCapturedAt.ToLocalTime().Date
+                                   == capturedAt.ToLocalTime().Date;
+        if (alreadyObservedToday
+            && previous.CountryRank == countryRank
+            && string.Equals(previous.CountryCode, normalizedCountry, StringComparison.Ordinal))
+            return false;
+
+        var reading = previous with
+        {
+            CapturedAt = capturedAt.ToString("O"),
+            CountryRank = countryRank,
+            CountryCode = normalizedCountry,
+        };
+        PersistUpdate(reading, pending: null, cancellationToken);
+        lock (_gate)
+        {
+            _latest[playerId] = reading;
+            if (_pendingProfileWrites.TryGetValue(playerId, out var pending))
+            {
+                _pendingProfileWrites[playerId] = pending with
+                {
+                    Reading = pending.Reading with
+                    {
+                        CountryRank = countryRank,
+                        CountryCode = normalizedCountry,
+                    },
+                };
+            }
+        }
+        ProfileUpdated?.Invoke();
+        return true;
     }
 
     private Task PersistPendingProfileUpdates(long playerId, CancellationToken token)
@@ -232,7 +320,7 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             using var command = con.CreateCommand();
             command.CommandText = """
             SELECT captured_at, player_id, player_name, total_pp, global_rank,
-                   accuracy, play_count, level, ranked_score, country_code
+                   accuracy, play_count, level, ranked_score, country_code, country_rank
             FROM profile_snapshots
             WHERE player_id = @player_id
             ORDER BY id DESC
@@ -298,9 +386,9 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
         command.CommandText = """
             INSERT INTO profile_snapshots(
                 captured_at, player_id, player_name, total_pp, global_rank,
-                accuracy, play_count, level, ranked_score, country_code, fingerprint)
+                accuracy, play_count, level, ranked_score, country_code, country_rank, fingerprint)
             VALUES(@captured_at, @player_id, @player_name, @total_pp, @global_rank,
-                   @accuracy, @play_count, @level, @ranked_score, @country_code, @fingerprint)
+                   @accuracy, @play_count, @level, @ranked_score, @country_code, @country_rank, @fingerprint)
             """;
         AddSnapshotParameters(command, reading);
         command.ExecuteNonQuery();
@@ -359,6 +447,7 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
                 level REAL,
                 ranked_score INTEGER,
                 country_code TEXT,
+                country_rank INTEGER,
                 fingerprint TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_profile_snapshots_player_time
@@ -377,8 +466,29 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             );
             """;
             command.ExecuteNonQuery();
+            EnsureColumn(con, "profile_snapshots", "country_rank", "INTEGER");
             Volatile.Write(ref _schemaEnsured, 1);
         }
+    }
+
+    private static void EnsureColumn(
+        SqliteConnection con,
+        string table,
+        string column,
+        string declaration)
+    {
+        using var info = con.CreateCommand();
+        info.CommandText = $"PRAGMA table_info({table})";
+        using var reader = info.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+        reader.Close();
+        using var alter = con.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {declaration}";
+        alter.ExecuteNonQuery();
     }
 
     private static void AddSnapshotParameters(SqliteCommand command, ProfileReading reading)
@@ -393,13 +503,14 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
         command.Parameters.AddWithValue("@level", (object?)reading.Level ?? DBNull.Value);
         command.Parameters.AddWithValue("@ranked_score", (object?)reading.RankedScore ?? DBNull.Value);
         command.Parameters.AddWithValue("@country_code", (object?)reading.CountryCode ?? DBNull.Value);
+        command.Parameters.AddWithValue("@country_rank", (object?)reading.CountryRank ?? DBNull.Value);
         command.Parameters.AddWithValue("@fingerprint", reading.CreateFingerprint());
     }
 
     private sealed record ProfileReading(
         string CapturedAt, long PlayerId, string PlayerName, double? TotalPp,
         long? GlobalRank, double? Accuracy, long? PlayCount, double? Level,
-        long? RankedScore, string? CountryCode)
+        long? RankedScore, string? CountryCode, long? CountryRank)
     {
         public bool Matches(TosuProfile profile) =>
             PlayerId == profile.Id
@@ -410,6 +521,7 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             && PlayCount == profile.PlayCount
             && Level == profile.Level
             && RankedScore == profile.RankedScore
+            && (profile.CountryRank is null || CountryRank == profile.CountryRank)
             && string.Equals(CountryCode, profile.CountryCode, StringComparison.Ordinal);
 
         public bool Matches(ProfileReading other) =>
@@ -421,6 +533,7 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             && PlayCount == other.PlayCount
             && Level == other.Level
             && RankedScore == other.RankedScore
+            && CountryRank == other.CountryRank
             && string.Equals(CountryCode, other.CountryCode, StringComparison.Ordinal);
 
         public string CreateFingerprint() => JsonSerializer.Serialize(new
@@ -434,14 +547,18 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             Level,
             RankedScore,
             CountryCode,
+            CountryRank,
         });
 
-        public static ProfileReading From(TosuProfile profile, double unixSeconds)
+        public static ProfileReading From(
+            TosuProfile profile,
+            double unixSeconds,
+            long? previousCountryRank = null)
         {
             var capturedAt = DateTimeOffset.FromUnixTimeMilliseconds((long)(unixSeconds * 1000)).ToString("O");
             return new ProfileReading(capturedAt, profile.Id, profile.Name, profile.TotalPp,
                 profile.GlobalRank, profile.Accuracy, profile.PlayCount, profile.Level,
-                profile.RankedScore, profile.CountryCode);
+                profile.RankedScore, profile.CountryCode, profile.CountryRank ?? previousCountryRank);
         }
 
         public static ProfileReading Read(SqliteDataReader reader) => new(
@@ -454,7 +571,8 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             reader.IsDBNull(6) ? null : reader.GetInt64(6),
             reader.IsDBNull(7) ? null : reader.GetDouble(7),
             reader.IsDBNull(8) ? null : reader.GetInt64(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9));
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetInt64(10));
     }
 
     private sealed record PendingProfileWrite(

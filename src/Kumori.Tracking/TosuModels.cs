@@ -42,6 +42,7 @@ public sealed record TosuSnapshot
     public double MaxPp { get; init; }
     public string ModsKey { get; init; } = "NM";
     public IReadOnlyList<AttemptMod> Mods { get; init; } = Array.Empty<AttemptMod>();
+    public bool ModsAreAuthoritativeResult { get; init; }
     public JudgementCapture.PlayValues Play { get; init; } = new();
 
     public string? BeatmapDisplay =>
@@ -57,6 +58,7 @@ public sealed record TosuProfile
     public string Name { get; init; } = "";
     public double? TotalPp { get; init; }
     public long? GlobalRank { get; init; }
+    public long? CountryRank { get; init; }
     public double? Accuracy { get; init; }
     public long? PlayCount { get; init; }
     public double? Level { get; init; }
@@ -69,6 +71,8 @@ public interface IProfileTelemetrySink
 {
     void Ingest(TosuSnapshot snapshot);
 }
+
+public sealed record OsuProfileIdentity(long PlayerId, string PlayerName);
 
 public sealed record BeatmapStats
 {

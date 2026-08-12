@@ -103,6 +103,64 @@ public sealed class OsuApiClientTests
     }
 
     [Fact]
+    public async Task UserProfile_ReturnsOfficialCountryRankAndCountryCode()
+    {
+        using var client = CreateClient(new StubHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/oauth/token")
+                return Task.FromResult(Json("""{"access_token":"token","expires_in":3600}"""));
+            Assert.Equal("/api/v2/users/4214858/osu", request.RequestUri.AbsolutePath);
+            Assert.Contains("key=id", request.RequestUri.Query);
+            return Task.FromResult(Json("""
+                {"country_code":"nl","cover":{"url":"https://assets.ppy.sh/profile-cover.jpeg"},"statistics":{"country_rank":561}}
+                """));
+        }));
+
+        var profile = await client.GetUserProfileStatsAsync(4_214_858);
+
+        Assert.Equal(561, profile.CountryRank);
+        Assert.Equal("NL", profile.CountryCode);
+        Assert.Equal("https://assets.ppy.sh/profile-cover.jpeg", profile.CoverUrl);
+    }
+
+    [Fact]
+    public async Task BeatmapUserScore_ReturnsOverallPositionAndLegacyScoreIdentity()
+    {
+        using var client = CreateClient(new StubHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/oauth/token")
+                return Task.FromResult(Json("""{"access_token":"token","expires_in":3600}"""));
+            Assert.Equal(
+                "/api/v2/beatmaps/123/scores/users/99",
+                request.RequestUri.AbsolutePath);
+            Assert.Contains("mode=osu", request.RequestUri.Query);
+            Assert.Contains("legacy_only=0", request.RequestUri.Query);
+            return Task.FromResult(Json("""
+                {
+                  "position":20,
+                  "score":{
+                    "id":777,"legacy_score_id":555,
+                    "total_score":2000000,"legacy_total_score":1234567,
+                    "accuracy":0.9921,"pp":287.4,"max_combo":640,
+                    "ended_at":"2026-07-25T13:57:00Z",
+                    "statistics":{"great":543,"ok":5,"meh":0,"miss":1},
+                    "mods":[{"acronym":"HD","settings":{}},{"acronym":"DT","settings":{}}]
+                  }
+                }
+                """));
+        }));
+
+        OsuBeatmapUserScore score = Assert.IsType<OsuBeatmapUserScore>(
+            await client.GetBeatmapUserScoreAsync(123, 99));
+
+        Assert.Equal(20, score.Position);
+        Assert.Equal(777, score.ScoreId);
+        Assert.Equal(1_234_567, score.TotalScore);
+        Assert.Equal(["HD", "DT"], score.Mods);
+        Assert.Equal((543, 5, 0, 1), (score.N300, score.N100, score.N50, score.Misses));
+    }
+
+    [Fact]
     public async Task TopScores_ReturnsTopHundredAndRejectsWholeMixedUnrankedCombination()
     {
         using var client = CreateClient(new StubHandler(request =>
@@ -114,12 +172,14 @@ public sealed class OsuApiClientTests
                 [
                   {
                     "id":1001,"pp":321.5,"accuracy":0.9876,"max_combo":900,
+                    "legacy_score_id":998,"total_score":1000000,"legacy_total_score":999000,"build_id":20260730,
                     "ended_at":"2026-01-01T00:00:00Z","is_perfect_combo":true,
                     "statistics":{"miss":0},
                     "mods":[{"acronym":"HD","settings":{}},{"acronym":"DT","settings":{"adjust_pitch":true}},
                             {"acronym":"CL","settings":{"no_slider_head_accuracy":false}}],
                     "beatmap":{"id":50,"beatmapset_id":5,"version":"Insane","bpm":180,
-                      "hit_length":100,"total_length":120,"difficulty_rating":6.2,"status":"ranked"},
+                      "hit_length":100,"total_length":120,"difficulty_rating":6.2,
+                      "cs":4,"ar":9,"accuracy":8,"drain":6,"status":"ranked"},
                     "beatmapset":{"artist":"Artist","title":"Title","creator":"Mapper","status":"ranked",
                       "ranked_date":"2025-01-01T00:00:00Z","covers":{"card":"https://example.test/card.jpg"}}
                   },
@@ -139,11 +199,22 @@ public sealed class OsuApiClientTests
 
         var score = Assert.Single(payload.Scores);
         Assert.Equal(1001, score.ScoreId);
+        Assert.Equal(FarmScoreOrigin.Legacy, score.Origin);
+        Assert.Equal(998, score.LegacyScoreId);
+        Assert.Equal(1_000_000, score.TotalScore);
+        Assert.Equal(999_000, score.LegacyTotalScore);
+        Assert.Equal(20260730, score.BuildId);
+        Assert.True(score.UsesClassicScoring);
         Assert.Equal(["HD", "DT", "CL"], score.ActualMods.Select(mod => mod.Acronym));
         Assert.Contains("\"adjust_pitch\":true", score.ActualMods[1].SettingsJson);
         Assert.Contains(
             "\"no_slider_head_accuracy\":false",
             score.ActualMods[2].SettingsJson);
+        var beatmap = Assert.Single(payload.Beatmaps);
+        Assert.Equal(4, beatmap.CircleSize);
+        Assert.Equal(9, beatmap.ApproachRate);
+        Assert.Equal(8, beatmap.OverallDifficulty);
+        Assert.Equal(6, beatmap.DrainRate);
     }
 
     [Fact]

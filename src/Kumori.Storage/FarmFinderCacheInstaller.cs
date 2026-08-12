@@ -11,6 +11,7 @@ namespace Kumori.Storage;
 public sealed class FarmFinderCacheInstaller : IFarmFinderCacheInstaller, IDisposable
 {
     internal const long MaximumDatabaseBytes = 2L * 1024 * 1024 * 1024;
+    internal const int MinimumInstallableSchemaVersion = 5;
     private const int MaximumManifestBytes = 64 * 1024;
     private static readonly JsonSerializerOptions jsonOptions =
         new(JsonSerializerDefaults.Web);
@@ -82,6 +83,13 @@ public sealed class FarmFinderCacheInstaller : IFarmFinderCacheInstaller, IDispo
                     cancellationToken)
                 .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
+            await Task.Run(
+                    () => ValidateDatabase(
+                        stagingPath,
+                        manifest.SchemaVersion,
+                        exhaustiveIntegrityCheck: false),
+                    cancellationToken)
+                .ConfigureAwait(false);
             if (File.Exists(databasePath))
             {
                 ReportStage(
@@ -94,6 +102,19 @@ public sealed class FarmFinderCacheInstaller : IFarmFinderCacheInstaller, IDispo
                     .ConfigureAwait(false);
             }
 
+            if (manifest.SchemaVersion < FarmFinderRepository.CurrentSchemaVersion)
+            {
+                ReportStage(
+                    progress,
+                    "Download complete · Updating cache format…",
+                    $"Updating the downloaded cache from schema {manifest.SchemaVersion} " +
+                    $"to {FarmFinderRepository.CurrentSchemaVersion} before installation.");
+                await Task.Run(
+                        () => MigrateDownloadedCache(stagingPath),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             ReportStage(
                 progress,
                 "Download complete · Running final checks…",
@@ -102,7 +123,7 @@ public sealed class FarmFinderCacheInstaller : IFarmFinderCacheInstaller, IDispo
             await Task.Run(
                     () => ValidateDatabase(
                         stagingPath,
-                        manifest.SchemaVersion,
+                        FarmFinderRepository.CurrentSchemaVersion,
                         exhaustiveIntegrityCheck: false),
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -141,7 +162,7 @@ public sealed class FarmFinderCacheInstaller : IFarmFinderCacheInstaller, IDispo
             return new FarmCacheInstallResult(
                 downloaded.Bytes,
                 downloaded.Sha256,
-                manifest.SchemaVersion,
+                FarmFinderRepository.CurrentSchemaVersion,
                 manifest.GeneratedAt,
                 replacedExisting);
         }
@@ -242,10 +263,12 @@ public sealed class FarmFinderCacheInstaller : IFarmFinderCacheInstaller, IDispo
         EnsureHttps(databaseUri, "Cache database");
         if (manifest.SizeBytes is <= 0 or > MaximumDatabaseBytes)
             throw new InvalidDataException("The cache manifest declares an invalid database size.");
-        if (manifest.SchemaVersion != FarmFinderRepository.CurrentSchemaVersion)
+        if (manifest.SchemaVersion < MinimumInstallableSchemaVersion ||
+            manifest.SchemaVersion > FarmFinderRepository.CurrentSchemaVersion)
             throw new InvalidDataException(
                 $"Cache schema {manifest.SchemaVersion} is incompatible with this Kumori build " +
-                $"(expected {FarmFinderRepository.CurrentSchemaVersion}).");
+                $"(supported {MinimumInstallableSchemaVersion}–" +
+                $"{FarmFinderRepository.CurrentSchemaVersion}).");
         if (manifest.GeneratedAt == default ||
             manifest.GeneratedAt > DateTimeOffset.UtcNow.AddHours(24))
             throw new InvalidDataException("The cache manifest has an invalid generation time.");
@@ -558,6 +581,13 @@ public sealed class FarmFinderCacheInstaller : IFarmFinderCacheInstaller, IDispo
             detach.CommandText = "DETACH DATABASE existing_cache";
             detach.ExecuteNonQuery();
         }
+    }
+
+    private static void MigrateDownloadedCache(string path)
+    {
+        var migrationRepository = new FarmFinderRepository(path);
+        migrationRepository.InitializeAsync().GetAwaiter().GetResult();
+        SqliteConnection.ClearAllPools();
     }
 
     private static void WriteInstallMetadata(

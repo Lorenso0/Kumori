@@ -102,6 +102,9 @@ public sealed class FarmFinderDomainTests
         Assert.Equal(2, result.UniquePlayers);
         Assert.Contains(result.Players, player => player.UserId == 1 && player.ScoreId == 12);
         Assert.Equal("https://osu.ppy.sh/beatmaps/100", result.Players[0].BeatmapUrl);
+        Assert.Equal([401d, 350d], result.Players.Select(player => player.Pp));
+        Assert.Equal([1, 2], result.Players.Select(player => player.LeaderboardRank));
+        Assert.Equal(["DT"], result.Players[0].ModAcronyms);
         Assert.Equal(375.5, result.AveragePp, 6);
     }
 
@@ -124,6 +127,48 @@ public sealed class FarmFinderDomainTests
 
         Assert.Equal(200, result.AveragePp, 6);
         Assert.Equal(["DT"], result.ModAcronyms);
+    }
+
+    [Fact]
+    public void ScoreGroupsCombineOnlyIdenticalPerformancesAndKeepClassicVisible()
+    {
+        var date = DateTimeOffset.Parse("2026-01-01");
+        var classicMods = new FarmMod[]
+        {
+            new("HD"),
+            new("HR"),
+            new("CL", "{\"no_slider_head_accuracy\":false}"),
+        };
+        var first = new FarmScoreDetail(
+            1, "First", 21_888, 101, 359.58, 1, 0, 1_234, true, date,
+            classicMods)
+        {
+            LeaderboardRank = 2,
+        };
+        var identical = new FarmScoreDetail(
+            2, "Second", 26_471, 102, 359.58, 1, 0, 1_234, true,
+            date.AddDays(1),
+            [classicMods[2], classicMods[1], classicMods[0]])
+        {
+            LeaderboardRank = 3,
+        };
+        var differentCombo = new FarmScoreDetail(
+            3, "Third", 58_653, 103, 359.58, 1, 0, 1_233, true,
+            date.AddDays(2),
+            classicMods)
+        {
+            LeaderboardRank = 4,
+        };
+
+        var groups = FarmScoreGroup.Create([first, identical, differentCombo]);
+
+        Assert.Equal(2, groups.Count);
+        Assert.Equal(2, groups[0].Count);
+        Assert.True(groups[0].HasMultipleScores);
+        Assert.Equal([1L, 2L], groups[0].Players.Select(player => player.UserId));
+        Assert.Contains("CL", groups[0].ModAcronyms);
+        Assert.Single(groups[1].Players);
+        Assert.False(groups[1].HasMultipleScores);
     }
 
     [Fact]
@@ -181,6 +226,25 @@ public sealed class FarmFinderDomainTests
         Assert.Equal(result.Beatmap.StarRating, result.EffectiveStarRating);
         Assert.False(result.HasCalculatedStarRating);
         Assert.EndsWith("base", result.EffectiveStarRatingText);
+    }
+
+    [Fact]
+    public void ResultMapStatsShowDifficultyAndClockRateAdjustments()
+    {
+        var aggregator = new FarmMapAggregator(
+            new ModNormalizer(clockRates),
+            new ModMatcher());
+        var date = DateTimeOffset.Parse("2026-01-01");
+
+        var result = Assert.Single(aggregator.Aggregate(
+            [Candidate(1, 300, .98, date, [new FarmMod("HR"), new FarmMod("DT")])],
+            new FarmFinderQuery(),
+            1));
+
+        Assert.Equal("5.2 (4)", result.CircleSizeText);
+        Assert.Equal("11 (9)", result.ApproachRateText);
+        Assert.Equal("11.11 (8)", result.OverallDifficultyText);
+        Assert.Equal("8.4 (6)", result.DrainRateText);
     }
 
     [Fact]
@@ -402,7 +466,13 @@ public sealed class FarmFinderDomainTests
             userId, $"Player {userId}", (int)userId, 10_000, date, date);
         var map = new FarmBeatmap(
             100, 10, "Artist", "Title", "Insane", "Mapper",
-            180, 100, 120, 6.2, "ranked", date, "");
+            180, 100, 120, 6.2, "ranked", date, "")
+        {
+            CircleSize = 4,
+            ApproachRate = 9,
+            OverallDifficulty = 8,
+            DrainRate = 6,
+        };
         var clockRate = new ClockRateCalculator().Calculate(mods);
         var normalized = new ModNormalizer(new ClockRateCalculator()).Normalize(
             mods, new ModNormalizationOptions(true, false));

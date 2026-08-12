@@ -1,0 +1,75 @@
+osu file format v14
+
+[General]
+AudioFilename:
+AudioLeadIn: 0
+PreviewTime: 1000
+Countdown: 0
+SampleSet: Normal
+StackLeniency: 0.7
+Mode: 0
+LetterboxInBreaks: 0
+WidescreenStoryboard: 0
+
+[Editor]
+DistanceSpacing: 1
+BeatDivisor: 4
+GridSize: 16
+TimelineZoom: 1
+
+[Metadata]
+Title:Kumori Skin Coverage
+TitleUnicode:Kumori Skin Coverage
+Artist:Kumori
+ArtistUnicode:Kumori
+Creator:Kumori
+Version:Studio Preview
+Source:Kumori
+Tags:skin studio preview fixture
+BeatmapID:0
+BeatmapSetID:-1
+
+[Difficulty]
+HPDrainRate:5
+CircleSize:4
+OverallDifficulty:5
+ApproachRate:5
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[Events]
+
+[TimingPoints]
+0,500,4,2,1,70,1,0
+
+[Colours]
+Combo1 : 255,105,180
+Combo2 : 80,200,255
+Combo3 : 255,205,80
+Combo4 : 130,255,170
+
+[HitObjects]
+128,96,1000,5,0,0:0:0:0:
+256,96,1500,1,2,0:0:0:0:
+384,96,2000,1,8,0:0:0:0:
+72,125,2250,2,0,B|160:85|300:110|440:125,1,360,0|0,0:0|0:0,0:0:0:0:
+72,275,2500,6,0,B|180:330|300:250|440:275,2,360,2|8|0,0:0|0:0|0:0,0:0:0:0:
+384,288,4000,5,4,0:0:0:0:
+256,288,4500,1,0,0:0:0:0:
+72,215,4300,2,0,B|160:175|300:195|440:215,1,360,0|0,0:0|0:0,0:0:0:0:
+104,116,5450,5,0,0:0:0:0:
+205,116,5451,5,0,0:0:0:0:
+307,116,5452,5,0,0:0:0:0:
+408,116,5453,5,0,0:0:0:0:
+104,268,5454,5,0,0:0:0:0:
+205,268,5455,5,0,0:0:0:0:
+307,268,5456,5,0,0:0:0:0:
+408,268,5457,5,0,0:0:0:0:
+440,305,5460,2,0,B|350:345|220:285|72:305,1,360,0|0,0:0|0:0,0:0:0:0:
+110,250,6200,5,0,0:0:0:0:
+402,135,7200,1,0,0:0:0:0:
+256,192,7500,12,0,9500,0:0:0:0:
+128,96,10500,5,2,0:0:0:0:
+384,96,11000,1,8,0:0:0:0:
+384,288,13000,1,4,0:0:0:0:
+128,288,14000,1,0,0:0:0:0:

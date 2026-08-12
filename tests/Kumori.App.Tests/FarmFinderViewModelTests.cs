@@ -1,5 +1,6 @@
 using System.Net;
 using System.Collections.Concurrent;
+using Kumori.App.FarmFinder;
 using Kumori.App.ViewModels;
 using Kumori.Core.Settings;
 using Kumori.FarmFinder;
@@ -30,6 +31,30 @@ public sealed class FarmFinderViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task SelectingALegacyCachedResultLoadsMapStatsWithoutRebuildingTheIndex()
+    {
+        var service = new FakeService
+        {
+            SearchResult = new FarmFinderSearchResult(
+                [Result()],
+                new CoverageSummary(0, 0, 0, 0, 0, 0, 0, 0, null, null, null)),
+        };
+        var metadata = new FakeMetadataProvider();
+        using var viewModel = Create(service, metadataProvider: metadata);
+        await viewModel.Initialization;
+
+        await viewModel.SearchAsync();
+        await WaitForAsync(() => viewModel.SelectedResult?.Beatmap.CircleSize is not null);
+
+        Assert.Equal(1, metadata.Calls);
+        Assert.Equal(4, viewModel.SelectedResult!.Beatmap.CircleSize);
+        Assert.Equal(9, viewModel.SelectedResult.Beatmap.ApproachRate);
+        Assert.False(viewModel.IsLoadingSelectedMapDetails);
+        Assert.Empty(viewModel.SelectedMapDetailsStatus);
+        Assert.Equal(0, service.UpdateCalls);
+    }
+
+    [Fact]
     public async Task Update_AllowsCountryUnionRangeAndConfirms()
     {
         var service = new FakeService();
@@ -51,6 +76,33 @@ public sealed class FarmFinderViewModelTests : IDisposable
 
         Assert.Equal(1, service.UpdateCalls);
         Assert.Equal(1, confirmations);
+        Assert.Empty(viewModel.ValidationMessage);
+    }
+
+    [Fact]
+    public async Task RepairScoreMetadataConfirmsAndRunsWithoutOsuCredentials()
+    {
+        var repository = new FarmFinderRepository(databasePath);
+        var now = DateTimeOffset.UtcNow;
+        var job = await repository.BeginOrResumeJobAsync(1, 100);
+        await repository.UpsertRankingPlayersAsync(
+            job.Id,
+            [new FarmPlayer(1, "Player", 10, 12_000, now)]);
+        var service = new FakeService();
+        using var viewModel = Create(service);
+        await viewModel.Initialization;
+        FarmScoreMetadataRepairStatus? confirmation = null;
+        viewModel.ConfirmMetadataRepairAsync = status =>
+        {
+            confirmation = status;
+            return Task.FromResult(true);
+        };
+
+        await viewModel.RepairScoreMetadataAsync();
+
+        Assert.Equal(1, confirmation?.PendingPlayers);
+        Assert.Equal(1, service.RepairCalls);
+        Assert.Contains("1 player", viewModel.StatusText);
         Assert.Empty(viewModel.ValidationMessage);
     }
 
@@ -209,6 +261,7 @@ public sealed class FarmFinderViewModelTests : IDisposable
         await viewModel.SearchAsync();
 
         Assert.Single(viewModel.Results);
+        Assert.Same(viewModel.Results[0], viewModel.SelectedResult);
         Assert.True(viewModel.HasResults);
         Assert.Contains("80 examined / 100 available", viewModel.CoverageText);
         Assert.Contains("2 failed", viewModel.CoverageText);
@@ -322,7 +375,7 @@ public sealed class FarmFinderViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenBeatmapCommand_OpensTheResultOnOsu()
+    public async Task OpenBeatmapCommand_OpensTheResultInOsuDirect()
     {
         var launcher = new FakeLauncher();
         using var viewModel = Create(new FakeService(), launcher: launcher);
@@ -331,8 +384,20 @@ public sealed class FarmFinderViewModelTests : IDisposable
 
         viewModel.OpenBeatmapCommand.Execute(result);
 
+        Assert.Equal($"osu://b/{result.Beatmap.BeatmapId}", launcher.OpenedUrl);
+    }
+
+    [Fact]
+    public async Task OpenBeatmapInBrowserCommand_OpensTheResultOnTheWebsite()
+    {
+        var launcher = new FakeLauncher();
+        using var viewModel = Create(new FakeService(), launcher: launcher);
+        await viewModel.Initialization;
+        var result = Result();
+
+        viewModel.OpenBeatmapInBrowserCommand.Execute(result);
+
         Assert.Equal(result.BeatmapUrl, launcher.OpenedUrl);
-        Assert.NotNull(launcher.OpenedUrl);
         Assert.StartsWith("https://osu.ppy.sh/beatmaps/", launcher.OpenedUrl);
     }
 
@@ -359,7 +424,8 @@ public sealed class FarmFinderViewModelTests : IDisposable
         FakeService service,
         SettingsService? settings = null,
         IFarmFinderCacheInstaller? cacheInstaller = null,
-        FakeLauncher? launcher = null)
+        FakeLauncher? launcher = null,
+        IFarmBeatmapMetadataProvider? metadataProvider = null)
     {
         var repository = new FarmFinderRepository(databasePath);
         var credentials = new MemoryCredentials();
@@ -376,7 +442,8 @@ public sealed class FarmFinderViewModelTests : IDisposable
             new FakeCatalog(),
             launcher ?? new FakeLauncher(),
             settings,
-            cacheInstaller);
+            cacheInstaller,
+            metadataProvider);
     }
 
     private static FarmMapResult Result()
@@ -411,6 +478,7 @@ public sealed class FarmFinderViewModelTests : IDisposable
     {
         public int SearchCalls { get; private set; }
         public int UpdateCalls { get; private set; }
+        public int RepairCalls { get; private set; }
         public FarmFinderQuery? LastQuery { get; private set; }
         public bool WaitForCancellation { get; init; }
         public TaskCompletionSource Started { get; } =
@@ -451,6 +519,22 @@ public sealed class FarmFinderViewModelTests : IDisposable
                 SourceName: "Hinamizawa"));
             return Task.FromResult(SearchResult.Coverage);
         }
+
+        public Task<FarmScoreMetadataRepairResult> RepairScoreMetadataAsync(
+            IProgress<FarmFinderProgress>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            RepairCalls++;
+            progress?.Report(new FarmFinderProgress(
+                1,
+                1,
+                "Score metadata repaired.",
+                PlayersFetched: 1,
+                ScoresExamined: 100,
+                Phase: FarmFinderProgressPhase.Completed,
+                SourceName: "Hinamizawa"));
+            return Task.FromResult(new FarmScoreMetadataRepairResult(1, 1, 0, 100));
+        }
     }
 
     private sealed class MemoryCredentials : IOsuCredentialsStore
@@ -475,6 +559,25 @@ public sealed class FarmFinderViewModelTests : IDisposable
         ];
         public RankedModEvaluation Evaluate(FarmMod mod) =>
             new(true, mod.NormalizedAcronym, mod.SettingsJson);
+    }
+
+    private sealed class FakeMetadataProvider : IFarmBeatmapMetadataProvider
+    {
+        public int Calls { get; private set; }
+
+        public Task<FarmBeatmap> EnrichAsync(
+            FarmBeatmap beatmap,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(beatmap with
+            {
+                CircleSize = 4,
+                ApproachRate = 9,
+                OverallDifficulty = 8,
+                DrainRate = 5,
+            });
+        }
     }
 
     private sealed class FakeLauncher : IExternalUrlLauncher

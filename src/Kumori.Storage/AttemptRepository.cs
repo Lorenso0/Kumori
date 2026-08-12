@@ -44,6 +44,7 @@ public sealed class AttemptRepository
         var hasAdjustedStars = HasColumn(con, "attempts", "adjusted_stars");
         var hasMaxCombo = HasColumn(con, "beatmaps", "max_combo");
         var hasKeyCounts = HasColumn(con, "attempts", "z_count") && HasColumn(con, "attempts", "x_count");
+        var hasDuration = HasColumn(con, "attempts", "duration_seconds");
         var hasAttemptMods = HasTable(con, "attempt_mods");
         var hasStartedAtUtc = HasColumn(con, "attempts", "started_at_utc_ms");
         var localDayExpression = hasStartedAtUtc
@@ -76,7 +77,8 @@ public sealed class AttemptRepository
                     {(hasKeyCounts ? "a.x_count" : "0")},
                     {(hasAttemptMods
                         ? "(SELECT COALESCE(json_group_array(json_object('acronym', ordered_mods.acronym, 'settings_json', ordered_mods.settings_json)), '[]') FROM (SELECT acronym, settings_json FROM attempt_mods WHERE attempt_id = a.id ORDER BY position) ordered_mods)"
-                        : "'[]'")}
+                        : "'[]'")},
+                    {(hasDuration ? "COALESCE(a.duration_seconds, 0)" : "0")}
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
             WHERE (@beforeId IS NULL OR a.id < @beforeId)
@@ -135,6 +137,7 @@ public sealed class AttemptRepository
                 Key1Count = (int)reader.GetInt64(26),
                 Key2Count = (int)reader.GetInt64(27),
                 Mods = ParseMods(reader.GetString(28)),
+                DurationSeconds = reader.GetDouble(29),
             });
         }
         return results;
@@ -228,7 +231,7 @@ public sealed class AttemptRepository
                    MAX(COALESCE(b.artist,'')), MAX(COALESCE(b.title,'')), MAX(COALESCE(b.difficulty,'')), MAX({mapper}),
                    MAX(a.started_at), COUNT(*),
                    SUM(CASE WHEN a.outcome='completed' THEN 1 ELSE 0 END),
-                   MAX(a.pp), COALESCE(MAX(CASE WHEN a.outcome='completed' THEN a.accuracy END), 0), MAX(a.combo),
+                   COALESCE(MAX(CASE WHEN a.outcome='completed' THEN a.pp END), 0), COALESCE(MAX(CASE WHEN a.outcome='completed' THEN a.accuracy END), 0), MAX(a.combo),
                    AVG(a.accuracy), AVG(a.pp), AVG(a.combo),
                    MAX({(hasAdjustedStars ? "COALESCE(a.adjusted_stars, a.base_stars, b.stars)" : "b.stars")}),
                    MAX({(hasMaxCombo ? "COALESCE(b.max_combo, 0)" : "0")})

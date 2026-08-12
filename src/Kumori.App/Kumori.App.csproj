@@ -28,6 +28,7 @@
     <ProjectReference Include="..\Kumori.Core\Kumori.Core.csproj" />
     <ProjectReference Include="..\Kumori.FarmFinder\Kumori.FarmFinder.csproj" />
     <ProjectReference Include="..\Kumori.Gameplay\Kumori.Gameplay.csproj" />
+    <ProjectReference Include="..\Kumori.Skins\Kumori.Skins.csproj" />
     <ProjectReference Include="..\Kumori.Storage\Kumori.Storage.csproj" />
     <ProjectReference Include="..\Kumori.Tracking\Kumori.Tracking.csproj" />
     <ProjectReference Include="..\Kumori.Native\Kumori.Native.csproj" />
@@ -76,5 +77,8 @@
   </ItemGroup>
   <ItemGroup Condition="'$(ReplayViewerBundlePath)' != '' and Exists('$(ReplayViewerBundlePath)')">
     <EmbeddedResource Include="$(ReplayViewerBundlePath)" LogicalName="Kumori.ReplayViewer.Bundle.zip" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(NativeToolsBundlePath)' != '' and Exists('$(NativeToolsBundlePath)')">
+    <EmbeddedResource Include="$(NativeToolsBundlePath)" LogicalName="Kumori.NativeTools.Bundle.zip" />
   </ItemGroup>
 </Project>

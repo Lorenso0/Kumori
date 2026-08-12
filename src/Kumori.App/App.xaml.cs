@@ -216,7 +216,34 @@ public partial class App : Application
             details,
             movement,
             sessions,
-            localAssetCandidates: ShareMediaResolver.FindLocalAssetCandidates);
+            localAssetCandidates: ShareMediaResolver.FindLocalAssetCandidates,
+            compactMediaResolver: async (play, token) => await Task.Run<IReadOnlyList<ShareMediaFile>>(() =>
+            {
+                BeatmapMediaResolution? resolved = BeatmapMediaResolver.Resolve(
+                    play.Map.BeatmapId ?? 0,
+                    play.Map.SetId ?? 0,
+                    play.Map.Checksum,
+                    play.Map.Difficulty,
+                    settings.Current.Media.PrimaryMirror,
+                    settings.Current.Media.FallbackMirrors,
+                    token);
+                if (resolved is null)
+                    return [];
+                var files = new List<ShareMediaFile>
+                {
+                    new(Path.GetFileName(resolved.BeatmapPath), "beatmap", resolved.BeatmapPath),
+                    new(resolved.AudioLogicalName, "audio", resolved.AudioPath),
+                };
+                if (resolved.BackgroundPath is { } background
+                    && !string.IsNullOrWhiteSpace(resolved.BackgroundLogicalName))
+                {
+                    files.Add(new ShareMediaFile(
+                        resolved.BackgroundLogicalName,
+                        "background",
+                        background));
+                }
+                return files;
+            }, token));
         var importsViewModel = new ImportsViewModel(playShare, replayViewer);
         Func<FarmFinderPage> farmFinderPageFactory = () =>
         {
@@ -228,6 +255,7 @@ public partial class App : Application
             var hinamizawaScores = new HinamizawaTopScoresProvider(
                 rankedModCatalog,
                 clockRates);
+            var farmBeatmapFiles = new FarmBeatmapFileCache();
             var farmService = new FarmFinderService(
                 farmRepository,
                 osuApi,
@@ -239,7 +267,7 @@ public partial class App : Application
                         farmRepository,
                         osuApi,
                         new HinamizawaStarRatingClient(),
-                        new FarmBeatmapFileCache())));
+                        farmBeatmapFiles)));
             var farmCacheInstaller = new FarmFinderCacheInstaller(
                 AppPaths.FarmFinderDatabase,
                 farmRepository,
@@ -253,7 +281,8 @@ public partial class App : Application
                     rankedModCatalog,
                     new ExternalUrlLauncher(),
                     settings,
-                    farmCacheInstaller));
+                    farmCacheInstaller,
+                    new FarmBeatmapMetadataProvider(farmBeatmapFiles, farmRepository)));
         };
         var viewModel = new MainViewModel(
             store,
@@ -403,6 +432,10 @@ public partial class App : Application
         // backup, update, or replay-reconciliation maintenance.
         var dashboardHydration = viewModel.HydrateAsync(_backgroundCts.Token);
         TrackBackground(dashboardHydration, "dashboard hydration");
+        TrackBackground(
+            new DailyProgressWebhookService(settings, analytics)
+                .RunAsync(_backgroundCts.Token),
+            "daily progress webhook");
         TrackBackground(EnqueueAfterSafeStartupAsync(
             store,
             settings.Current.Tracking.Enabled,
@@ -491,7 +524,7 @@ public partial class App : Application
             // bounded cleanup runs so progress remains visible.
             Dispatcher.BeginInvoke(
                 new Action(() => _ = ShutdownFromTrayAsync(statusWindow)),
-                DispatcherPriority.ContextIdle);
+                ShutdownStartPriority);
         };
 
         _singleInstance.ListenForActivation(request => _ = HandleActivationAsync(request));
@@ -533,6 +566,7 @@ public partial class App : Application
 
         // Background services start only after the shell is visible
         // (no-flicker startup plan: shell first, services second).
+        CancellationTokenSource? countryRankSyncCts = null;
         Task StartTrackingRuntimeAsync(KumoriSettings runtimeSettings)
         {
             if (!runtimeSettings.Tracking.Enabled || _tracking is not null)
@@ -540,6 +574,26 @@ public partial class App : Application
             var profileTelemetry = new ProfileTelemetryStore(
                 factory,
                 (key, work) => gameplayWork.Enqueue(key, work));
+            countryRankSyncCts = CancellationTokenSource.CreateLinkedTokenSource(_backgroundCts.Token);
+            TrackBackground(
+                new CountryRankSyncService(profileTelemetry).RunAsync(countryRankSyncCts.Token),
+                "country rank sync");
+            var scoreWebhookApi = new OsuApiClient(
+                new WindowsCredentialsStore(AppPaths.FarmFinderCredentialsFile),
+                new OsuRankedModCatalog(),
+                new ClockRateCalculator());
+            var scoreWebhook = new ScoreWebhookService(
+                settings,
+                new ScoreWebhookRepository(factory),
+                details,
+                movement,
+                playShare,
+                scoreWebhookApi,
+                profileTelemetry.GetCurrentIdentity);
+            trackingSink.AttemptPersisted += scoreWebhook.ObserveAttemptPersisted;
+            TrackBackground(
+                scoreWebhook.RunAsync(_backgroundCts.Token),
+                "confirmed score webhook");
             IReplayPlaybackDetector replayPlaybackDetector;
             var dashboardRefreshRequested = 0;
             var dashboardRefreshRunning = 0;
@@ -870,6 +924,9 @@ public partial class App : Application
 
         async Task StopTrackingRuntimeAsync()
         {
+            countryRankSyncCts?.Cancel();
+            countryRankSyncCts?.Dispose();
+            countryRankSyncCts = null;
             var tracking = _tracking;
             _tracking = null;
             if (tracking is not null)
@@ -982,4 +1039,5 @@ public partial class App : Application
             Log.Error(ex, "Could not handle Kumori activation request");
         }
     }
+
 }

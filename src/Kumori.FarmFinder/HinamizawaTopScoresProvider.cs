@@ -50,7 +50,7 @@ public sealed class HinamizawaTopScoresProvider :
         requestInterval = minimumRequestInterval ?? productionRequestInterval;
         if (!http.DefaultRequestHeaders.UserAgent.Any())
             http.DefaultRequestHeaders.UserAgent.ParseAdd(
-                "Kumori-FarmFinder/0.7.0 (+https://github.com/Lorenzo0111/Kumori)");
+                "Kumori-FarmFinder/0.8.0 (+https://github.com/Lorenzo0111/Kumori)");
         if (!http.DefaultRequestHeaders.Accept.Any())
             http.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
@@ -110,6 +110,20 @@ public sealed class HinamizawaTopScoresProvider :
             var actualMods = ParseEligibleMods(value.Mods, out var eligible);
             if (!eligible)
                 continue;
+            var isLegacy = value.LegacyScoreId is not null || IsLegacyScore(value.Type);
+            if (isLegacy &&
+                !actualMods.Any(mod =>
+                    mod.NormalizedAcronym.Equals("CL", StringComparison.OrdinalIgnoreCase)))
+            {
+                var classic = rankedMods.Evaluate(new FarmMod("CL"));
+                if (!classic.IsEligible)
+                    continue;
+                actualMods =
+                [
+                    .. actualMods,
+                    new FarmMod(classic.Acronym, classic.CanonicalSettingsJson),
+                ];
+            }
 
             var beatmapSet = value.Beatmapset ?? value.Beatmap.Beatmapset;
             var beatmap = new FarmBeatmap(
@@ -127,7 +141,13 @@ public sealed class HinamizawaTopScoresProvider :
                 beatmapSet?.RankedDate,
                 beatmapSet?.Covers?.Card ??
                 beatmapSet?.Covers?.Cover ??
-                string.Empty);
+                string.Empty)
+            {
+                CircleSize = value.Beatmap.CircleSize,
+                ApproachRate = value.Beatmap.ApproachRate,
+                OverallDifficulty = value.Beatmap.OverallDifficulty,
+                DrainRate = value.Beatmap.DrainRate,
+            };
             beatmaps[beatmap.BeatmapId] = beatmap;
 
             var canonicalParts = actualMods
@@ -152,10 +172,20 @@ public sealed class HinamizawaTopScoresProvider :
                 value.CreatedAt ??
                 DateTimeOffset.MinValue,
                 actualMods,
-                canonicalParts.Length == 0
-                    ? "NM"
-                    : string.Join("+", canonicalParts),
-                clockRates.Calculate(actualMods)));
+                 canonicalParts.Length == 0
+                     ? "NM"
+                     : string.Join("+", canonicalParts),
+                 clockRates.Calculate(actualMods),
+                 isLegacy
+                     ? FarmScoreOrigin.Legacy
+                     : value.BuildId is not null || !string.IsNullOrWhiteSpace(value.Type)
+                         ? FarmScoreOrigin.Lazer
+                         : FarmScoreOrigin.Unknown,
+                 value.LegacyScoreId ?? (isLegacy ? value.Id : null),
+                 value.TotalScore,
+                 value.LegacyTotalScore,
+                 value.BuildId,
+                 value.Type));
         }
 
         return new PlayerScoresPayload(
@@ -219,6 +249,9 @@ public sealed class HinamizawaTopScoresProvider :
         }
         return results;
     }
+
+    private static bool IsLegacyScore(string? type) =>
+        type?.StartsWith("score_best_", StringComparison.OrdinalIgnoreCase) == true;
 
     private async Task<HttpResponseMessage> SendAsync(
         long userId,
@@ -360,6 +393,11 @@ public sealed class HinamizawaTopScoresProvider :
     private sealed record ScoreResponse
     {
         [JsonPropertyName("id")] public long Id { get; init; }
+        [JsonPropertyName("type")] public string? Type { get; init; }
+        [JsonPropertyName("build_id")] public int? BuildId { get; init; }
+        [JsonPropertyName("total_score")] public long? TotalScore { get; init; }
+        [JsonPropertyName("legacy_total_score")] public long? LegacyTotalScore { get; init; }
+        [JsonPropertyName("legacy_score_id")] public long? LegacyScoreId { get; init; }
         [JsonPropertyName("pp")] public double? Pp { get; init; }
         [JsonPropertyName("accuracy")] public double Accuracy { get; init; }
         [JsonPropertyName("max_combo")] public int MaxCombo { get; init; }
@@ -390,6 +428,10 @@ public sealed class HinamizawaTopScoresProvider :
         [JsonPropertyName("hit_length")] public int HitLength { get; init; }
         [JsonPropertyName("total_length")] public int TotalLength { get; init; }
         [JsonPropertyName("difficulty_rating")] public double DifficultyRating { get; init; }
+        [JsonPropertyName("cs")] public double? CircleSize { get; init; }
+        [JsonPropertyName("ar")] public double? ApproachRate { get; init; }
+        [JsonPropertyName("accuracy")] public double? OverallDifficulty { get; init; }
+        [JsonPropertyName("drain")] public double? DrainRate { get; init; }
         [JsonPropertyName("status")] public string? Status { get; init; }
         [JsonPropertyName("beatmapset")] public BeatmapsetResponse? Beatmapset { get; init; }
     }

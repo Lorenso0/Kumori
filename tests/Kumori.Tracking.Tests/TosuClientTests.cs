@@ -11,7 +11,7 @@ public class TosuClientTests
         var client = new TosuClient();
         client.Ingest(Packet("""
             {"profile":{"id":4214858,"name":"Lorenzo","performancePoints":6291,
-              "rank":52590,"accuracy":99.51,"playCount":79580,"level":100,
+              "rank":52590,"countryRank":561,"accuracy":99.51,"playCount":79580,"level":100,
               "rankedScore":5920000000,"countryCode":"NL"}}
             """));
 
@@ -19,6 +19,7 @@ public class TosuClientTests
         Assert.Equal(4214858, profile.Id);
         Assert.Equal(6291, profile.TotalPp);
         Assert.Equal(52590, profile.GlobalRank);
+        Assert.Equal(561, profile.CountryRank);
         Assert.Equal(79580, profile.PlayCount);
     }
 
@@ -620,6 +621,35 @@ public class TosuClientTests
             """, 102));
 
         Assert.Equal("HD", client.LastSnapshot!.ModsKey);
+    }
+
+    [Fact]
+    public void Ingest_AuthoritativeResultModsReplaceFalseLiveBpmMapping()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "Gameplay"},
+                "beatmap": {"checksum": "mapped-mod", "time": {"live": 5000}},
+                "play": {"mods": {"array": [{"acronym": "HD"}, {"acronym": "BPM", "settings": {"target_bpm": 240}}]}}
+            }
+            """, 100));
+
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "ResultScreen"},
+                "beatmap": {"checksum": "mapped-mod", "time": {"live": 5000}},
+                "play": {"mods": {"array": [{"acronym": "BPM"}]}},
+                "resultsScreen": {"score": {"mods": {"array": [{"acronym": "HD"}, {"acronym": "DT"}]}}}
+            }
+            """, 101));
+
+        TosuSnapshot result = client.LastSnapshot!;
+        Assert.True(result.ModsAreAuthoritativeResult);
+        Assert.Equal("HDDT", result.ModsKey);
+        Assert.Equal(["HD", "DT"], result.Mods.Select(mod => mod.Acronym));
     }
 
     [Fact]

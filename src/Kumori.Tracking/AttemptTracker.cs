@@ -87,6 +87,7 @@ public sealed record AttemptSnapshot
     public BeatmapStats BeatmapStats { get; init; } = new();
     public string ModsKey { get; init; } = "NM";
     public IReadOnlyList<AttemptMod> Mods { get; init; } = Array.Empty<AttemptMod>();
+    public bool ModsAreAuthoritativeResult { get; init; }
 }
 
 public sealed class AttemptTracker
@@ -115,6 +116,7 @@ public sealed class AttemptTracker
     private AttemptSnapshot? _latestSnapshot;
     private IReadOnlyList<AttemptMod> _attemptMods = Array.Empty<AttemptMod>();
     private string _attemptModsKey = "NM";
+    private bool _modsAreAuthoritativeResult;
     private int _attemptMinimumSeconds = (int)MinimumAttemptSeconds;
     private double? _lastTrustedAccuracy;
     private bool _placeholderAccuracyDetected;
@@ -157,6 +159,7 @@ public sealed class AttemptTracker
         public BeatmapStats BeatmapStats { get; init; } = new();
         public string ModsKey { get; init; } = "NM";
         public IReadOnlyList<AttemptMod> Mods { get; init; } = Array.Empty<AttemptMod>();
+        public bool ModsAreAuthoritativeResult { get; init; }
         public double Pp { get; init; }
         public double FcPp { get; init; }
         public double MaxPp { get; init; }
@@ -345,6 +348,7 @@ public sealed class AttemptTracker
         _judgements.Reset();
         _attemptMods = frame.Mods;
         _attemptModsKey = frame.ModsKey;
+        _modsAreAuthoritativeResult = frame.ModsAreAuthoritativeResult;
         _sink.StartAttempt(new AttemptStart
         {
             Identity = frame.Packet.Identity,
@@ -522,6 +526,7 @@ public sealed class AttemptTracker
             BeatmapStats = frame.BeatmapStats,
             ModsKey = _attemptModsKey,
             Mods = _attemptMods,
+            ModsAreAuthoritativeResult = _modsAreAuthoritativeResult,
         };
         _latestSnapshot = snapshot;
         return snapshot;
@@ -568,6 +573,7 @@ public sealed class AttemptTracker
         _lastCheckpointMonoTime = 0;
         _attemptMods = Array.Empty<AttemptMod>();
         _attemptModsKey = "NM";
+        _modsAreAuthoritativeResult = false;
         if (decrementOrdinal)
         {
             _attemptOrdinal = Math.Max(0, _attemptOrdinal - 1);
@@ -586,6 +592,7 @@ public sealed class AttemptTracker
         // this attempt, a later FR/empty transition packet cannot represent a
         // real mod change and must not replace the authoritative settings.
         if (frame.ClientKind == OsuClientKind.Lazer
+            && !frame.ModsAreAuthoritativeResult
             && _attemptMods.Any(mod => mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase))
             && !frame.Mods.Any(mod => mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase)))
         {
@@ -601,6 +608,7 @@ public sealed class AttemptTracker
         {
             _attemptMods = frame.Mods;
             _attemptModsKey = frame.ModsKey;
+            _modsAreAuthoritativeResult = frame.ModsAreAuthoritativeResult;
         }
     }
 

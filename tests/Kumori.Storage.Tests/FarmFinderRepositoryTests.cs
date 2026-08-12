@@ -28,6 +28,7 @@ public sealed class FarmFinderRepositoryTests : IDisposable
 
         Assert.Contains("idx_farm_players_rank", indexes);
         Assert.Contains("idx_farm_players_scores_updated", indexes);
+        Assert.Contains("idx_farm_players_score_metadata", indexes);
         Assert.Contains("idx_farm_scores_pp", indexes);
         Assert.Contains("idx_farm_scores_user", indexes);
         Assert.Contains("idx_farm_scores_beatmap_mods", indexes);
@@ -37,7 +38,7 @@ public sealed class FarmFinderRepositoryTests : IDisposable
 
         using var version = connection.CreateCommand();
         version.CommandText = "SELECT value FROM farm_metadata WHERE key='schema_version'";
-        Assert.Equal("5", version.ExecuteScalar());
+        Assert.Equal("6", version.ExecuteScalar());
     }
 
     [Fact]
@@ -84,6 +85,10 @@ public sealed class FarmFinderRepositoryTests : IDisposable
             using var downgrade = connection.CreateCommand();
             downgrade.CommandText = """
                 DROP TABLE farm_star_ratings;
+                ALTER TABLE farm_beatmaps DROP COLUMN circle_size;
+                ALTER TABLE farm_beatmaps DROP COLUMN approach_rate;
+                ALTER TABLE farm_beatmaps DROP COLUMN overall_difficulty;
+                ALTER TABLE farm_beatmaps DROP COLUMN drain_rate;
                 UPDATE farm_metadata SET value='4' WHERE key='schema_version';
                 """;
             downgrade.ExecuteNonQuery();
@@ -92,12 +97,17 @@ public sealed class FarmFinderRepositoryTests : IDisposable
         var migrated = new FarmFinderRepository(databasePath);
         await migrated.InitializeAsync();
 
-        Assert.Single(await migrated.QueryCandidatesAsync(new FarmFinderQuery()));
+        var migratedCandidate = Assert.Single(
+            await migrated.QueryCandidatesAsync(new FarmFinderQuery()));
+        Assert.Null(migratedCandidate.Beatmap.CircleSize);
+        Assert.Null(migratedCandidate.Beatmap.ApproachRate);
+        Assert.Null(migratedCandidate.Beatmap.OverallDifficulty);
+        Assert.Null(migratedCandidate.Beatmap.DrainRate);
         using var migratedConnection = new SqliteConnection($"Data Source={databasePath}");
         migratedConnection.Open();
         using var version = migratedConnection.CreateCommand();
         version.CommandText = "SELECT value FROM farm_metadata WHERE key='schema_version'";
-        Assert.Equal("5", version.ExecuteScalar());
+        Assert.Equal("6", version.ExecuteScalar());
         using var ratings = migratedConnection.CreateCommand();
         ratings.CommandText =
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='farm_star_ratings'";
@@ -175,13 +185,86 @@ public sealed class FarmFinderRepositoryTests : IDisposable
             Assert.Equal(1L, (long)(membership.ExecuteScalar() ?? 0L));
         }
         await repository.ReplacePlayerScoresAsync(Payload(player, now, 101, 102));
-        Assert.Equal(2, (await repository.QueryCandidatesAsync(new FarmFinderQuery())).Count);
+        var initial = await repository.QueryCandidatesAsync(new FarmFinderQuery());
+        Assert.Equal(2, initial.Count);
+        Assert.All(initial, candidate =>
+        {
+            Assert.Equal(4, candidate.Beatmap.CircleSize);
+            Assert.Equal(9, candidate.Beatmap.ApproachRate);
+            Assert.Equal(8, candidate.Beatmap.OverallDifficulty);
+            Assert.Equal(6, candidate.Beatmap.DrainRate);
+        });
 
         await repository.ReplacePlayerScoresAsync(Payload(player, now.AddMinutes(1), 103));
         var remaining = await repository.QueryCandidatesAsync(new FarmFinderQuery());
 
         Assert.Single(remaining);
         Assert.Equal(103, remaining[0].Score.ScoreId);
+    }
+
+    [Fact]
+    public async Task ScoreOriginMetadataRoundTripsAndMarksPlayerRepairComplete()
+    {
+        var repository = new FarmFinderRepository(databasePath);
+        var now = DateTimeOffset.UtcNow;
+        var player = new FarmPlayer(1, "Player", 10, 12_000, now);
+        var job = await repository.BeginOrResumeJobAsync(1, 100);
+        await repository.UpsertRankingPlayersAsync(job.Id, [player]);
+        var map = new FarmBeatmap(
+            500, 50, "Artist", "Title", "Insane", "Mapper",
+            180, 100, 120, 6.2, "ranked", now, "");
+        var score = new FarmScore(
+            101, player.UserId, map.BeatmapId, 350, .99, 0, 500, true,
+            now, [new FarmMod("HD"), new FarmMod("CL")], "CL+HD", 1,
+            FarmScoreOrigin.Legacy, 4_000_000_101, 987_654, 876_543,
+            20260730, "score_best_osu");
+
+        Assert.Equal(1, (await repository.GetScoreMetadataRepairStatusAsync()).PendingPlayers);
+        await repository.ReplacePlayerScoresAsync(new PlayerScoresPayload(
+            player with { ScoresUpdatedAt = now },
+            [score],
+            [map]));
+
+        var cached = Assert.Single(
+            await repository.QueryCandidatesAsync(new FarmFinderQuery()));
+        Assert.Equal(FarmScoreOrigin.Legacy, cached.Score.Origin);
+        Assert.Equal(4_000_000_101, cached.Score.LegacyScoreId);
+        Assert.Equal(987_654, cached.Score.TotalScore);
+        Assert.Equal(876_543, cached.Score.LegacyTotalScore);
+        Assert.Equal(20260730, cached.Score.BuildId);
+        Assert.Equal("score_best_osu", cached.Score.SourceType);
+        Assert.True(cached.Score.UsesClassicScoring);
+        Assert.True((await repository.GetScoreMetadataRepairStatusAsync()).IsComplete);
+        Assert.Empty(await repository.GetPlayersNeedingScoreMetadataRepairAsync());
+    }
+
+    [Fact]
+    public async Task DifficultyStatsCanBeAddedToAnExistingCacheWithoutReplacingScores()
+    {
+        var repository = new FarmFinderRepository(databasePath);
+        var now = DateTimeOffset.UtcNow;
+        var player = new FarmPlayer(1, "Player", 10, 12_000, now);
+        var job = await repository.BeginOrResumeJobAsync(1, 100);
+        await repository.UpsertRankingPlayersAsync(job.Id, [player]);
+        await repository.ReplacePlayerScoresAsync(Payload(player, now, 101));
+        var existing = Assert.Single(
+            await repository.QueryCandidatesAsync(new FarmFinderQuery()));
+
+        await repository.UpdateBeatmapDifficultyAsync(existing.Beatmap with
+        {
+            CircleSize = 5,
+            ApproachRate = 9.5,
+            OverallDifficulty = 8.5,
+            DrainRate = 6.5,
+        });
+
+        var updated = Assert.Single(
+            await repository.QueryCandidatesAsync(new FarmFinderQuery()));
+        Assert.Equal(5, updated.Beatmap.CircleSize);
+        Assert.Equal(9.5, updated.Beatmap.ApproachRate);
+        Assert.Equal(8.5, updated.Beatmap.OverallDifficulty);
+        Assert.Equal(6.5, updated.Beatmap.DrainRate);
+        Assert.Equal(existing.Score.ScoreId, updated.Score.ScoreId);
     }
 
     [Fact]
@@ -282,7 +365,13 @@ public sealed class FarmFinderRepositoryTests : IDisposable
     {
         var map = new FarmBeatmap(
             500, 50, "Artist", "Title", "Insane", "Mapper",
-            180, 100, 120, 6.2, "ranked", updated, "");
+            180, 100, 120, 6.2, "ranked", updated, "")
+        {
+            CircleSize = 4,
+            ApproachRate = 9,
+            OverallDifficulty = 8,
+            DrainRate = 6,
+        };
         return new PlayerScoresPayload(
             player with { ScoresUpdatedAt = updated },
             scoreIds.Select(id => new FarmScore(
@@ -299,7 +388,13 @@ public sealed class FarmFinderRepositoryTests : IDisposable
     {
         var map = new FarmBeatmap(
             500 + scoreId, 50, "Artist", "Title", "Insane", "Mapper",
-            180, 100, 120, 6.2, "ranked", updated, "");
+            180, 100, 120, 6.2, "ranked", updated, "")
+        {
+            CircleSize = 4,
+            ApproachRate = 9,
+            OverallDifficulty = 8,
+            DrainRate = 6,
+        };
         var clockRate = new ClockRateCalculator().Calculate(mods);
         var normalized = new ModNormalizer(new ClockRateCalculator()).Normalize(
             mods,

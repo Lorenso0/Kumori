@@ -71,7 +71,7 @@ public sealed class SkinExtraCompletenessTests
     }
 
     [Fact]
-    public void Donor_font_digit_can_share_the_partial_fonts_managed_identity()
+    public void Donor_font_digit_keeps_its_original_role_prefix()
     {
         var partialFingerprint = new string('a', 64);
         var donor = new SkinExtraPackManifest
@@ -97,9 +97,9 @@ public sealed class SkinExtraCompletenessTests
                 "[Fonts]\nHitCirclePrefix: kumori-font-aaaaaaaaaaaa\n"));
 
         var change = Assert.Single(plan.Changes);
-        Assert.Equal("kumori-font-aaaaaaaaaaaa-9.png", change.Filename);
+        Assert.Equal("other-9.png", change.Filename);
         Assert.Contains(plan.IniPatch, entry =>
             entry.Key == "HitCirclePrefix"
-            && entry.Value == "kumori-font-aaaaaaaaaaaa");
+            && entry.Value == "other");
     }
 }

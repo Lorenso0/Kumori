@@ -735,7 +735,7 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
     private static string ResolveRoot(string? overridePath)
     {
         string? root = string.IsNullOrWhiteSpace(overridePath)
-            ? LazerStorage.GetRoot()
+            ? LazerSkinStorageRoot.Find()
             : Path.GetFullPath(overridePath);
         if (string.IsNullOrWhiteSpace(root)
             || !File.Exists(RealmPath(root))
@@ -837,44 +837,4 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
         new(LazerSkinWriteStatus.Missing, hash, Message: message);
 
     private sealed class BatchPreflightException : Exception;
-}
-
-[MapTo("Skin")]
-internal partial class LazerSkin : RealmObject
-{
-    [PrimaryKey]
-    [MapTo("ID")]
-    public Guid Id { get; set; }
-
-    [MapTo("Name")]
-    public string Name { get; set; } = "";
-
-    [MapTo("Creator")]
-    public string Creator { get; set; } = "";
-
-    [MapTo("DeletePending")]
-    public bool DeletePending { get; set; }
-
-    [MapTo("Files")]
-    public IList<LazerNamedFileUsage> Files { get; } = null!;
-}
-
-[MapTo("KeyBinding")]
-internal partial class LazerKeyBinding : RealmObject
-{
-    [PrimaryKey]
-    [MapTo("ID")]
-    public Guid Id { get; set; }
-
-    [MapTo("RulesetName")]
-    public string? RulesetName { get; set; }
-
-    [MapTo("Variant")]
-    public int? Variant { get; set; }
-
-    [MapTo("Action")]
-    public int Action { get; set; }
-
-    [MapTo("KeyCombination")]
-    public string KeyCombination { get; set; } = "";
 }

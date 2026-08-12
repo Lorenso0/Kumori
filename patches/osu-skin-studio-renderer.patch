@@ -1,0 +1,503 @@
+diff --git a/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableHitCircle.cs b/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableHitCircle.cs
+index b2e8070..da938ad 100644
+--- a/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableHitCircle.cs
++++ b/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableHitCircle.cs
+@@ -333,6 +333,18 @@ public ProxyableSkinnableDrawable(ISkinComponentLookup lookup, Func<ISkinCompone
+ 
+         #region FOR EDITOR USE ONLY, DO NOT USE FOR ANY OTHER PURPOSE
+ 
++        /// <summary>
++        /// Keeps this real lazer drawable in its idle visual state for an
++        /// external asset-preview surface without synthesizing gameplay input.
++        /// </summary>
++        public void SuppressHitAnimationsForPreview() => SuppressHitAnimations();
++
++        /// <summary>
++        /// Restores the skin's native combo colour after preview suppression
++        /// has bypassed the post-hit white/dim state.
++        /// </summary>
++        public void RestoreComboColourForPreview() => UpdateComboColour();
++
+         internal void SuppressHitAnimations()
+         {
+             UpdateState(ArmedState.Idle);
+diff --git a/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSlider.cs b/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSlider.cs
+index e22e1d2..1d62732 100644
+--- a/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSlider.cs
++++ b/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSlider.cs
+@@ -373,6 +373,12 @@ private partial class DefaultSliderBody : PlaySliderBody
+ 
+         #region FOR EDITOR USE ONLY, DO NOT USE FOR ANY OTHER PURPOSE
+ 
++        /// <summary>
++        /// Keeps this real lazer drawable in its idle visual state for an
++        /// external asset-preview surface without synthesizing gameplay input.
++        /// </summary>
++        public void SuppressHitAnimationsForPreview() => SuppressHitAnimations();
++
+         internal void SuppressHitAnimations()
+         {
+             UpdateState(ArmedState.Idle);
+diff --git a/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSliderBall.cs b/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSliderBall.cs
+index 9b8b197..abc05f6 100644
+--- a/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSliderBall.cs
++++ b/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSliderBall.cs
+@@ -10,6 +10,7 @@
+ using osu.Game.Rulesets.Objects.Drawables;
+ using osu.Game.Rulesets.Objects.Types;
+ using osu.Game.Rulesets.Osu.Skinning.Default;
++using osu.Game.Rulesets.Osu.Skinning;
+ using osu.Game.Skinning;
+ 
+ namespace osu.Game.Rulesets.Osu.Objects.Drawables
+@@ -20,6 +21,7 @@ public partial class DrawableSliderBall : CircularContainer, ISliderProgress
+ 
+         private DrawableSlider drawableSlider;
+         private Drawable ball;
++        private SkinnableDrawable followCircle;
+ 
+         [BackgroundDependencyLoader]
+         private void load(DrawableHitObject drawableSlider)
+@@ -32,7 +34,7 @@ private void load(DrawableHitObject drawableSlider)
+ 
+             Children = new[]
+             {
+-                new SkinnableDrawable(new OsuSkinComponentLookup(OsuSkinComponents.SliderFollowCircle), _ => new DefaultFollowCircle())
++                followCircle = new SkinnableDrawable(new OsuSkinComponentLookup(OsuSkinComponents.SliderFollowCircle), _ => new DefaultFollowCircle())
+                 {
+                     Origin = Anchor.Centre,
+                     Anchor = Anchor.Centre,
+@@ -77,5 +79,43 @@ public void UpdateProgress(double completionProgress)
+ 
+             ball.Rotation = -90 + (float)(-Math.Atan2(diff.X, diff.Y) * 180 / Math.PI);
+         }
++
++        /// <summary>
++        /// Pins the real skinned ball and follow circle for a stationary asset
++        /// preview, independently of gameplay tracking transforms.
++        /// </summary>
++        public void SetPreviewPresentation(bool showBall, bool showFollowCircle)
++        {
++            ClearTransforms();
++            Alpha = showBall || showFollowCircle ? 1 : 0;
++
++            followCircle.ClearTransforms();
++            followCircle.Alpha = showFollowCircle ? 1 : 0;
++            if (followCircle.Drawable is FollowCircle followDrawable)
++            {
++                if (showFollowCircle)
++                    followDrawable.ShowTrackedForPreview();
++                else
++                {
++                    followDrawable.ClearTransforms();
++                    followDrawable.Alpha = 0;
++                }
++            }
++
++            ball.ClearTransforms();
++            ball.Alpha = showBall ? 1 : 0;
++        }
++
++        /// <summary>
++        /// Applies preview colours to the real ball and follow-circle layers
++        /// independently, matching lazer's normal skin component boundaries.
++        /// </summary>
++        public void SetPreviewElementColours(
++            Colour4 ballColour,
++            Colour4 followCircleColour)
++        {
++            ball.Colour = ballColour;
++            followCircle.Colour = followCircleColour;
++        }
+     }
+ }
+diff --git a/osu.Game.Rulesets.Osu/Skinning/FollowCircle.cs b/osu.Game.Rulesets.Osu/Skinning/FollowCircle.cs
+index db78916..84cee6d 100644
+--- a/osu.Game.Rulesets.Osu/Skinning/FollowCircle.cs
++++ b/osu.Game.Rulesets.Osu/Skinning/FollowCircle.cs
+@@ -135,5 +135,17 @@ protected override void Dispose(bool isDisposing)
+         protected abstract void OnSliderTick();
+ 
+         protected abstract void OnSliderBreak();
++
++        /// <summary>
++        /// Shows this skin's real follow circle in its fully tracked visual
++        /// state for a stationary external asset preview.
++        /// </summary>
++        public void ShowTrackedForPreview()
++        {
++            ClearTransforms();
++            OnSliderPress();
++            FinishTransforms(true);
++            Alpha = 1;
++        }
+     }
+ }
+diff --git a/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyCursorTrail.cs b/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyCursorTrail.cs
+index 375bef7..fd905c4 100644
+--- a/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyCursorTrail.cs
++++ b/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyCursorTrail.cs
+@@ -24,6 +24,7 @@ public partial class LegacyCursorTrail : CursorTrail
+         private IBindable<float> cursorSize = null!;
+ 
+         private Vector2? currentPosition;
++        private bool cursorCentre = true;
+ 
+         public LegacyCursorTrail(ISkin skin)
+         {
+@@ -42,19 +43,8 @@ private void load(OsuConfigManager config, ISkinSource skinSource)
+             // Stable always chooses cursor trail disjoint behaviour based on the cursor texture lookup source, so we need to fetch where that occurred.
+             // See https://github.com/peppy/osu-stable-reference/blob/3ea48705eb67172c430371dcfc8a16a002ed0d3d/osu!/Graphics/Skinning/SkinManager.cs#L269
+             var cursorProvider = skinSource.FindProvider(s => s.GetTexture("cursor") != null);
+-            DisjointTrail = cursorProvider?.GetTexture("cursormiddle") == null;
+-
+-            if (DisjointTrail)
+-            {
+-                bool centre = skin.GetConfig<OsuSkinConfiguration, bool>(OsuSkinConfiguration.CursorCentre)?.Value ?? true;
+-
+-                TrailOrigin = centre ? Anchor.Centre : Anchor.TopLeft;
+-                Blending = BlendingParameters.Inherit;
+-            }
+-            else
+-            {
+-                Blending = BlendingParameters.Additive;
+-            }
++            cursorCentre = skin.GetConfig<OsuSkinConfiguration, bool>(OsuSkinConfiguration.CursorCentre)?.Value ?? true;
++            setDisjointTrail(cursorProvider?.GetTexture("cursormiddle") == null);
+ 
+             if (Texture != null)
+             {
+@@ -85,15 +75,44 @@ protected override void Update()
+             }
+         }
+ 
+-        protected override bool OnMouseMove(MouseMoveEvent e)
++        public override void UpdateCursorPosition(Vector2 screenSpacePosition)
+         {
+             if (!DisjointTrail)
+-                return base.OnMouseMove(e);
++            {
++                base.UpdateCursorPosition(screenSpacePosition);
++                return;
++            }
+ 
+-            currentPosition = e.ScreenSpaceMousePosition;
++            currentPosition = screenSpacePosition;
++        }
+ 
+-            // Intentionally block the base call as we're adding the trails ourselves.
+-            return false;
++        /// <summary>
++        /// Changes stable-compatible cursor trail behaviour without reloading
++        /// the entire skin. Used only by external asset-preview surfaces.
++        /// </summary>
++        public void SetDisjointTrailForPreview(bool disjointTrail)
++        {
++            if (DisjointTrail == disjointTrail)
++                return;
++            setDisjointTrail(disjointTrail);
++            currentPosition = null;
++            lastTrailTime = Time.Current;
++            ResetTrail();
++        }
++
++        private void setDisjointTrail(bool disjointTrail)
++        {
++            DisjointTrail = disjointTrail;
++            if (DisjointTrail)
++            {
++                TrailOrigin = cursorCentre ? Anchor.Centre : Anchor.TopLeft;
++                Blending = BlendingParameters.Inherit;
++            }
++            else
++            {
++                TrailOrigin = Anchor.Centre;
++                Blending = BlendingParameters.Additive;
++            }
+         }
+     }
+ }
+diff --git a/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyMainCirclePiece.cs b/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyMainCirclePiece.cs
+index bece7a3..85d106a 100644
+--- a/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyMainCirclePiece.cs
++++ b/osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyMainCirclePiece.cs
+@@ -203,6 +203,21 @@ private void updateStateTransforms(DrawableHitObject drawableHitObject, ArmedSta
+             }
+         }
+ 
++        /// <summary>
++        /// Applies isolated preview colours to the real legacy hit-circle
++        /// layers without tinting the combo number through their parent.
++        /// </summary>
++        public void SetPreviewElementColours(
++            Colour4 bodyColour,
++            Colour4 overlayColour,
++            Colour4 numberColour)
++        {
++            CircleSprite.Colour = bodyColour;
++            OverlaySprite.Colour = overlayColour;
++            if (hasNumber)
++                hitCircleText.Colour = numberColour;
++        }
++
+         protected override void Dispose(bool isDisposing)
+         {
+             base.Dispose(isDisposing);
+diff --git a/osu.Game.Rulesets.Osu/UI/Cursor/CursorTrail.cs b/osu.Game.Rulesets.Osu/UI/Cursor/CursorTrail.cs
+index 8ddb599..f50d53a 100644
+--- a/osu.Game.Rulesets.Osu/UI/Cursor/CursorTrail.cs
++++ b/osu.Game.Rulesets.Osu/UI/Cursor/CursorTrail.cs
+@@ -166,16 +166,60 @@ private void resetTime()
+         protected virtual bool AvoidDrawingNearCursor => false;
+ 
+         private Vector2? lastPosition;
+-        private readonly InputResampler resampler = new InputResampler();
++        private InputResampler resampler = new InputResampler();
++
++        /// <summary>
++        /// Whether framework mouse events should be ignored because positions
++        /// are supplied explicitly through <see cref="UpdateCursorPosition"/>.
++        /// </summary>
++        public bool ExternalPositionUpdatesOnly
++        {
++            get => externalPositionUpdatesOnly;
++            set
++            {
++                if (externalPositionUpdatesOnly == value)
++                    return;
++                externalPositionUpdatesOnly = value;
++                lastPosition = null;
++                resampler = new InputResampler();
++            }
++        }
++
++        private bool externalPositionUpdatesOnly;
+ 
+         public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) => true;
+ 
+         protected override bool OnMouseMove(MouseMoveEvent e)
+         {
+-            AddTrail(e.ScreenSpaceMousePosition);
++            if (!ExternalPositionUpdatesOnly)
++                UpdateCursorPosition(e.ScreenSpaceMousePosition);
+             return base.OnMouseMove(e);
+         }
+ 
++        /// <summary>
++        /// Feeds a cursor position into the trail independently of framework
++        /// mouse input. Scene renderers use this for scripted skinned cursors.
++        /// </summary>
++        public virtual void UpdateCursorPosition(Vector2 screenSpacePosition)
++        {
++            AddTrail(screenSpacePosition);
++        }
++
++        /// <summary>
++        /// Clears existing trail pieces and sampling history. External preview
++        /// renderers use this before a scripted cursor teleports or its surface
++        /// is resized so unrelated positions are never joined by a streak.
++        /// </summary>
++        public void ResetTrail()
++        {
++            lastPosition = null;
++            resampler = new InputResampler();
++            currentIndex = 0;
++            for (int i = 0; i < parts.Length; i++)
++                parts[i].InvalidationID = -1;
++            Invalidate(Invalidation.DrawNode);
++        }
++
+         protected void AddTrail(Vector2 position)
+         {
+             position = ToLocalSpace(position);
+diff --git a/osu.Game.Rulesets.Osu/UI/OsuPlayfield.cs b/osu.Game.Rulesets.Osu/UI/OsuPlayfield.cs
+index e379c44..394b543 100644
+--- a/osu.Game.Rulesets.Osu/UI/OsuPlayfield.cs
++++ b/osu.Game.Rulesets.Osu/UI/OsuPlayfield.cs
+@@ -1,7 +1,8 @@
+-﻿// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
++// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+ // See the LICENCE file in the repository root for full licence text.
+ 
+ using System;
++using System.Collections.Generic;
+ using System.Diagnostics;
+ using System.Diagnostics.CodeAnalysis;
+ using System.Linq;
+@@ -16,6 +17,7 @@
+ using osu.Game.Rulesets.Objects.Legacy;
+ using osu.Game.Rulesets.Osu.Beatmaps;
+ using osu.Game.Rulesets.Osu.Configuration;
++using osu.Game.Rulesets.Osu.Judgements;
+ using osu.Game.Rulesets.Osu.Objects;
+ using osu.Game.Rulesets.Osu.Objects.Drawables;
+ using osu.Game.Rulesets.Osu.Objects.Drawables.Connections;
+@@ -34,6 +36,7 @@ public partial class OsuPlayfield : Playfield
+         private readonly ProxyContainer approachCircles;
+         private readonly ProxyContainer spinnerProxies;
+         private readonly JudgementContainer<DrawableOsuJudgement> judgementLayer;
++        private readonly Container<DrawableOsuJudgement> assetPreviewJudgementLayer;
+ 
+         private readonly JudgementPooler<DrawableOsuJudgement> judgementPooler;
+ 
+@@ -51,6 +54,7 @@ public partial class OsuPlayfield : Playfield
+         public override Quad SkinnableComponentScreenSpaceDrawQuad => playfieldBorder.ScreenSpaceDrawQuad;
+ 
+         private readonly Container judgementAboveHitObjectLayer;
++        private readonly Container assetPreviewJudgementAboveHitObjectLayer;
+ 
+         public OsuPlayfield()
+         {
+@@ -68,8 +72,10 @@ public OsuPlayfield()
+                 spinnerProxies = new ProxyContainer { RelativeSizeAxes = Axes.Both },
+                 FollowPoints = new FollowPointRenderer { RelativeSizeAxes = Axes.Both },
+                 judgementLayer = new JudgementContainer<DrawableOsuJudgement> { RelativeSizeAxes = Axes.Both },
++                assetPreviewJudgementLayer = new Container<DrawableOsuJudgement> { RelativeSizeAxes = Axes.Both },
+                 HitObjectContainer,
+                 judgementAboveHitObjectLayer = new Container { RelativeSizeAxes = Axes.Both },
++                assetPreviewJudgementAboveHitObjectLayer = new Container { RelativeSizeAxes = Axes.Both },
+                 approachCircles = new ProxyContainer { RelativeSizeAxes = Axes.Both },
+             };
+ 
+@@ -131,6 +137,53 @@ private void onJudgementLoaded(DrawableOsuJudgement judgement)
+             judgementAboveHitObjectLayer.Add(judgement.ProxiedAboveHitObjectsContent);
+         }
+ 
++        /// <summary>
++        /// Displays real lazer judgement drawables at their normal gameplay
++        /// timing for an external asset-inspection scene.
++        /// </summary>
++        public void ShowAssetPreviewJudgements(IReadOnlyList<HitResult> results, double time)
++        {
++            ClearAssetPreviewJudgements();
++            if (results.Count == 0)
++                return;
++
++            const float spacing = 112;
++            float firstX = BASE_SIZE.X / 2 - spacing * (results.Count - 1) / 2;
++            for (int index = 0; index < results.Count; index++)
++            {
++                var hitObject = new HitCircle
++                {
++                    StartTime = time,
++                    Position = new Vector2(firstX + index * spacing, BASE_SIZE.Y / 2),
++                };
++                var judgement = judgementPooler.Get(results[index], candidate =>
++                {
++                    candidate.Apply(
++                        new OsuJudgementResult(hitObject, new OsuJudgement())
++                        {
++                            Type = results[index],
++                        },
++                        null);
++                    candidate.Anchor = Anchor.TopLeft;
++                    candidate.Origin = Anchor.Centre;
++                    candidate.Position = hitObject.Position;
++                });
++                if (judgement != null)
++                    assetPreviewJudgementLayer.Add(judgement);
++            }
++        }
++
++        /// <summary>
++        /// Removes only the judgement drawables owned by the asset preview.
++        /// Normal gameplay judgements remain untouched.
++        /// </summary>
++        public void ClearAssetPreviewJudgements()
++        {
++            foreach (var judgement in assetPreviewJudgementLayer.ToArray())
++                judgement.Expire();
++            assetPreviewJudgementAboveHitObjectLayer.Clear(true);
++        }
++
+         [BackgroundDependencyLoader]
+         private void load(OsuRulesetConfigManager? config, IBeatmap? beatmap)
+         {
+diff --git a/osu.Game/Rulesets/UI/HitObjectContainer.cs b/osu.Game/Rulesets/UI/HitObjectContainer.cs
+index c2879e6..40f12fa 100644
+--- a/osu.Game/Rulesets/UI/HitObjectContainer.cs
++++ b/osu.Game/Rulesets/UI/HitObjectContainer.cs
+@@ -56,6 +56,16 @@ public HitObjectContainer()
+             RelativeSizeAxes = Axes.Both;
+         }
+ 
++        /// <summary>
++        /// Keeps the small set of real hit-object drawables used by an external
++        /// asset preview resident while its gameplay clock is paused.
++        /// </summary>
++        public void EnableAssetPreviewLifetimeExtension()
++        {
++            PastLifetimeExtension = 60_000;
++            FutureLifetimeExtension = 60_000;
++        }
++
+         protected override void LoadAsyncComplete()
+         {
+             base.LoadAsyncComplete();
+diff --git a/osu.Game/Rulesets/UI/Playfield.cs b/osu.Game/Rulesets/UI/Playfield.cs
+index 90a2f63..2159c58 100644
+--- a/osu.Game/Rulesets/UI/Playfield.cs
++++ b/osu.Game/Rulesets/UI/Playfield.cs
+@@ -175,6 +175,35 @@ public virtual void Add(DrawableHitObject h)
+             OnHitObjectAdded(h.HitObject);
+         }
+ 
++        /// <summary>
++        /// Adds a real ruleset drawable directly to the playfield for a
++        /// non-gameplay asset preview. The drawable is deliberately excluded
++        /// from the judgement and pooled lifetime managers.
++        /// </summary>
++        public void AddAssetPreviewDrawable(DrawableHitObject drawable)
++        {
++            if (!drawable.IsInitialized)
++                onNewDrawableHitObject(drawable);
++
++            drawable.OnLoadComplete += loaded =>
++            {
++                loaded.LifetimeStart = double.MinValue;
++                loaded.LifetimeEnd = double.MaxValue;
++            };
++            // Drawable hit objects must live under the hit-object container to
++            // inherit the ruleset playfield's coordinate and masking space.
++            // Keeping them out of the lifetime/judgement maps still leaves
++            // this as a presentation-only path.
++            HitObjectContainer.Add(drawable);
++        }
++
++        /// <summary>
++        /// Adds non-interactive presentation furniture to an asset preview.
++        /// This stays inside the ruleset playfield so it is clipped and scaled
++        /// with the real gameplay surface.
++        /// </summary>
++        public void AddAssetPreviewOverlay(Drawable drawable) => AddInternal(drawable);
++
+         /// <summary>
+         /// Remove a DrawableHitObject from this Playfield.
+         /// </summary>
+diff --git a/osu.Game/Screens/Play/Player.cs b/osu.Game/Screens/Play/Player.cs
+index 77f4a6a..669c2a1 100644
+--- a/osu.Game/Screens/Play/Player.cs
++++ b/osu.Game/Screens/Play/Player.cs
+@@ -252,6 +252,7 @@ private void load(OsuConfigManager config, OsuGameBase game, CancellationToken c
+                 gameActive.BindTo(game.IsActive);
+ 
+             DrawableRuleset = ruleset.CreateDrawableRulesetWith(playableBeatmap, gameplayMods);
++            PrepareDrawableRuleset(DrawableRuleset);
+             dependencies.CacheAs(DrawableRuleset);
+ 
+             if (DrawableRuleset is IDrawableScrollingRuleset scrollingRuleset)
+@@ -435,6 +436,14 @@ private void load(OsuConfigManager config, OsuGameBase game, CancellationToken c
+ 
+         protected virtual GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart) => new MasterGameplayClockContainer(beatmap, gameplayStart);
+ 
++        /// <summary>
++        /// Allows specialised renderer surfaces to configure the drawable ruleset
++        /// before it enters the load hierarchy.
++        /// </summary>
++        protected virtual void PrepareDrawableRuleset(DrawableRuleset drawableRuleset)
++        {
++        }
++
+         private Drawable createUnderlayComponents(WorkingBeatmap working)
+         {
+             var container = new Container

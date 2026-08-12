@@ -2319,7 +2319,7 @@ public sealed class SkinEditorDomainTests
     }
 
     [Fact]
-    public void Number_font_plan_uses_managed_prefix_and_only_removes_old_managed_font()
+    public void Number_font_plan_preserves_source_names_and_removes_replaced_prefix()
     {
         var manifest = new SkinExtraPackManifest
         {
@@ -2351,10 +2351,112 @@ public sealed class SkinEditorDomainTests
             ini);
 
         Assert.Contains(plan.Changes, change => change.Filename == "kumori-font-old-0.png" && change.IsDeletion);
-        Assert.Contains(plan.Changes, change => change.Filename == "kumori-font-aaaaaaaaaaaa-0.png");
+        Assert.Contains(plan.Changes, change => change.Filename == "default-0.png");
+        Assert.DoesNotContain(plan.Changes, change =>
+            change.Filename.StartsWith("kumori-font-", StringComparison.OrdinalIgnoreCase)
+            && !change.IsDeletion);
         Assert.DoesNotContain(plan.Changes, change => change.Filename == "score-0.png");
         Assert.Contains(plan.IniPatch, entry =>
-            entry.Key == "HitCirclePrefix" && entry.Value == "kumori-font-aaaaaaaaaaaa");
+            entry.Key == "HitCirclePrefix" && entry.Value == "default");
+    }
+
+    [Fact]
+    public void Number_font_plan_preserves_one_shared_source_and_its_prefixes()
+    {
+        var manifest = new SkinExtraPackManifest
+        {
+            Id = "shared-font-pack",
+            DisplayName = "Shared font pack",
+            FamilyId = "osu.number-font",
+            Area = "osu!",
+            FamilyName = "Number fonts",
+            Fingerprint = new string('a', 64),
+            FontRoles = ["Hitcircle", "Score", "Combo"],
+            IniPatch =
+            [
+                new SkinExtraIniPatchEntry("Fonts", "HitCirclePrefix", "numbers"),
+                new SkinExtraIniPatchEntry("Fonts", "ScorePrefix", "numbers"),
+                new SkinExtraIniPatchEntry("Fonts", "ComboPrefix", "numbers"),
+            ],
+        };
+
+        var plan = SkinExtraPackPlanner.BuildFamilyPlan(
+            manifest,
+            [],
+            [new SkinExtraPackFile("numbers-7@2x.png", [7])],
+            SkinIniDocument.ParseText("[Fonts]\nHitCirclePrefix: default\nScorePrefix: score\nComboPrefix: score\n"));
+
+        Assert.Equal("numbers-7@2x.png", Assert.Single(plan.Changes).Filename);
+        Assert.Contains(plan.IniPatch, entry =>
+            entry.Key == "HitCirclePrefix" && entry.Value == "numbers");
+        Assert.Contains(plan.IniPatch, entry =>
+            entry.Key == "ScorePrefix" && entry.Value == "numbers");
+        Assert.Contains(plan.IniPatch, entry =>
+            entry.Key == "ComboPrefix" && entry.Value == "numbers");
+    }
+
+    [Fact]
+    public void Number_font_plan_preserves_custom_score_prefix_and_filename()
+    {
+        var manifest = new SkinExtraPackManifest
+        {
+            Id = "score-font-pack",
+            DisplayName = "Score font pack",
+            FamilyId = "osu.number-font",
+            Area = "osu!",
+            FamilyName = "Number fonts",
+            Fingerprint = new string('b', 64),
+            FontRoles = ["Score"],
+            IniPatch =
+            [
+                new SkinExtraIniPatchEntry("Fonts", "ScorePrefix", "points"),
+            ],
+        };
+
+        var plan = SkinExtraPackPlanner.BuildFamilyPlan(
+            manifest,
+            [],
+            [new SkinExtraPackFile("points-0.png", [0])],
+            SkinIniDocument.ParseText("[Fonts]\nScorePrefix: score\n"));
+
+        Assert.Equal("points-0.png", Assert.Single(plan.Changes).Filename);
+        Assert.Equal(
+            "points",
+            Assert.Single(plan.IniPatch, entry => entry.Key == "ScorePrefix").Value);
+    }
+
+    [Fact]
+    public void Number_font_plan_keeps_shared_current_prefix_used_by_an_untouched_role()
+    {
+        var manifest = new SkinExtraPackManifest
+        {
+            Id = "score-font-pack",
+            DisplayName = "Score font pack",
+            FamilyId = "osu.number-font",
+            Area = "osu!",
+            FamilyName = "Number fonts",
+            Fingerprint = new string('c', 64),
+            FontRoles = ["Score"],
+            IniPatch =
+            [
+                new SkinExtraIniPatchEntry("Fonts", "ScorePrefix", "points"),
+            ],
+        };
+        var current = new[]
+        {
+            new LazerSkinFileInfo("shared-0.png", new string('d', 64), 1),
+        };
+
+        var plan = SkinExtraPackPlanner.BuildFamilyPlan(
+            manifest,
+            current,
+            [new SkinExtraPackFile("points-0.png", [0])],
+            SkinIniDocument.ParseText(
+                "[Fonts]\nHitCirclePrefix: default\nScorePrefix: shared\nComboPrefix: shared\n"));
+
+        Assert.DoesNotContain(plan.Changes, change =>
+            change.Filename == "shared-0.png" && change.IsDeletion);
+        Assert.Contains(plan.Changes, change => change.Filename == "points-0.png");
     }
 
     private static LazerSkinFileInfo File(string filename) =>

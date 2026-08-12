@@ -721,49 +721,31 @@ public static class SkinExtraPackPlanner
 
         if (manifest.FamilyId.Equals("osu.number-font", StringComparison.OrdinalIgnoreCase))
         {
-            var managedPrefix = $"kumori-font-{manifest.Fingerprint[..12]}";
-            var sourcePrefixes = patch
-                .Where(entry => entry.Section.Equals("Fonts", StringComparison.OrdinalIgnoreCase)
-                                && entry.Key.EndsWith("Prefix", StringComparison.OrdinalIgnoreCase)
-                                && !string.IsNullOrWhiteSpace(entry.Value))
-                .Select(entry => Path.GetFileName(entry.Value!))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(value => value.Length)
-                .ToArray();
-            incoming = incoming.Select(file =>
-            {
-                var target = Path.GetFileName(file.Filename);
-                foreach (var prefix in sourcePrefixes)
-                {
-                    if (!target.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    target = managedPrefix + target[prefix.Length..];
-                    break;
-                }
-                return new SkinExtraPackFile(target, file.Bytes);
-            }).ToArray();
-            patch = patch.Select(entry =>
-                entry.Section.Equals("Fonts", StringComparison.OrdinalIgnoreCase)
-                && entry.Key.EndsWith("Prefix", StringComparison.OrdinalIgnoreCase)
-                    ? entry with { Value = managedPrefix }
-                    : entry).ToList();
-            var managedCurrentPrefixes = manifest.FontRoles
-                .Select(role => role switch
-                {
-                    "Hitcircle" => "HitCirclePrefix",
-                    "Score" => "ScorePrefix",
-                    "Combo" => "ComboPrefix",
-                    _ => "",
-                })
-                .Where(key => key.Length > 0)
-                .Select(key => currentIni?.GetValue("Fonts", key))
-                .Where(value => value?.StartsWith("kumori-font-", StringComparison.OrdinalIgnoreCase) == true)
+            var affectedPrefixKeys = manifest.FontRoles
+                .Select(NumberFontPrefixKeyForRole)
+                .Where(key => key is not null)
                 .Cast<string>()
-                .Select(Path.GetFileName)
+                .Concat(patch
+                    .Where(entry => entry.Section.Equals(
+                                        "Fonts",
+                                        StringComparison.OrdinalIgnoreCase)
+                                    && IsNumberFontPrefixKey(entry.Key))
+                    .Select(entry => entry.Key))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var unaffectedPrefixes = NumberFontPrefixKeys
+                .Where(key => !affectedPrefixKeys.Contains(key))
+                .Select(key => CurrentNumberFontPrefix(currentIni, key))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var ownedPrefixes = affectedPrefixKeys
+                .Select(key => CurrentNumberFontPrefix(currentIni, key))
+                .Where(prefix => !unaffectedPrefixes.Contains(prefix))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             owned = currentFiles
-                .Where(file => managedCurrentPrefixes.Any(prefix =>
-                    Path.GetFileName(file.Filename).StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase)))
+                .Where(file => ownedPrefixes.Any(prefix =>
+                    Path.GetFileName(file.Filename).StartsWith(
+                        prefix + "-",
+                        StringComparison.OrdinalIgnoreCase)))
                 .Where(file => !lazerUsedOnly
                                || SkinExtraLazerCompatibility.IsLazerUsed(
                                    file.Filename,
@@ -818,6 +800,36 @@ public static class SkinExtraPackPlanner
                     : $"{file.Filename} (replaced from {manifest.DisplayName})"));
         }
         return new SkinExtraApplicationPlan(changes, patch, owned);
+    }
+
+    private static readonly string[] NumberFontPrefixKeys =
+        ["HitCirclePrefix", "ScorePrefix", "ComboPrefix"];
+
+    private static bool IsNumberFontPrefixKey(string settingKey) =>
+        NumberFontPrefixKeys.Contains(settingKey, StringComparer.OrdinalIgnoreCase);
+
+    private static string? NumberFontPrefixKeyForRole(string role) =>
+        role.ToLowerInvariant() switch
+        {
+            "hitcircle" => "HitCirclePrefix",
+            "score" => "ScorePrefix",
+            "combo" => "ComboPrefix",
+            _ => null,
+        };
+
+    private static string CurrentNumberFontPrefix(
+        SkinIniDocument? currentIni,
+        string settingKey)
+    {
+        var configured = currentIni?.GetValue("Fonts", settingKey);
+        if (!string.IsNullOrWhiteSpace(configured))
+            return Path.GetFileName(configured.Replace('\\', '/'));
+
+        return settingKey.ToLowerInvariant() switch
+        {
+            "hitcircleprefix" => "default",
+            _ => "score",
+        };
     }
 }
 

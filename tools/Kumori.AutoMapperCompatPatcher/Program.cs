@@ -63,6 +63,11 @@ internal static class Program
             if (File.Exists(cachePath))
             {
                 CopyAtomically(cachePath, assemblyPath);
+                // A cache hit must meet the same fail-closed IL invariants as a
+                // freshly patched assembly. Never trust a stale, truncated, or
+                // externally modified cache entry merely because its filename
+                // matches the expected hashes.
+                VerifyPatched(assemblyPath);
                 Console.WriteLine($"Used cached AutoMapper compatibility patch: {assemblyPath}");
                 return;
             }
@@ -188,6 +193,24 @@ internal static class Program
         EnsureLegacyConstructorCallsAreAbsent(module);
         WriteAtomically(assembly, assemblyPath);
         Console.WriteLine($"Patched {sites.Count} AutoMapper constructor call(s): {assemblyPath}");
+    }
+
+    private static void VerifyPatched(string assemblyPath)
+    {
+        using var assembly = AssemblyDefinition.ReadAssembly(
+            assemblyPath,
+            new ReaderParameters
+            {
+                InMemory = true,
+                ReadingMode = ReadingMode.Deferred,
+            });
+        ModuleDefinition module = assembly.MainModule;
+        if (module.GetType(MarkerNamespace, MarkerName) is null)
+        {
+            throw new InvalidDataException(
+                "The cached osu.Game compatibility assembly is missing its patch marker.");
+        }
+        EnsureLegacyConstructorCallsAreAbsent(module);
     }
 
     private static IEnumerable<(MethodDefinition, Instruction, MethodReference)> FindLegacyConstructorCalls(

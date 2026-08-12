@@ -264,6 +264,27 @@ public sealed class LazerSkinRealmServiceTests : IDisposable
         });
     }
 
+    [Fact]
+    public void Dynamic_skin_service_does_not_share_an_assembly_with_default_schema_models()
+    {
+        // osu! opens its own default-schema Realm before the Studio shell is
+        // constructed. Keeping Kumori's mapped test/read models in a separate,
+        // lazily loaded assembly prevents Realm's generated module initializer
+        // from registering duplicate Skin/File types at that point.
+        Assert.NotEqual(
+            typeof(LazerSkinRealmService).Assembly,
+            typeof(LazerSkin).Assembly);
+        Assert.DoesNotContain(
+            typeof(LazerSkinRealmService).Assembly.GetTypes(),
+            type => typeof(RealmObjectBase).IsAssignableFrom(type));
+        Assert.Null(
+            typeof(LazerSkinRealmService)
+                .Assembly
+                .ManifestModule
+                .GetType("<Module>")?
+                .TypeInitializer);
+    }
+
     private RealmConfiguration Configuration() => new(Path.Combine(root, "client.realm"))
     {
         Schema = new[]

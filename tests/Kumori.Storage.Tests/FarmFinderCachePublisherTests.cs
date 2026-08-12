@@ -63,7 +63,7 @@ public sealed class FarmFinderCachePublisherTests : IDisposable
             "0.6.2"));
 
         Assert.Equal(
-            "farm-finder-v5-20260730T131415Z.sqlite3",
+            "farm-finder-v6-20260730T131415Z.sqlite3",
             Path.GetFileName(result.DatabasePath));
         Assert.Equal(2, Directory.GetFiles(result.PackageDirectory).Length);
         Assert.False(File.Exists(result.DatabasePath + "-wal"));
@@ -111,7 +111,7 @@ public sealed class FarmFinderCachePublisherTests : IDisposable
             File.ReadAllBytes(result.ManifestPath));
         var rootElement = manifest.RootElement;
         Assert.Equal(1, rootElement.GetProperty("formatVersion").GetInt32());
-        Assert.Equal(5, rootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(6, rootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(result.SizeBytes, rootElement.GetProperty("sizeBytes").GetInt64());
         Assert.Equal(result.Sha256, rootElement.GetProperty("sha256").GetString());
         Assert.Equal(
@@ -149,7 +149,7 @@ public sealed class FarmFinderCachePublisherTests : IDisposable
     {
         Directory.CreateDirectory(root);
         var source = Path.Combine(root, "source-v4.sqlite3");
-        var output = Path.Combine(root, "output-v5");
+        var output = Path.Combine(root, "output-v6");
         await CreatePopulatedDatabaseAsync(source);
         using (var connection = new SqliteConnection(
                    new SqliteConnectionStringBuilder
@@ -187,7 +187,7 @@ public sealed class FarmFinderCachePublisherTests : IDisposable
         using var schema = published.CreateCommand();
         schema.CommandText =
             "SELECT value FROM farm_metadata WHERE key='schema_version'";
-        Assert.Equal("5", schema.ExecuteScalar());
+        Assert.Equal("6", schema.ExecuteScalar());
         using var ratings = published.CreateCommand();
         ratings.CommandText =
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='farm_star_ratings'";

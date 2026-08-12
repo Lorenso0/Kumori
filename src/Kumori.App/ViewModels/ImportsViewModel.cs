@@ -102,8 +102,11 @@ public partial class ImportsViewModel : ObservableObject
         ApplyFilter();
     }
 
-    public async Task OpenReplayInspectorAsync(AttemptRowViewModel row)
+    public async Task OpenReplayInspectorAsync(AttemptRowViewModel row, Window? owner = null)
     {
+        if (IsReplayAnalyzerLoading)
+            return;
+
         SelectedAttempt = row;
         IsReplayAnalyzerLoading = true;
         ReplayAnalyzerLoadingText = "Loading shared replay...";
@@ -116,6 +119,15 @@ public partial class ImportsViewModel : ObservableObject
             await Inspector.OpenReplayInspectorCommand.ExecuteAsync(null);
             if (!string.IsNullOrWhiteSpace(Inspector.LoadError))
                 throw new InvalidOperationException(Inspector.LoadError);
+
+            if (Inspector.TakeLastReplayInspectorProcess() is { } process && owner is not null)
+            {
+                ReplayAnalyzerLoadingText = "Opening Replay Analyzer...";
+                _ = await ReplayAnalyzerWindowPlacement.CenterNearOwnerAsync(
+                    process,
+                    owner,
+                    activate: true);
+            }
             HistoryStatus = "Replay Analyzer opened";
         }
         finally

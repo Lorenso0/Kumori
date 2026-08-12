@@ -108,6 +108,14 @@ public interface IOsuCredentialsStore
     Task DeleteAsync(CancellationToken cancellationToken = default);
 }
 
+public interface IOsuBeatmapScoreProvider
+{
+    Task<OsuBeatmapUserScore?> GetBeatmapUserScoreAsync(
+        long beatmapId,
+        long userId,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IFarmFinderRepository
 {
     Task InitializeAsync(CancellationToken cancellationToken = default);
@@ -118,6 +126,8 @@ public interface IFarmFinderRepository
     Task UpsertRankingPlayersAsync(long jobId, IReadOnlyList<FarmPlayer> players, CancellationToken cancellationToken = default);
     Task UpsertCountryCoverageAsync(long jobId, CountryCoverage coverage, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<FarmPlayer>> GetPlayersInRangeAsync(int minimumRank, int maximumRank, CancellationToken cancellationToken = default);
+    Task<FarmScoreMetadataRepairStatus> GetScoreMetadataRepairStatusAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FarmPlayer>> GetPlayersNeedingScoreMetadataRepairAsync(CancellationToken cancellationToken = default);
     Task ReplacePlayerScoresAsync(PlayerScoresPayload payload, CancellationToken cancellationToken = default);
     Task RecordPlayerFailureAsync(long jobId, long userId, string error, CancellationToken cancellationToken = default);
     Task MarkPlayerCompletedAsync(long jobId, long userId, CancellationToken cancellationToken = default);
@@ -145,6 +155,10 @@ public interface IFarmFinderService
     Task<CoverageSummary> UpdateIndexAsync(
         FarmFinderQuery query,
         bool forceRefresh,
+        IProgress<FarmFinderProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    Task<FarmScoreMetadataRepairResult> RepairScoreMetadataAsync(
         IProgress<FarmFinderProgress>? progress = null,
         CancellationToken cancellationToken = default);
 }

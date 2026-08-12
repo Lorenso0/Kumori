@@ -169,11 +169,21 @@ public sealed class FarmMapAggregator(
                     value.Candidate.Score.ActualMods)
             {
                 BeatmapId = value.Candidate.Score.BeatmapId,
+                Origin = value.Candidate.Score.Origin,
+                LegacyScoreId = value.Candidate.Score.LegacyScoreId,
+                TotalScore = value.Candidate.Score.TotalScore,
+                LegacyTotalScore = value.Candidate.Score.LegacyTotalScore,
+                BuildId = value.Candidate.Score.BuildId,
+                SourceType = value.Candidate.Score.SourceType,
             })
                 .OrderByDescending(detail => detail.Pp)
                 .ThenByDescending(detail => detail.Accuracy)
                 .ThenByDescending(detail => detail.ScoreDate)
                 .ThenBy(detail => detail.UserId)
+                .Select((detail, index) => detail with
+                {
+                    LeaderboardRank = index + 1,
+                })
                 .ToArray();
 
             var fullCombos = scores.Count(score => score.IsFullCombo);
