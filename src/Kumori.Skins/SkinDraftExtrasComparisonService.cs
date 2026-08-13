@@ -53,6 +53,19 @@ public sealed class SkinDraftExtrasComparisonService
         }
 
         var effective = packages.Materialize(draftId);
+        var imageTransforms = selection.ImageTransforms
+                              ?? new Dictionary<string, SkinImageTransform>(
+                                  StringComparer.OrdinalIgnoreCase);
+        var selectedComponents = targets
+            .Select(SkinDraftAssetService.ComponentName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (imageTransforms.Keys.Any(component =>
+                !selectedComponents.Contains(component)))
+        {
+            throw new InvalidDataException(
+                "Extras recolouring contains an element outside the file selection.");
+        }
+        var transformer = new SkinImageTransformService();
         var added = 0;
         var replaced = 0;
         var identical = 0;
@@ -63,8 +76,19 @@ public sealed class SkinDraftExtrasComparisonService
                 added++;
                 continue;
             }
+            var comparisonHash = declared[target].ByteHash;
+            var component = SkinDraftAssetService.ComponentName(target);
+            if (imageTransforms.TryGetValue(component, out var transform))
+            {
+                var path = containedPackPath(pack.DirectoryPath, target);
+                comparisonHash = SkinDraftWorkspaceService.Hash(
+                    transformer.Apply(
+                        File.ReadAllBytes(path),
+                        target,
+                        transform));
+            }
             if (SkinDraftWorkspaceService.Hash(current).Equals(
-                    declared[target].ByteHash,
+                    comparisonHash,
                     StringComparison.OrdinalIgnoreCase))
             {
                 identical++;
@@ -75,9 +99,6 @@ public sealed class SkinDraftExtrasComparisonService
             }
         }
 
-        var selectedComponents = targets
-            .Select(SkinDraftAssetService.ComponentName)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var removed = effective.Keys.Count(filename =>
             !filename.Equals("skin.ini", StringComparison.OrdinalIgnoreCase)
             && family.Matches(filename)
@@ -120,5 +141,18 @@ public sealed class SkinDraftExtrasComparisonService
             removed,
             changedSettings,
             identicalSettings);
+    }
+
+    private static string containedPackPath(string directory, string filename)
+    {
+        var root = Path.GetFullPath(directory);
+        var candidate = Path.GetFullPath(Path.Combine(
+            root,
+            filename.Replace('/', Path.DirectorySeparatorChar)));
+        var prefix = Path.TrimEndingDirectorySeparator(root)
+                     + Path.DirectorySeparatorChar;
+        if (!candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Extras pack path escaped its directory.");
+        return candidate;
     }
 }

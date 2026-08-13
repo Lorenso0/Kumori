@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -1902,8 +1903,6 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 pack.Descriptor,
                 SmoothTrailCheckBox.IsChecked == true));
         _ = EnsureElementThumbnailsAsync(pack);
-        foreach (var element in pack.Elements)
-            element.SetTint(Colors.White);
         var cursorFamily = SkinCursorMiddlePolicy.IsCursorFamily(
             pack.Manifest.FamilyId);
         NativePreviewControls.Visibility = rendererTargetVisible && cursorFamily
@@ -2241,7 +2240,8 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         var selected = CreatePreviewPack(
             pack,
             selectedFiles,
-            SelectedPatch(pack));
+            SelectedPatch(pack),
+            applyElementTints: true);
         var rendered = RenderPackToCanvas(selected, CursorTrailCanvas);
         PreviewModeBar.Visibility = rendererTargetVisible
             ? Visibility.Hidden
@@ -2331,8 +2331,11 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private SkinExtraPackPreview CreatePreviewPack(
         SkinExtraPackPreview source,
         IReadOnlyDictionary<string, string> targetPaths,
-        IReadOnlyList<SkinExtraIniPatchEntry> patch)
+        IReadOnlyList<SkinExtraIniPatchEntry> patch,
+        bool applyElementTints = false)
     {
+        if (applyElementTints)
+            targetPaths = ApplyElementTintsToPreview(source, targetPaths);
         var imageTargets = targetPaths
             .Where(pair => SkinElementCategorizer.IsImage(pair.Key))
             .ToArray();
@@ -2370,6 +2373,54 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             ImagePaths = imagePaths,
             AudioPaths = audioPaths,
         };
+    }
+
+    private IReadOnlyDictionary<string, string> ApplyElementTintsToPreview(
+        SkinExtraPackPreview pack,
+        IReadOnlyDictionary<string, string> targetPaths)
+    {
+        var tints = pack.Elements
+            .Where(element => element.CanTint
+                              && element.IsTinted
+                              && element.IsSelected != false)
+            .ToDictionary(
+                element => element.Key,
+                element => element.TintRgb,
+                StringComparer.OrdinalIgnoreCase);
+        if (tints.Count == 0)
+            return targetPaths;
+
+        var sourceFiles = targetPaths
+            .Where(pair => SkinElementCategorizer.IsImage(pair.Key))
+            .Select(pair => new SkinExtraPackFile(
+                pair.Key,
+                File.ReadAllBytes(pair.Value)))
+            .ToArray();
+        var recoloured = SkinExtraElementTinting.Apply(
+            pack.Manifest.FamilyId,
+            sourceFiles,
+            tints);
+        var result = targetPaths.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+        var directory = Path.Combine(previewTempRoot, "recoloured");
+        Directory.CreateDirectory(directory);
+        for (var index = 0; index < recoloured.Count; index++)
+        {
+            if (ReferenceEquals(recoloured[index], sourceFiles[index]))
+                continue;
+            var digest = Convert.ToHexString(
+                    SHA256.HashData(recoloured[index].Bytes))
+                .ToLowerInvariant()[..16];
+            var path = Path.Combine(
+                directory,
+                $"{digest}-{Path.GetFileName(recoloured[index].Filename)}");
+            if (!File.Exists(path))
+                File.WriteAllBytes(path, recoloured[index].Bytes);
+            result[recoloured[index].Filename] = path;
+        }
+        return result;
     }
 
     private static BitmapSource? LoadExactTarget(
@@ -2442,7 +2493,11 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 StringComparer.OrdinalIgnoreCase);
             OverlaySelectedLogicalElements(pack, currentFiles, integratedFiles);
             var integratedPatch = OverlayPatch(currentPatch, SelectedPatch(pack));
-            var integratedPack = CreatePreviewPack(pack, integratedFiles, integratedPatch);
+            var integratedPack = CreatePreviewPack(
+                pack,
+                integratedFiles,
+                integratedPatch,
+                applyElementTints: true);
             RenderAudioComparison(currentFiles, integratedFiles, pack.Manifest.Area);
 
             var currentRendered = RenderPackToCanvas(currentPack, CurrentPreviewCanvas);
@@ -2707,6 +2762,11 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                       && sender is ToggleButton { Tag: "Current" };
         var compare = currentSkinSource is not null
                       && sender is ToggleButton { Tag: "Compare" };
+        SetPreviewMode(current, compare, refresh: true);
+    }
+
+    private void SetPreviewMode(bool current, bool compare, bool refresh)
+    {
         CurrentSkinPreviewButton.IsChecked = current;
         ComparePreviewButton.IsChecked = compare;
         PackOnlyPreviewButton.IsChecked = !current && !compare;
@@ -2723,7 +2783,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         CursorPreview.Visibility = current || compare
             ? Visibility.Collapsed
             : Visibility.Visible;
-        if ((current || compare) && selectedPack is not null)
+        if (refresh && (current || compare) && selectedPack is not null)
             _ = RefreshComparisonPreviewAsync(selectedPack);
         ResetExtrasPreviewAnimation();
         UpdateExtrasPreviewAnimationSubscription();
@@ -2733,6 +2793,10 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     {
         previewAnimationsEnabled = PreviewPlaybackToggle.IsChecked == true;
         UpdatePreviewPlaybackPresentation();
+        if (previewAnimationsEnabled)
+            ResetExtrasPreviewAnimation();
+        else
+            RenderExtrasPreviewFrame();
         previewAnimationsChanged?.Invoke(previewAnimationsEnabled);
         UpdateExtrasPreviewAnimationSubscription();
     }
@@ -2741,11 +2805,13 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     {
         if (sender is not Button { DataContext: PackElementEntry element } button)
             return;
+        if (!element.CanTint)
+            return;
         activeTintElement = element;
         ElementColorPicker.Open(
             element.TintHex,
             element.Name,
-            "Tint only this logical element in the native lazer preview.",
+            "Recolour this element in the preview and stage the recoloured files when it is added to Changes.",
             allowOpacity: false);
         ElementColorPickerPopup.PlacementTarget = button;
         ElementColorPickerPopup.IsOpen = true;
@@ -2764,6 +2830,10 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 return;
             }
             element.SetTint(colour);
+            var pack = allPacks.FirstOrDefault(candidate =>
+                candidate.Elements.Contains(element));
+            if (pack is not null)
+                RefreshSelectionPreview(pack);
             PreviewTintChanged?.Invoke(
                 this,
                 new SkinExtrasPreviewTintChangedEventArgs(
@@ -2869,6 +2939,12 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     {
         if (!extrasCanvasAnimationStates.TryGetValue(canvas, out var context))
             return;
+        var previewElapsed = SkinPreviewAnimation.ExtrasTime(
+            context.FamilyId,
+            extrasPreviewElapsed);
+        var staticHitCircle = UsesStaticHitCirclePreview(
+            context.FamilyId,
+            previewAnimationsEnabled);
         var images = canvas.Children
             .OfType<Image>()
             .Where(image => image.Tag is PreviewLayerVisual)
@@ -2884,15 +2960,15 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         {
             context.Health = SkinPreviewAnimation.SmoothHealth(
                 context.Health,
-                SkinPreviewAnimation.HealthTarget(extrasPreviewElapsed),
+                SkinPreviewAnimation.HealthTarget(previewElapsed),
                 extrasPreviewFrameDelta);
         }
 
         var slider = SkinPreviewAnimation.Slider(
-            extrasPreviewElapsed,
+            previewElapsed,
             context.LegacyVersionOne);
         var spinner = SkinPreviewAnimation.Spinner(
-            extrasPreviewElapsed,
+            previewElapsed,
             context.SpinnerNoBlink);
         var placements = new Dictionary<PreviewLayerVisual, ExtrasAnimationPlacement>();
 
@@ -2908,22 +2984,32 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             switch (layer.AnimationRole)
             {
                 case SkinPreviewAnimationRole.ApproachCircle:
-                    var approach = SkinPreviewAnimation.Approach(extrasPreviewElapsed);
-                    scaleX = scaleY = approach.Scale;
-                    opacity *= approach.Opacity;
+                    if (staticHitCircle)
+                    {
+                        opacity = 0;
+                    }
+                    else
+                    {
+                        var approach = SkinPreviewAnimation.Approach(previewElapsed);
+                        scaleX = scaleY = approach.Scale;
+                        opacity *= approach.Opacity;
+                    }
                     break;
 
                 case SkinPreviewAnimationRole.HitCircle:
-                    var hit = SkinPreviewAnimation.HitObject(extrasPreviewElapsed);
-                    scaleX = scaleY = hit.Scale;
-                    opacity *= hit.Opacity;
+                    if (!staticHitCircle)
+                    {
+                        var hit = SkinPreviewAnimation.HitObject(previewElapsed);
+                        scaleX = scaleY = hit.Scale;
+                        opacity *= hit.Opacity;
+                    }
                     break;
 
                 case SkinPreviewAnimationRole.Followpoint:
                     var followpointCount = roleCounts[layer.AnimationRole];
                     var fraction = (layer.AnimationIndex + 1d) / (followpointCount + 1d);
                     var followpoint = SkinPreviewAnimation.Followpoint(
-                        extrasPreviewElapsed,
+                        previewElapsed,
                         fraction);
                     scaleX = scaleY = followpoint.Scale;
                     opacity *= followpoint.Opacity;
@@ -2955,7 +3041,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 case SkinPreviewAnimationRole.Cursor:
                 case SkinPreviewAnimationRole.CursorMiddle:
                     var cursor = SkinPreviewAnimation.Cursor(
-                        extrasPreviewElapsed,
+                        previewElapsed,
                         canvas.Width,
                         canvas.Height,
                         context.CursorExpand,
@@ -2980,7 +3066,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                                        ? SkinPreviewAnimation.SmoothTrailFadeMilliseconds
                                        : SkinPreviewAnimation.DisjointTrailFadeMilliseconds);
                     var trailCursor = SkinPreviewAnimation.Cursor(
-                        extrasPreviewElapsed - trailAge,
+                        previewElapsed - trailAge,
                         canvas.Width,
                         canvas.Height,
                         expand: false,
@@ -3080,6 +3166,14 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             }
         }
     }
+
+    internal static bool UsesStaticHitCirclePreview(
+        string familyId,
+        bool animationsEnabled) =>
+        !animationsEnabled
+        && familyId.Equals(
+            "osu.hitcircles",
+            StringComparison.OrdinalIgnoreCase);
 
     private static void ApplyExtrasAnimationPlacement(
         FrameworkElement element,
@@ -4623,7 +4717,6 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 ? incompleteImportGuide!.SourceFingerprint
                 : null);
         var elementTints = pack.Elements
-            .Concat(currentFallbackElements)
             .Where(element => element.IsTinted && element.IsSelected != false)
             .ToDictionary(
                 element => element.Key,
@@ -5022,11 +5115,19 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         currentPreviewFiles.Clear();
         currentFallbackElements = [];
         currentFallbackPackKey = null;
+        CurrentPreviewCanvas.Children.Clear();
+        ResultPreviewCanvas.Children.Clear();
         CurrentSkinPreviewLabel.Text = currentSkinSource?.HasStagedChanges == true
             ? "CURRENT + CHANGES"
             : "CURRENT SKIN";
         if (selectedPack is { } pack)
+        {
+            SetPreviewMode(
+                current: currentSkinSource is not null,
+                compare: false,
+                refresh: false);
             _ = RefreshComparisonPreviewAsync(pack);
+        }
     }
 
     private bool CompleteGuidedAssets(
@@ -5843,6 +5944,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         public string Name { get; }
         public IReadOnlyList<PackFileEntry> Files { get; }
         public bool FromCurrentSkin { get; }
+        public bool CanTint => !FromCurrentSkin
+                               && Files.Any(file =>
+                                   SkinElementCategorizer.IsImage(file.Name));
         public BitmapSource? Thumbnail => thumbnail;
         public string TintHex => $"#{tint.R:X2}{tint.G:X2}{tint.B:X2}";
         public string TintLabel => $"RGB {tint.R}, {tint.G}, {tint.B}";

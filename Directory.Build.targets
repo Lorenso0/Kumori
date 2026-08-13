@@ -10,6 +10,12 @@
          checkout's processes before MSBuild starts. -->
     <CopyRetryCount Condition="'$(Configuration)' == 'Debug'">2</CopyRetryCount>
     <CopyRetryDelayMilliseconds Condition="'$(Configuration)' == 'Debug'">100</CopyRetryDelayMilliseconds>
+    <!-- lazer persists assembly-qualified component names in skin layout JSON.
+         Keep osu!standard on its canonical identity when Kumori passes its
+         own release version as a global MSBuild property. Directory.Build.targets
+         is used because the vendored osu tree owns a nearer props file. -->
+    <AssemblyVersion Condition="'$(_KumoriIsUpstreamOsuProject)' == 'True' and '$(MSBuildProjectName)' == 'osu.Game.Rulesets.Osu'">1.0.0.0</AssemblyVersion>
+    <GenerateAssemblyInfo Condition="'$(_KumoriIsUpstreamOsuProject)' == 'True' and '$(MSBuildProjectName)' == 'osu.Game.Rulesets.Osu'">true</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <!--

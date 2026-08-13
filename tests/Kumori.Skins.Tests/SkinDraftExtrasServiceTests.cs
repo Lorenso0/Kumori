@@ -163,6 +163,53 @@ public sealed class SkinDraftExtrasServiceTests : IDisposable
     }
 
     [Fact]
+    public void Selected_extra_image_is_recoloured_only_when_staged()
+    {
+        var workspace = new SkinDraftWorkspaceService(Path.Combine(root, "recolour"));
+        var draft = workspace.Create("Draft", "Kumori");
+        var packDirectory = Path.Combine(root, "recolour-pack");
+        Directory.CreateDirectory(packDirectory);
+        var original = Png(new Rgba32(200, 100, 50, 255));
+        File.WriteAllBytes(Path.Combine(packDirectory, "cursor.png"), original);
+        var cursor = SkinExtraFingerprint.Describe(
+            "cursor.png",
+            "cursor.png",
+            original);
+        var manifest = new SkinExtraPackManifest
+        {
+            Id = "cursor-recolour",
+            DisplayName = "Cursor recolour",
+            FamilyId = "osu.cursor",
+            Area = "osu!",
+            FamilyName = "Cursor",
+            Fingerprint = SkinExtraFingerprint.ForPack("osu.cursor", [cursor]),
+            Files = [cursor],
+        };
+        var selection = new SkinDraftExtrasSelection(
+            ["cursor.png"],
+            [],
+            ReplaceEntireFamily: false,
+            new Dictionary<string, SkinImageTransform>
+            {
+                ["cursor"] = new(
+                    SkinImageTransformMode.Colorize,
+                    new SkinRgb(10, 20, 30)),
+            });
+
+        Assert.Equal(original, File.ReadAllBytes(Path.Combine(packDirectory, "cursor.png")));
+        draft = new SkinDraftExtrasService(workspace).StageSelection(
+            draft.DraftId,
+            new SkinExtraPackDescriptor(packDirectory, manifest, false),
+            selection);
+
+        var effective = new SkinPackageService(workspace).Materialize(draft.DraftId);
+        Assert.NotEqual(original, effective["cursor.png"]);
+        using var image = Image.Load<Rgba32>(effective["cursor.png"]);
+        Assert.Equal(new Rgba32(10, 20, 30, 255), image[0, 0]);
+        Assert.Equal(original, File.ReadAllBytes(Path.Combine(packDirectory, "cursor.png")));
+    }
+
+    [Fact]
     public void Comparison_reports_file_and_setting_impact_before_apply()
     {
         var workspace = new SkinDraftWorkspaceService(Path.Combine(root, "compare"));

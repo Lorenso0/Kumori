@@ -271,10 +271,6 @@
                             AutomationProperties.Name="Skin editor actions">
                         <Button.ContextMenu>
                             <ContextMenu>
-                                <MenuItem x:Name="OpenLazerEditorMenuItem"
-                                          Header="Open new lazer editor (preview)…"
-                                          Click="OpenLazerEditor_Click" />
-                                <Separator />
                                 <MenuItem Header="Change lazer folder…" Click="ChangeFolder_Click" />
                                 <MenuItem Header="Refresh skin library" Click="Refresh_Click" />
                                 <MenuItem Header="Duplicate skin&#x2026;" Click="DuplicateSkin_Click" />

@@ -16,6 +16,7 @@ public sealed class SkinStudioPreferencesServiceTests : IDisposable
 
         Assert.True(preferences.AutomaticEditBackups);
         Assert.Equal(30, preferences.BackupRetention);
+        Assert.False(preferences.ShowOtherRulesetElements);
         Assert.Equal(
             SkinStudioPreferencesService.CurrentFormatVersion,
             preferences.FormatVersion);
@@ -39,6 +40,27 @@ public sealed class SkinStudioPreferencesServiceTests : IDisposable
         Assert.False(File.Exists(Path.Combine(
             root,
             "studio-preferences.json.new")));
+    }
+
+    [Fact]
+    public void NativeWorkbenchRestoresDraftTargetAndCursorPreferences()
+    {
+        var service = new SkinStudioPreferencesService(root);
+        var draftId = Guid.NewGuid();
+
+        service.Save(new SkinStudioPreferences(
+            LastDraftId: draftId,
+            LastSelectedComponent: "  sliderb  ",
+            SmoothCursorTrail: true,
+            AutoMoveCursor: false,
+            ShowOtherRulesetElements: true));
+
+        var loaded = service.Load();
+        Assert.Equal(draftId, loaded.LastDraftId);
+        Assert.Equal("sliderb", loaded.LastSelectedComponent);
+        Assert.True(loaded.SmoothCursorTrail);
+        Assert.False(loaded.AutoMoveCursor);
+        Assert.True(loaded.ShowOtherRulesetElements);
     }
 
     [Theory]

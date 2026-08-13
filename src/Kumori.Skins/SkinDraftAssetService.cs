@@ -681,6 +681,8 @@ public sealed class SkinDraftAssetService
                 SkinDraftWorkspaceService.NormalizeSkinFilename(filename),
                 null)
             .Replace("@2x", "", StringComparison.OrdinalIgnoreCase);
+        if (isNumberFontGlyph(normalized))
+            return normalized;
         var dash = normalized.LastIndexOf('-');
         if (dash >= 0 && int.TryParse(normalized[(dash + 1)..], out _))
             normalized = normalized[..dash];
@@ -693,10 +695,31 @@ public sealed class SkinDraftAssetService
                 SkinDraftWorkspaceService.NormalizeSkinFilename(filename),
                 null)
             .Replace("@2x", "", StringComparison.OrdinalIgnoreCase);
+        if (isNumberFontGlyph(stem))
+            return null;
         var dash = stem.LastIndexOf('-');
         return dash >= 0 && int.TryParse(stem[(dash + 1)..], out var frame)
             ? frame
             : null;
+    }
+
+    private static bool isNumberFontGlyph(string stem)
+    {
+        var filename = Path.GetFileName(stem);
+        var dash = filename.LastIndexOf('-');
+        if (dash <= 0 || dash == filename.Length - 1)
+            return false;
+        var prefix = filename[..dash];
+        var suffix = filename[(dash + 1)..];
+        return (prefix.Equals("default", StringComparison.OrdinalIgnoreCase)
+                || prefix.Equals("score", StringComparison.OrdinalIgnoreCase)
+                || prefix.Equals("combo", StringComparison.OrdinalIgnoreCase)
+                || prefix.Equals("scoreentry", StringComparison.OrdinalIgnoreCase))
+               && (suffix.Length == 1 && char.IsDigit(suffix[0])
+                   || suffix.Equals("comma", StringComparison.OrdinalIgnoreCase)
+                   || suffix.Equals("dot", StringComparison.OrdinalIgnoreCase)
+                   || suffix.Equals("percent", StringComparison.OrdinalIgnoreCase)
+                   || suffix.Equals("x", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string NormalizeComponent(string componentName) =>

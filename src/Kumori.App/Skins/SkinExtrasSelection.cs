@@ -51,6 +51,41 @@ public enum SkinExtraResolutionPolicy
     UpscaleToTwoX,
 }
 
+internal static class SkinExtraElementTinting
+{
+    public static IReadOnlyList<SkinExtraPackFile> Apply(
+        string familyId,
+        IEnumerable<SkinExtraPackFile> files,
+        IReadOnlyDictionary<string, SkinRgb>? elementTints)
+    {
+        var source = files.ToArray();
+        if (source.Length == 0 || elementTints is not { Count: > 0 })
+            return source;
+
+        var filenames = source.Select(file => file.Filename).ToArray();
+        var transformer = new SkinImageTransformService();
+        return source.Select(file =>
+        {
+            if (!SkinElementCategorizer.IsImage(file.Filename))
+                return file;
+            var key = SkinExtraLogicalGrouping.Key(
+                familyId,
+                file.Filename,
+                filenames);
+            if (!elementTints.TryGetValue(key, out var colour))
+                return file;
+            return new SkinExtraPackFile(
+                file.Filename,
+                transformer.Apply(
+                    file.Bytes,
+                    file.Filename,
+                    new SkinImageTransform(
+                        SkinImageTransformMode.Colorize,
+                        colour)));
+        }).ToArray();
+    }
+}
+
 internal static class SkinCursorMiddlePolicy
 {
     public const string CanonicalFilename = "cursormiddle.png";

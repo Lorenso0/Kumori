@@ -1,5 +1,17 @@
 namespace Kumori.Skins;
 
+public enum SkinStudioPreviewScene
+{
+    Showcase,
+    Circles,
+    Sliders,
+    Hud,
+    Cursor,
+    Spinner,
+    Judgements,
+    Followpoints,
+}
+
 public enum SkinStudioRuleset
 {
     Osu,
@@ -66,6 +78,115 @@ public sealed record SkinStudioSemanticPreviewDescriptor(
     public bool IsRaw => Kind == SkinStudioSemanticPreviewKind.RawAsset;
 }
 
+public sealed record SkinStudioCategoryPreviewPlan(
+    SkinStudioSemanticPreviewDescriptor Target,
+    IReadOnlyList<string> Components,
+    IReadOnlyList<string> CalloutComponents);
+
+public static class SkinStudioCategoryPreviewCatalog
+{
+    public static SkinStudioCategoryPreviewPlan? Resolve(
+        string? categoryTitle,
+        IEnumerable<string> availableComponents)
+    {
+        if (string.IsNullOrWhiteSpace(categoryTitle))
+            return null;
+        var components = availableComponents
+            .Where(component => !string.IsNullOrWhiteSpace(component))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (components.Length == 0)
+            return null;
+
+        var preferred = categoryTitle.Trim().ToLowerInvariant() switch
+        {
+            "hit objects" => "hitcircle",
+            "cursor and trail" => "cursor",
+            "gameplay hud" => "scorebar-bg",
+            "judgements" => "hit300",
+            "spinner" => "spinner-circle",
+            "countdown and prompts" => "ready",
+            "ranking" => "ranking-panel",
+            "menus and selection" => "mode-osu",
+            "number fonts" => "default-0",
+            "audio samples" => "normal-hitnormal",
+            _ => components.FirstOrDefault(component =>
+                !SkinStudioSemanticPreviewCatalog.Resolve(component).IsRaw),
+        };
+        if (string.IsNullOrWhiteSpace(preferred))
+            return null;
+        var target = SkinStudioSemanticPreviewCatalog.Resolve(preferred);
+        if (target.IsRaw)
+            return null;
+        var familyComponents = components.Where(component =>
+                SkinStudioSemanticPreviewCatalog.Resolve(component).FamilyId
+                    .Equals(target.FamilyId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (categoryTitle.Trim().Equals(
+                "number fonts",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            // The native hitcircle-number composition must not be obscured by
+            // the score/combo/leaderboard contexts which share this family.
+            familyComponents = familyComponents.Where(component =>
+                    component.StartsWith(
+                        "default-",
+                        StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+        else if (categoryTitle.Trim().Equals(
+                     "hit objects",
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            // The category composition contains its real circle, followpoint,
+            // and slider contexts together. Individual tile selection still
+            // resolves to the narrower family-specific scene.
+            familyComponents = components.Where(component =>
+            {
+                var family = SkinStudioSemanticPreviewCatalog.Resolve(component)
+                    .FamilyId;
+                return family is "osu.hitcircles"
+                    or "osu.followpoints"
+                    or "osu.slider"
+                    or "osu.slider-colours";
+            }).ToArray();
+        }
+        var calloutComponents = categoryTitle.Trim().ToLowerInvariant() switch
+        {
+            "hit objects" => existing(
+                components,
+                "approachcircle", "hitcircle", "hitcircleoverlay"),
+            "cursor and trail" => existing(
+                components,
+                "cursor", "cursormiddle", "cursortrail"),
+            "gameplay hud" => existing(
+                components,
+                "scorebar-bg", "scorebar-colour", "scorebar-marker"),
+            "judgements" => existing(
+                components,
+                "hit0", "hit100", "hit300"),
+            "spinner" => existing(
+                components,
+                "spinner-background", "spinner-circle",
+                "spinner-approachcircle", "spinner-metre"),
+            "number fonts" => existing(components, "default-0"),
+            _ => existing(components, preferred),
+        };
+        return new SkinStudioCategoryPreviewPlan(
+            target,
+            familyComponents.Length > 0 ? familyComponents : [preferred],
+            calloutComponents);
+    }
+
+    private static IReadOnlyList<string> existing(
+        IReadOnlyCollection<string> available,
+        params string[] requested) => requested
+        .Where(component => available.Contains(
+            component,
+            StringComparer.OrdinalIgnoreCase))
+        .ToArray();
+}
+
 /// <summary>
 /// Authoritative semantic routing for the native studio. File discovery remains
 /// owned by <see cref="SkinExtraFamilyRegistry"/>; this class defines how every
@@ -74,6 +195,8 @@ public sealed record SkinStudioSemanticPreviewDescriptor(
 public static class SkinStudioSemanticPreviewCatalog
 {
     public const int HitCircleNumberPreviewCount = 10;
+    public static IReadOnlyList<int> HitCircleNumberPreviewValues { get; } =
+        Enumerable.Range(1, HitCircleNumberPreviewCount).ToArray();
     public static SkinStudioSemanticPreviewDescriptor Resolve(
         string? componentName,
         string? familyId = null,
@@ -137,10 +260,30 @@ public static class SkinStudioSemanticPreviewCatalog
         SkinExtraFamilyRegistry.All
             .Where(family => !family.Id.Equals("misc.other", StringComparison.OrdinalIgnoreCase))
             .Select(family => Resolve(
-                family.ExactNames.FirstOrDefault()
-                ?? family.Id[(family.Id.IndexOf('.') + 1)..],
+                representativeComponent(family),
                 family.Id))
             .ToArray();
+
+    private static string representativeComponent(SkinExtraFamilyDefinition family) =>
+        family.Id.ToLowerInvariant() switch
+        {
+            "osu.slider" => "slider",
+            "osu.slider-colours" => "slider",
+            "osu.combo-colours" => "hitcircle",
+            "osu.number-font" => "default-0",
+            "interface.playfield" => "play-skip",
+            "interface.background" => "menu-background",
+            "audio.nightcore" => "nightcore-kick",
+            "audio.countdown" => "readys",
+            "audio.hitsounds.taiko" => "taiko-normal-hitnormal",
+            "audio.spinner" => "spinnerspin",
+            "audio.gameplay" => "pause-loop",
+            "audio.interface" => "menuhit",
+            "audio.other" => "rank-up",
+            _ => family.ExactNames.FirstOrDefault()
+                 ?? family.Prefixes.FirstOrDefault()
+                 ?? family.Id[(family.Id.IndexOf('.') + 1)..],
+        };
 
     private static string normalizeComponent(string? componentName)
     {
@@ -180,13 +323,17 @@ public static class SkinStudioSemanticPreviewCatalog
             return "audio.applause";
         if (component is "rank-up" or "rank-down")
             return "audio.other";
-        if (component.StartsWith("menu", StringComparison.OrdinalIgnoreCase)
-            || component.StartsWith("key-", StringComparison.OrdinalIgnoreCase))
-            return "audio.interface";
-
-        var extension = isKnownAudioComponent(component) ? ".wav" : ".png";
-        return SkinExtraFamilyRegistry.ForFile(component + extension)?.Id
-               ?? "misc.other";
+        var imageFilename = component + ".png";
+        var audioFilename = component + ".wav";
+        var imageFamily = SkinExtraFamilyRegistry.ForFile(imageFilename);
+        var audioFamily = SkinExtraFamilyRegistry.ForFile(audioFilename);
+        var imageScore = imageFamily?.MatchScore(imageFilename) ?? -1;
+        var audioScore = audioFamily?.MatchScore(audioFilename) ?? -1;
+        if (imageScore > audioScore)
+            return imageFamily!.Id;
+        if (isKnownAudioComponent(component) && audioFamily is not null)
+            return audioFamily.Id;
+        return imageFamily?.Id ?? audioFamily?.Id ?? "misc.other";
     }
 
     private static SkinStudioRuleset rulesetFor(string? area, string familyId) =>
@@ -301,7 +448,9 @@ public static class SkinStudioSemanticPreviewCatalog
             return SkinExtraCompatibility.Unknown;
         if (familyId.Equals("osu.number-font", StringComparison.OrdinalIgnoreCase))
             return SkinExtraCompatibility.LazerUsed;
-        var extension = isKnownAudioComponent(component) ? ".wav" : ".png";
+        var extension = SkinExtraFamilyRegistry.ById(familyId)?.Area == "Audio"
+            ? ".wav"
+            : ".png";
         return SkinExtraLazerCompatibility.Classify(component + extension, familyId);
     }
 

@@ -86,7 +86,6 @@ public partial class SkinEditorPage : UserControl
     private readonly SettingsService settings;
     private readonly ILazerSkinRealmService realmService;
     private readonly ILazerSkinReloadService? reloadService;
-    private readonly Func<Task>? openLazerEditor;
     private readonly List<FileSystemWatcher> externalWatchers = [];
     private readonly Dictionary<(string Section, string Key), IniRow> iniRows = [];
     private readonly Dictionary<string, FrameworkElement> iniSectionPanels =
@@ -205,21 +204,18 @@ public partial class SkinEditorPage : UserControl
         : this(
             settings,
             realmService,
-            reloadService: null,
-            openLazerEditor: null)
+            reloadService: null)
     {
     }
 
     internal SkinEditorPage(
         SettingsService settings,
         ILazerSkinRealmService? realmService,
-        ILazerSkinReloadService? reloadService,
-        Func<Task>? openLazerEditor = null)
+        ILazerSkinReloadService? reloadService)
     {
         this.settings = settings;
         this.realmService = realmService ?? new LazerSkinRealmService();
         this.reloadService = reloadService;
-        this.openLazerEditor = openLazerEditor;
         extrasSyncService = SkinExtrasCatalogSyncService.Shared;
         extrasSyncService.ProgressChanged += ExtrasSyncService_ProgressChanged;
         extrasSyncService.LibraryChanged += ExtrasSyncService_LibraryChanged;
@@ -232,7 +228,6 @@ public partial class SkinEditorPage : UserControl
             Interval = TimeSpan.FromMilliseconds(33),
         };
         InitializeComponent();
-        OpenLazerEditorMenuItem.IsEnabled = openLazerEditor is not null;
         previewAnimationsEnabled = settings.Current.SkinEditor.PreviewAnimationsEnabled;
         PreviewPlaybackToggle.IsChecked = previewAnimationsEnabled;
         UpdatePreviewPlaybackPresentation();
@@ -4095,7 +4090,9 @@ public partial class SkinEditorPage : UserControl
                 "General",
                 "CursorCentre",
                 defaultValue: true),
-            state.Scale * SkinPreviewAnimation.LegacyTrailTextureScale,
+            state.Scale * (smooth
+                ? 1
+                : SkinPreviewAnimation.LegacyTrailTextureScale),
             ReadPreviewBoolean(
                 "General",
                 "CursorTrailRotate",
@@ -6275,6 +6272,11 @@ public partial class SkinEditorPage : UserControl
                     SkinFollowpointSequence.CompleteWithTransparentFrames(
                         effectiveIncoming);
             }
+            effectiveIncoming = await Task.Run(() =>
+                SkinExtraElementTinting.Apply(
+                    manifest.FamilyId,
+                    effectiveIncoming,
+                    selection.ElementTints));
             var effectiveFiles = SkinDraftProjection.EffectiveFiles(
                 currentSkin.Files,
                 draft.Changes);
@@ -6445,8 +6447,8 @@ public partial class SkinEditorPage : UserControl
                     BuildIniForm();
                     UpdateComboStrip();
                 }
-                _ = RefreshGameplayPreviewAsync();
-                _ = RefreshRichPreviewsAsync();
+                await RefreshGameplayPreviewAsync();
+                await RefreshRichPreviewsAsync();
                 StatusText.Text =
                     $"{packName} staged for {manifest.FamilyName}: "
                     + $"{replaced} replaced, {added} added, {removed} removed"
@@ -6781,27 +6783,6 @@ public partial class SkinEditorPage : UserControl
         {
             menu.PlacementTarget = button;
             menu.IsOpen = true;
-        }
-    }
-
-    private async void OpenLazerEditor_Click(object sender, RoutedEventArgs e)
-    {
-        if (openLazerEditor is null)
-            return;
-
-        try
-        {
-            await openLazerEditor();
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"Could not open the new lazer editor: {ex.Message}";
-            KumoriDialog.Show(
-                Window.GetWindow(this),
-                StatusText.Text,
-                "Skin Studio",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
         }
     }
 

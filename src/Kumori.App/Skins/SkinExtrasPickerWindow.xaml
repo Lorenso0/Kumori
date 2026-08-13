@@ -217,8 +217,9 @@
                                 Margin="8,0,0,0"
                                 Padding="7,0"
                                 HorizontalContentAlignment="Stretch"
+                                IsEnabled="{Binding CanTint}"
                                 Click="ElementTintButton_Click"
-                                ToolTip="Recolour this logical element">
+                                ToolTip="Recolour this element before adding it to Changes">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="20" />

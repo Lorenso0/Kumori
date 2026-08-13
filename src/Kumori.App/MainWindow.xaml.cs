@@ -39,7 +39,6 @@ public partial class MainWindow : Window
     private string _selectedPage = "Dashboard";
     private WelcomeWindow? _onboardingWindow;
     private SkinLibraryWindow? _onboardingToolWindow;
-    private SkinStudioLauncherPage? _skinStudioLauncherPage;
     private SkinEditorPage? _skinEditorPage;
     private FarmFinderPage? _farmFinderPage;
     private readonly Func<FarmFinderPage>? _farmFinderPageFactory;
@@ -95,7 +94,6 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
-            _skinStudioLauncherPage?.Dispose();
             (_farmFinderPage?.DataContext as IDisposable)?.Dispose();
             (_lazerSkinReload as IDisposable)?.Dispose();
         };
@@ -533,20 +531,12 @@ public partial class MainWindow : Window
 
     private async Task ShowLegacySkinEditorAsync()
     {
-        if (_skinStudioLauncherPage is { } launcher
-            && ReferenceEquals(SkinEditorHost.Content, launcher))
-        {
-            await launcher.StopAsync();
-            launcher.Dispose();
-            _skinStudioLauncherPage = null;
-        }
         if (_skinEditorPage is null)
         {
             _skinEditorPage = new SkinEditorPage(
                 _settings,
                 realmService: null,
-                reloadService: _lazerSkinReload,
-                openLazerEditor: ShowLazerSkinEditorAsync);
+                reloadService: _lazerSkinReload);
         }
         SkinEditorHost.Content = _skinEditorPage;
         // Let WPF paint the themed page shell before Realm discovery and
@@ -555,34 +545,6 @@ public partial class MainWindow : Window
         await _skinEditorPage.EnsureLoadedAsync();
     }
 
-    private async Task ShowLazerSkinEditorAsync()
-    {
-        try
-        {
-            if (_skinStudioLauncherPage is null)
-            {
-                _skinStudioLauncherPage = new SkinStudioLauncherPage(
-                    _settings,
-                    ShowLegacySkinEditorAsync,
-                    _lazerSkinReload);
-                SkinEditorHost.Content = _skinStudioLauncherPage;
-                await Dispatcher.Yield(DispatcherPriority.Loaded);
-            }
-            else if (!ReferenceEquals(
-                         SkinEditorHost.Content,
-                         _skinStudioLauncherPage))
-            {
-                SkinEditorHost.Content = _skinStudioLauncherPage;
-            }
-
-            await _skinStudioLauncherPage.EnsureReadyAsync();
-        }
-        catch
-        {
-            await ShowLegacySkinEditorAsync();
-            throw;
-        }
-    }
     private void ChangelogNavigation_Click(object sender, RoutedEventArgs e) =>
         OpenWorkspaceTab(new ChangelogWindow(), "Changelog");
     private void DiscordNavigation_Click(object sender, RoutedEventArgs e)

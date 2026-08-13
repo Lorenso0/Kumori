@@ -3,7 +3,8 @@ namespace Kumori.Skins;
 public sealed record SkinDraftExtrasSelection(
     IReadOnlyCollection<string> TargetFilenames,
     IReadOnlyCollection<SkinExtraIniPatchEntry> IniPatch,
-    bool ReplaceEntireFamily);
+    bool ReplaceEntireFamily,
+    IReadOnlyDictionary<string, SkinImageTransform>? ImageTransforms = null);
 
 public sealed class SkinDraftExtrasService
 {
@@ -75,7 +76,17 @@ public sealed class SkinDraftExtrasService
         var selectedComponents = selectedTargets
             .Select(SkinDraftAssetService.ComponentName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var imageTransforms = selection.ImageTransforms
+                              ?? new Dictionary<string, SkinImageTransform>(
+                                  StringComparer.OrdinalIgnoreCase);
+        if (imageTransforms.Keys.Any(component =>
+                !selectedComponents.Contains(component)))
+        {
+            throw new InvalidDataException(
+                "Extras recolouring contains an element outside the file selection.");
+        }
         var mutations = new List<SkinDraftFileMutation>();
+        var transformer = new SkinImageTransformService();
 
         foreach (var (filename, bytes) in effective)
         {
@@ -101,6 +112,16 @@ public sealed class SkinDraftExtrasService
             var declared = declaredByTarget[filename];
             var path = containedPackPath(pack.DirectoryPath, filename);
             var bytes = File.ReadAllBytes(path);
+            var component = SkinDraftAssetService.ComponentName(filename);
+            if (imageTransforms.TryGetValue(component, out var transform))
+            {
+                if (!SkinMediaTypes.IsImage(filename))
+                {
+                    throw new InvalidDataException(
+                        $"Extras element '{component}' is not an image and cannot be recoloured.");
+                }
+                bytes = transformer.Apply(bytes, filename, transform);
+            }
             effective.TryGetValue(filename, out var current);
             mutations.Add(new SkinDraftFileMutation(
                 filename,

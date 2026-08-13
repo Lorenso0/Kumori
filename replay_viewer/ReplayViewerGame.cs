@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Drawing;
 using System.IO.Compression;
+using System.Reflection;
 using osu.Framework.Allocation;
 using osu.Framework.Audio;
 using osu.Framework.Audio.Track;
@@ -65,6 +66,31 @@ public partial class ReplayViewerGame : OsuGameBase
         this.contract = contract;
         this.analysis = analysis;
         this.preparedAnalysis = preparedAnalysis;
+    }
+
+    /// <summary>
+    /// SkinManager constructs persisted skins while OsuGameBase is loading its
+    /// dependencies, before this viewer creates an <see cref="OsuRuleset"/>.
+    /// Preload the ruleset assembly so Newtonsoft can resolve ruleset-owned HUD
+    /// component types found in lazer skin layout JSON during that earlier pass.
+    /// </summary>
+    internal static void EnsureSkinLayoutDependenciesLoaded()
+    {
+        // Load by simple name. Kumori's release version is intentionally
+        // applied to bundled assemblies, while lazer layout JSON persists the
+        // assembly version it was exported with. Once the matching simple-name
+        // assembly is loaded, System.Type conversion can resolve those layout
+        // entries across that harmless version difference.
+        Assembly rulesetAssembly = Assembly.Load("osu.Game.Rulesets.Osu");
+        const string requiredType = "osu.Game.Rulesets.Osu.HUD.AimErrorMeter";
+        if (rulesetAssembly.GetType(requiredType, throwOnError: false) is null)
+        {
+            throw new TypeLoadException(
+                $"The bundled osu! ruleset does not provide the skin HUD component '{requiredType}'.");
+        }
+
+        Logger.Log(
+            $"Kumori: preloaded skin layout dependency {rulesetAssembly.GetName().FullName}.");
     }
 
     public override void SetHost(GameHost host)

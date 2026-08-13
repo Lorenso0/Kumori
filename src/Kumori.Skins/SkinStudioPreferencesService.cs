@@ -5,7 +5,12 @@ namespace Kumori.Skins;
 public sealed record SkinStudioPreferences(
     int FormatVersion = SkinStudioPreferencesService.CurrentFormatVersion,
     bool AutomaticEditBackups = true,
-    int BackupRetention = 30);
+    int BackupRetention = 30,
+    Guid? LastDraftId = null,
+    string? LastSelectedComponent = null,
+    bool SmoothCursorTrail = false,
+    bool AutoMoveCursor = true,
+    bool ShowOtherRulesetElements = false);
 
 public sealed class SkinStudioPreferencesService
 {
@@ -94,6 +99,18 @@ public sealed class SkinStudioPreferencesService
                 $"Backup retention must be between {MinimumRetention} and "
                 + $"{MaximumRetention}.");
         }
-        return preferences;
+        var selectedComponent = string.IsNullOrWhiteSpace(
+            preferences.LastSelectedComponent)
+            ? null
+            : preferences.LastSelectedComponent.Trim();
+        if (selectedComponent is { Length: > 256 })
+        {
+            throw new InvalidDataException(
+                "The remembered Skin Studio component is too long.");
+        }
+        return preferences with
+        {
+            LastSelectedComponent = selectedComponent,
+        };
     }
 }

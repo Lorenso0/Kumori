@@ -79,6 +79,8 @@ internal readonly record struct SkinPreviewSpinnerState(
 internal static class SkinPreviewAnimation
 {
     public const double LoopMilliseconds = 6000;
+    public const double HitCircleLoopMilliseconds =
+        SliderStartMilliseconds + 240;
     public const double CursorRevolutionMilliseconds = 10000;
     public const double DisjointTrailFadeMilliseconds = 150;
     public const double SmoothTrailFadeMilliseconds = 500;
@@ -121,6 +123,13 @@ internal static class SkinPreviewAnimation
 
     public static double LoopTime(double elapsedMilliseconds) =>
         PositiveModulo(elapsedMilliseconds, LoopMilliseconds);
+
+    public static double ExtrasTime(
+        string familyId,
+        double elapsedMilliseconds) =>
+        familyId.Equals("osu.hitcircles", StringComparison.OrdinalIgnoreCase)
+            ? PositiveModulo(elapsedMilliseconds, HitCircleLoopMilliseconds)
+            : elapsedMilliseconds;
 
     public static SkinPreviewCursorState Cursor(
         double elapsedMilliseconds,

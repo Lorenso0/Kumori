@@ -64,11 +64,12 @@ $appProject = [IO.Path]::GetFullPath(
     (Join-Path $workspace "src\Kumori.App\Kumori.App.csproj"))
 $appExecutable = [IO.Path]::GetFullPath(
     (Join-Path $workspace "src\Kumori.App\bin\Debug\net10.0-windows10.0.17763.0\Kumori.exe"))
+$bridgeProject = [IO.Path]::GetFullPath(
+    (Join-Path $workspace "src\Kumori.StableFrameBridge\Kumori.StableFrameBridge.csproj"))
 $rootProjects = @(
     $appProject,
     [IO.Path]::GetFullPath((Join-Path $workspace "replay_viewer\Kumori.ReplayViewer.csproj")),
-    [IO.Path]::GetFullPath((Join-Path $workspace "src\Kumori.SkinStudio\Kumori.SkinStudio.csproj")),
-    [IO.Path]::GetFullPath((Join-Path $workspace "src\Kumori.StableFrameBridge\Kumori.StableFrameBridge.csproj"))
+    $bridgeProject
 )
 $sharedInputs = @(
     "Directory.Build.props",
@@ -143,7 +144,6 @@ while ($pending.Count -gt 0)
 
 # Kumori.App builds the x86 bridge through an MSBuild target rather than a
 # ProjectReference, so make that dependency explicit for incremental planning.
-$bridgeProject = $rootProjects[3]
 $references[$appProject] = @($references[$appProject]) + $bridgeProject
 
 function Get-StampPath([string]$project)
@@ -274,14 +274,13 @@ function Stop-DevelopmentProcesses([switch]$KumoriOnly)
     } else {
         @(
             $appExecutable,
-            [IO.Path]::GetFullPath((Join-Path $workspace "replay_viewer\bin\Debug\net10.0\win-x64\Kumori.ReplayViewer.exe")),
-            [IO.Path]::GetFullPath((Join-Path $workspace "src\Kumori.SkinStudio\bin\Debug\net10.0\win-x64\Kumori.SkinStudio.exe"))
+            [IO.Path]::GetFullPath((Join-Path $workspace "replay_viewer\bin\Debug\net10.0\win-x64\Kumori.ReplayViewer.exe"))
         )
     }
     $processNames = if ($KumoriOnly) {
         @("Kumori")
     } else {
-        @("Kumori", "Kumori.ReplayViewer", "Kumori.SkinStudio")
+        @("Kumori", "Kumori.ReplayViewer")
     }
     function Find-DevelopmentProcesses
     {

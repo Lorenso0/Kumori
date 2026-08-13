@@ -43,6 +43,41 @@ public sealed class SkinImageTransformServiceTests
     }
 
     [Fact]
+    public void Palette_replacement_matches_tolerance_and_preserves_other_pixels()
+    {
+        byte[] pixels =
+        [
+            100, 100, 100, 91,
+            96, 96, 96, 123,
+            80, 80, 80, 177,
+        ];
+
+        SkinPixelTools.ApplyPaletteReplace(
+            pixels,
+            new SkinRgb(100, 100, 100),
+            new SkinRgb(200, 20, 40),
+            tolerance: 5);
+
+        Assert.Equal([40, 20, 200, 91], pixels[..4]);
+        Assert.NotEqual([96, 96, 96], pixels[4..7]);
+        Assert.Equal(123, pixels[7]);
+        Assert.Equal([80, 80, 80, 177], pixels[8..12]);
+    }
+
+    [Fact]
+    public void Palette_replacement_requires_a_source_colour()
+    {
+        var service = new SkinImageTransformService();
+
+        Assert.Throws<ArgumentException>(() => service.Apply(
+            png(new Rgba32(20, 30, 40, 255)),
+            "cursor.png",
+            new SkinImageTransform(
+                SkinImageTransformMode.PaletteReplace,
+                new SkinRgb(200, 100, 50))));
+    }
+
+    [Fact]
     public void External_image_validation_decodes_dimensions_and_visibility()
     {
         var result = SkinMediaValidationService.ValidateImage(

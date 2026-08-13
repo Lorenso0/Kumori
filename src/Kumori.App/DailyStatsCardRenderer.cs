@@ -523,7 +523,7 @@ internal static class DailyStatsCardRenderer
             ScoreCardModRenderer.Draw(
                 drawing,
                 ParseModAcronyms(combination.ModsKey),
-                null,
+                combination.Bpm,
                 slotLeft,
                 y,
                 slotWidth - 10,

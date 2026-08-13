@@ -58,7 +58,7 @@ The analyzer explains what the captured information suggests, but it cannot alwa
 
 ## Skin Extras library
 
-Skin Studio can extract reusable element families from an installed osu!lazer
+The Skin Editor can extract reusable element families from an installed osu!lazer
 skin, a stable skin folder, or an `.osk` archive. The Extras library groups
 packs by gameplay area and family, including cursors, hit objects, sliders,
 number fonts, judgements, HUD/interface elements, spinners, menu assets,
@@ -104,9 +104,9 @@ added to Changes. Cursor packs never import `cursormiddle` assets; the optional
 **Smooth Trail** setting instead stages a transparent 1x1 `cursormiddle.png`
 placeholder and removes every other cursor-middle variant.
 
-Skin Studio also maintains a complete local copy of the signed public
+The Skin Editor also maintains a complete local copy of the signed public
 [Kumori Extras catalog](https://github.com/Lorenso0/Kumori-Extras). Opening
-Skin Studio starts a non-blocking conditional update check, and **Check for
+the editor starts a non-blocking conditional update check, and **Check for
 updates** is available from both the Actions menu and Extras header. New,
 updated, missing, or unhealthy catalog packs are always transferred as complete
 `.kextra` archives inside two verified catalog bundles. Each changed bundle is
@@ -153,8 +153,7 @@ This section is for developers. On Windows, install the [.NET 10 SDK](https://do
 The build script obtains the official osu! `2026.726.0-lazer` source at its
 exact release commit under the ignored `third_party\osu` directory. This
 source pin is used because matching `ppy.osu.Game` NuGet packages have not
-been published for that release. It then applies Kumori's tracked, narrowly
-scoped Skin Studio renderer patch.
+been published for that release.
 
 ```bat
 build-app.cmd

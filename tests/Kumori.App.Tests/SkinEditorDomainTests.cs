@@ -541,6 +541,36 @@ public sealed class SkinEditorDomainTests
     }
 
     [Fact]
+    public void Extras_element_tinting_recolours_only_the_selected_logical_element()
+    {
+        var cursor = new SkinExtraPackFile(
+            "cursor.png",
+            SkinImageTools.Encode(
+                SkinImageTools.ToBitmap([20, 40, 80, 123], 1, 1, 4),
+                "cursor.png"));
+        var trail = new SkinExtraPackFile(
+            "cursortrail.png",
+            SkinImageTools.Encode(
+                SkinImageTools.ToBitmap([30, 50, 90, 200], 1, 1, 4),
+                "cursortrail.png"));
+
+        var result = SkinExtraElementTinting.Apply(
+            "osu.cursor",
+            [cursor, trail],
+            new Dictionary<string, SkinRgb>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["cursor"] = new SkinRgb(255, 0, 0),
+            });
+
+        Assert.NotSame(cursor, result[0]);
+        Assert.Same(trail, result[1]);
+        var pixels = SkinImageTools.Pixels(
+            SkinImageTools.Decode(result[0].Bytes),
+            out _);
+        Assert.Equal(new byte[] { 0, 0, 255, 123 }, pixels);
+    }
+
+    [Fact]
     public void Cursor_extras_use_the_expected_collection_hierarchy()
     {
         Assert.Equal(
@@ -557,8 +587,8 @@ public sealed class SkinEditorDomainTests
         var classic = SkinExtrasPickerWindow.BuildTrailPoints(continuous: false);
         var continuous = SkinExtrasPickerWindow.BuildTrailPoints(continuous: true);
 
-        Assert.Equal(5, classic.Count);
-        Assert.Equal(28, continuous.Count);
+        Assert.Equal(10, classic.Count);
+        Assert.Equal(31, continuous.Count);
         Assert.Equal(classic[0].X, continuous[0].X, precision: 6);
         Assert.Equal(classic[0].Y, continuous[0].Y, precision: 6);
         Assert.Equal(classic[^1].X, continuous[^1].X, precision: 6);
@@ -659,15 +689,15 @@ public sealed class SkinEditorDomainTests
         Assert.False(SkinExtrasPickerWindow.IsSmoothTrailPlaceholder(alphaNoise));
         Assert.False(SkinExtrasPickerWindow.IsSmoothTrailPlaceholder(visible));
         Assert.Equal(
-            5,
+            10,
             SkinExtrasPickerWindow.BuildTrailPoints(
                 SkinExtrasPickerWindow.UsesSmoothCursorTrail(null)).Count);
         Assert.Equal(
-            28,
+            31,
             SkinExtrasPickerWindow.BuildTrailPoints(
                 SkinExtrasPickerWindow.UsesSmoothCursorTrail(transparent)).Count);
         Assert.Equal(
-            28,
+            31,
             SkinExtrasPickerWindow.BuildTrailPoints(
                 SkinExtrasPickerWindow.UsesSmoothCursorTrail(
                     legacyOpaquePlaceholder)).Count);
@@ -718,15 +748,18 @@ public sealed class SkinEditorDomainTests
             hasMiddle: true,
             renderMiddle: false);
 
-        Assert.Equal(6, classic.Count);
-        Assert.Equal(29, smooth.Count);
+        Assert.Equal(11, classic.Count);
+        Assert.Equal(32, smooth.Count);
         Assert.Equal(
             SkinCursorPreviewLayerKind.Cursor,
             Assert.Single(classic.Where(layer =>
                 layer.Kind == SkinCursorPreviewLayerKind.Cursor)).Kind);
         Assert.All(
             classic.Where(layer => layer.Kind == SkinCursorPreviewLayerKind.Trail),
-            layer => Assert.InRange(layer.MaxWidth, 92, 110));
+            layer => Assert.Equal(110, layer.MaxWidth));
+        Assert.All(
+            classic.Where(layer => layer.Kind == SkinCursorPreviewLayerKind.Trail),
+            layer => Assert.Equal(1, layer.Opacity));
         Assert.All(
             smooth.Where(layer => layer.Kind == SkinCursorPreviewLayerKind.Trail),
             layer => Assert.Equal(52, layer.MaxWidth));
@@ -768,8 +801,8 @@ public sealed class SkinEditorDomainTests
         var classic = SkinEditorPage.BuildCursorCompositionTrailPoints(smooth: false);
         var smooth = SkinEditorPage.BuildCursorCompositionTrailPoints(smooth: true);
 
-        Assert.Equal(5, classic.Count);
-        Assert.Equal(28, smooth.Count);
+        Assert.Equal(10, classic.Count);
+        Assert.Equal(31, smooth.Count);
         Assert.Equal(classic[0], smooth[0]);
         Assert.Equal(classic[^1], smooth[^1]);
         Assert.True(smooth[1].X - smooth[0].X

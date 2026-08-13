@@ -1,3 +1,4 @@
+using Kumori.Core.Models;
 using Kumori.Storage;
 using Microsoft.Data.Sqlite;
 using Xunit;
@@ -82,6 +83,49 @@ public class AnalyticsRepositoryTests : IDisposable
         Assert.Equal(180, summary.Daily[0].TotalDurationSeconds);
         Assert.Equal(450, summary.Daily[0].ZTotal + summary.Daily[0].XTotal);
         Assert.Equal(3, summary.Daily[0].TotalMisses);
+    }
+
+    [Fact]
+    public void GetDailyProgress_PreservesConfirmedBpmTargetInModCombinations()
+    {
+        using (var con = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            con.Open();
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = """
+                ALTER TABLE attempts ADD COLUMN beatmap_id INTEGER;
+                ALTER TABLE attempts ADD COLUMN mods_key TEXT NOT NULL DEFAULT 'NM';
+                ALTER TABLE attempts ADD COLUMN misses INTEGER NOT NULL DEFAULT 0;
+                CREATE TABLE beatmaps(
+                    id INTEGER PRIMARY KEY,
+                    artist TEXT,
+                    title TEXT,
+                    difficulty TEXT,
+                    bpm REAL);
+                INSERT INTO beatmaps VALUES(20, 'Artist', 'Song', 'Insane', 180);
+                UPDATE attempts SET beatmap_id = 20, mods_key = 'HDDABPM' WHERE id = 3;
+                CREATE TABLE attempt_mods(
+                    attempt_id INTEGER NOT NULL,
+                    acronym TEXT NOT NULL,
+                    settings_json TEXT NOT NULL);
+                INSERT INTO attempt_mods VALUES(3, 'BPM', '{"target_bpm":230}');
+                CREATE TABLE attempt_context(
+                    attempt_id INTEGER PRIMARY KEY,
+                    beatmap_json TEXT,
+                    score_json TEXT);
+                INSERT INTO attempt_context VALUES(3, NULL, '{"mods_authoritative_result":true}');
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        DailyProgressReport? report = new AnalyticsRepository(
+            new SqliteConnectionFactory(_dbPath, readOnly: true))
+            .GetDailyProgress("2026-07-07");
+
+        DailyModCombinationUsage combination = Assert.Single(report!.MostUsedModCombinations);
+        Assert.Equal("HDDABPM", combination.ModsKey);
+        Assert.Equal(230, combination.Bpm);
+        Assert.Equal(1, combination.Plays);
     }
 
     [Fact]

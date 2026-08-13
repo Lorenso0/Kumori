@@ -110,6 +110,7 @@ public sealed record DailyPlayHighlight
 public sealed record DailyModCombinationUsage
 {
     public string ModsKey { get; init; } = "NM";
+    public double? Bpm { get; init; }
     public long Plays { get; init; }
 }
 

@@ -60,19 +60,14 @@ internal static class SkinCursorPreview
         {
             for (var index = 0; index < points.Count; index++)
             {
-                var progress = points.Count == 1
-                    ? 1
-                    : index / (double)(points.Count - 1);
-                var size = hasMiddle ? 52 : 92 + progress * 18;
+                var size = hasMiddle ? 52 : 110;
                 result.Add(new SkinCursorPreviewLayer(
                     SkinCursorPreviewLayerKind.Trail,
                     points[index].X,
                     points[index].Y,
                     size,
                     size,
-                    hasMiddle
-                        ? 0.08 + progress * 0.67
-                        : 0.2 + progress * 0.55));
+                    1));
             }
         }
 
@@ -102,7 +97,12 @@ internal static class SkinCursorPreview
 
     public static IReadOnlyList<(double X, double Y)> TrailPoints(bool smooth)
     {
-        var count = smooth ? 28 : 5;
+        var fadeMilliseconds = smooth
+            ? SkinPreviewAnimation.SmoothTrailFadeMilliseconds
+            : SkinPreviewAnimation.DisjointTrailFadeMilliseconds;
+        var count = (int)Math.Ceiling(
+            fadeMilliseconds
+            / SkinPreviewAnimation.DisjointTrailIntervalMilliseconds) + 1;
         var result = new (double X, double Y)[count];
         for (var index = 0; index < count; index++)
         {

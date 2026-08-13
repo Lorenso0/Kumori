@@ -257,7 +257,7 @@ public sealed class DailyProgressWebhookServiceTests : IDisposable
         },
         MostUsedModCombinations =
         [
-            new DailyModCombinationUsage { ModsKey = "HD,DT", Plays = 28 },
+            new DailyModCombinationUsage { ModsKey = "HD,DA,BPM", Bpm = 230, Plays = 28 },
             new DailyModCombinationUsage { ModsKey = "NM", Plays = 21 },
             new DailyModCombinationUsage { ModsKey = "HR", Plays = 11 },
         ],

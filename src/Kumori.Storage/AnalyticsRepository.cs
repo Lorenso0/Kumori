@@ -226,7 +226,7 @@ public sealed class AnalyticsRepository
             """;
         command.Parameters.AddWithValue("@day", day);
         using var reader = command.ExecuteReader();
-        var totals = new Dictionary<string, (long Plays, long LatestAttempt)>(StringComparer.OrdinalIgnoreCase);
+        var totals = new Dictionary<DailyModCombinationKey, (long Plays, long LatestAttempt)>();
         while (reader.Read())
         {
             string modsKey = reader.GetString(0);
@@ -240,10 +240,13 @@ public sealed class AnalyticsRepository
                 modsKey = RemoveBpmMarker(modsKey);
 
             long attemptId = reader.GetInt64(1);
-            if (totals.TryGetValue(modsKey, out var current))
-                totals[modsKey] = (current.Plays + 1, Math.Max(current.LatestAttempt, attemptId));
+            var key = new DailyModCombinationKey(
+                modsKey,
+                activeBpmAdjust ? targetBpm : null);
+            if (totals.TryGetValue(key, out var current))
+                totals[key] = (current.Plays + 1, Math.Max(current.LatestAttempt, attemptId));
             else
-                totals[modsKey] = (1, attemptId);
+                totals[key] = (1, attemptId);
         }
 
         return totals
@@ -252,11 +255,14 @@ public sealed class AnalyticsRepository
             .Take(3)
             .Select(pair => new DailyModCombinationUsage
             {
-                ModsKey = pair.Key,
+                ModsKey = pair.Key.ModsKey,
+                Bpm = pair.Key.Bpm,
                 Plays = pair.Value.Plays,
             })
             .ToArray();
     }
+
+    private readonly record struct DailyModCombinationKey(string ModsKey, double? Bpm);
 
     private static string RemoveBpmMarker(string modsKey)
     {

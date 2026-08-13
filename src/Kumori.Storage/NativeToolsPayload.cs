@@ -5,8 +5,7 @@ using Serilog;
 namespace Kumori.Storage;
 
 /// <summary>
-/// Atomically extracts the versioned native-tools bundle shared by Replay
-/// Viewer and the lazer-native Skin Studio.
+/// Atomically extracts the versioned Replay Viewer payload.
 /// </summary>
 public static class NativeToolsPayload
 {
@@ -15,9 +14,6 @@ public static class NativeToolsPayload
 
     public static string? TryEnsureReplayViewerExtracted() =>
         tryEnsureExtracted("Kumori.ReplayViewer.exe");
-
-    public static string? TryEnsureSkinStudioExtracted() =>
-        tryEnsureExtracted("Kumori.SkinStudio.exe");
 
     private static string? tryEnsureExtracted(string executableName)
     {
@@ -77,11 +73,7 @@ public static class NativeToolsPayload
         string temporaryDirectory,
         string versionDirectory)
     {
-        foreach (var executable in new[]
-                 {
-                     "Kumori.ReplayViewer.exe",
-                     "Kumori.SkinStudio.exe",
-                 })
+        foreach (var executable in new[] { "Kumori.ReplayViewer.exe" })
         {
             if (!File.Exists(Path.Combine(temporaryDirectory, executable)))
             {

@@ -11,6 +11,7 @@ public enum SkinImageTransformMode
     Tint,
     MultiplicativeTint,
     HueSaturationLightness,
+    PaletteReplace,
 }
 
 public sealed record SkinImageTransform(
@@ -18,7 +19,9 @@ public sealed record SkinImageTransform(
     SkinRgb Colour,
     double HueDegrees = 0,
     double SaturationMultiplier = 1,
-    double LightnessMultiplier = 1);
+    double LightnessMultiplier = 1,
+    SkinRgb? SourceColour = null,
+    byte MatchTolerance = 0);
 
 public sealed class SkinImageTransformService
 {
@@ -75,6 +78,19 @@ public sealed class SkinImageTransformService
                     transform.HueDegrees,
                     transform.SaturationMultiplier,
                     transform.LightnessMultiplier);
+                break;
+            case SkinImageTransformMode.PaletteReplace:
+                if (transform.SourceColour is not { } source)
+                {
+                    throw new ArgumentException(
+                        "Palette replacement requires a source colour.",
+                        nameof(transform));
+                }
+                SkinPixelTools.ApplyPaletteReplace(
+                    bgra,
+                    source,
+                    transform.Colour,
+                    transform.MatchTolerance);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(transform));

@@ -16,6 +16,7 @@ Old/
 build/
 dist/
 artifacts/
+/.artifacts/
 headless/
 third_party/artifacts/
 **/bin/

@@ -33,5 +33,9 @@
     <Content Include="THIRD-PARTY-NOTICES.md"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\third_party\osu\LICENCE"
+             Link="OSU-LICENCE"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

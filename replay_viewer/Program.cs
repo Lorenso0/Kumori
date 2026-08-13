@@ -45,6 +45,7 @@ public static class Program
                 return autoMapper.Compatible ? 0 : 2;
             }
 
+            ReplayViewerGame.EnsureSkinLayoutDependenciesLoaded();
             ViewerContract contract = ViewerContract.Load(options.ContractPath!);
             AdvancedAnalyzerColours.Configure(contract.ThemeId, contract.CustomThemeColors);
             NativeViewerLog.Write($"Loaded contract attempt={contract.Attempt.Id} samples={contract.Samples.Count} beatmap=\"{contract.BeatmapPath}\"");

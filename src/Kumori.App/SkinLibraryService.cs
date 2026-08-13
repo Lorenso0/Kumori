@@ -32,9 +32,11 @@ public static class SkinLibraryService
             new SkinLibraryItem("Argon Pro", BuiltInArgonProPath, false, 0,
                 IsBuiltIn: true, IsImported: false),
         ];
-        var files = Directory.EnumerateFiles(skinDirectory, "*.osk")
+        var files = Directory.EnumerateFiles(skinDirectory)
+            .Where(path => string.Equals(Path.GetExtension(path), ".osk", StringComparison.OrdinalIgnoreCase))
             .Select(path => new SkinLibraryItem(Path.GetFileNameWithoutExtension(path), path, false, SafeFileSize(path)));
         var folders = Directory.EnumerateDirectories(skinDirectory)
+            .Where(IsSkinFolder)
             .Select(path => new SkinLibraryItem(Path.GetFileName(path), path, true, SafeDirectorySize(path)));
         var items = builtIn.Concat(files).Concat(folders).ToList();
         string selection = (configuredPath ?? "").Trim();
@@ -72,6 +74,11 @@ public static class SkinLibraryService
 
     public static string ImportFolder(string source)
     {
+        if (!IsSkinFolder(source))
+        {
+            throw new InvalidDataException("The selected folder is not an osu! skin folder because it has no skin.ini file.");
+        }
+
         Directory.CreateDirectory(SkinDirectory);
         var destination = UniquePath(Path.Combine(SkinDirectory, SafeName(Path.GetFileName(source), "skin")));
         CopyDirectory(source, destination);
@@ -86,11 +93,9 @@ public static class SkinLibraryService
         }
 
         var fullPath = Path.GetFullPath(path);
-        var fullSkinDir = Path.GetFullPath(SkinDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        if (!fullPath.StartsWith(fullSkinDir, StringComparison.OrdinalIgnoreCase))
+        if (!IsImportedSkinPath(fullPath, SkinDirectory))
         {
-            throw new InvalidOperationException("Only skins imported into Kumori's skin folder can be deleted.");
+            throw new InvalidOperationException("Only valid skins imported directly into Kumori's skin folder can be deleted.");
         }
         if (Directory.Exists(fullPath))
         {
@@ -128,6 +133,30 @@ public static class SkinLibraryService
             ? IsBuiltInPath(configuredPath)
             : string.Equals(libraryPath, configuredPath, StringComparison.OrdinalIgnoreCase);
 
+    internal static bool IsImportedSkinPath(string path, string skinDirectory)
+    {
+        string fullPath;
+        string fullSkinDirectory;
+        try
+        {
+            fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            fullSkinDirectory = Path.GetFullPath(skinDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (!string.Equals(Path.GetDirectoryName(fullPath), fullSkinDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return File.Exists(fullPath)
+            ? string.Equals(Path.GetExtension(fullPath), ".osk", StringComparison.OrdinalIgnoreCase)
+            : Directory.Exists(fullPath) && IsSkinFolder(fullPath);
+    }
+
     private static string SafeName(string? source, string fallback)
     {
         var invalid = Path.GetInvalidFileNameChars();
@@ -164,6 +193,19 @@ public static class SkinLibraryService
         foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
         {
             File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)));
+        }
+    }
+
+    private static bool IsSkinFolder(string path)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly)
+                .Any(file => string.Equals(Path.GetFileName(file), "skin.ini", StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return false;
         }
     }
 

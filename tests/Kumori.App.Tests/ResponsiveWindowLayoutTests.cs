@@ -45,57 +45,6 @@ public sealed class ResponsiveWindowLayoutTests
                         Path.Combine(directory.FullName, "settings.v2.json"),
                         Path.Combine(directory.FullName, "legacy.json"));
                     settings.Load();
-                    var studioLauncher = new SkinStudioLauncherPage(settings, () => Task.CompletedTask);
-                    Assert.IsType<SkinStudioEmbeddedHost>(studioLauncher.FindName("StudioHost"));
-                    Assert.IsType<Button>(studioLauncher.FindName("RetryButton"));
-                    Assert.IsType<Border>(studioLauncher.FindName("QuickColourSwatch"));
-                    Assert.True(Assert.IsType<WrapPanel>(
-                        studioLauncher.FindName("QuickColourSwatchPanel")).Children.Count >= 8);
-                    Assert.IsType<Popup>(studioLauncher.FindName("SkinStudioColorPickerPopup"));
-                    Assert.Equal(Visibility.Visible,
-                        Assert.IsType<Border>(studioLauncher.FindName("WelcomePanel")).Visibility);
-                    Assert.Equal(Visibility.Collapsed,
-                        Assert.IsType<Border>(studioLauncher.FindName("ExtrasWorkspace")).Visibility);
-                    Assert.IsType<Border>(studioLauncher.FindName("MainRendererMount"));
-                    var studioWindow = new Window
-                    {
-                        Content = studioLauncher,
-                        Width = 800,
-                        Height = 650,
-                        ShowInTaskbar = false,
-                        WindowStartupLocation = WindowStartupLocation.Manual,
-                        Left = -20000,
-                        Top = -20000,
-                    };
-                    studioWindow.Show();
-                    studioWindow.UpdateLayout();
-                    var overflowMenuButton = Assert.IsType<Button>(
-                        studioLauncher.FindName("OverflowMenuButton"));
-                    overflowMenuButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    Assert.True(overflowMenuButton.ContextMenu?.IsOpen);
-                    overflowMenuButton.ContextMenu!.IsOpen = false;
-                    Assert.Equal(Visibility.Visible,
-                        Assert.IsType<Border>(studioLauncher.FindName("CompactNavigation")).Visibility);
-                    Assert.Equal(Visibility.Visible,
-                        Assert.IsType<Border>(studioLauncher.FindName("CanvasPane")).Visibility);
-                    Assert.Equal(Visibility.Collapsed,
-                        Assert.IsType<Border>(studioLauncher.FindName("NavigatorPane")).Visibility);
-                    var browseButton = Assert.IsType<Button>(studioLauncher.FindName("CompactBrowseButton"));
-                    browseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                    studioWindow.UpdateLayout();
-                    Assert.Equal(Visibility.Visible,
-                        Assert.IsType<Border>(studioLauncher.FindName("NavigatorPane")).Visibility);
-                    Assert.Equal(Visibility.Collapsed,
-                        Assert.IsType<Border>(studioLauncher.FindName("CanvasPane")).Visibility);
-                    studioWindow.Width = 1200;
-                    studioWindow.UpdateLayout();
-                    Assert.Equal(Visibility.Collapsed,
-                        Assert.IsType<Border>(studioLauncher.FindName("CompactNavigation")).Visibility);
-                    Assert.Equal(Visibility.Visible,
-                        Assert.IsType<Border>(studioLauncher.FindName("InspectorPane")).Visibility);
-                    studioWindow.Content = null;
-                    studioWindow.Close();
-                    studioLauncher.Dispose();
                     var factory = new SqliteConnectionFactory(database, readOnly: false);
                     var vm = new MainViewModel(
                         new AppStateStore(),

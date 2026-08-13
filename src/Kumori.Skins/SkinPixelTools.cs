@@ -84,6 +84,65 @@ public static class SkinPixelTools
         }
     }
 
+    public static void ApplyPaletteReplace(
+        Span<byte> bgra,
+        SkinRgb source,
+        SkinRgb target,
+        byte tolerance)
+    {
+        rgbToHsl(
+            source.Red,
+            source.Green,
+            source.Blue,
+            out _,
+            out _,
+            out var sourceLightness);
+        rgbToHsl(
+            target.Red,
+            target.Green,
+            target.Blue,
+            out var targetHue,
+            out var targetSaturation,
+            out var targetLightness);
+        for (var index = 0; index + 3 < bgra.Length; index += 4)
+        {
+            if (bgra[index + 3] == 0)
+                continue;
+            var red = bgra[index + 2];
+            var green = bgra[index + 1];
+            var blue = bgra[index];
+            if (Math.Abs(red - source.Red) > tolerance
+                || Math.Abs(green - source.Green) > tolerance
+                || Math.Abs(blue - source.Blue) > tolerance)
+            {
+                continue;
+            }
+            if (red == source.Red
+                && green == source.Green
+                && blue == source.Blue)
+            {
+                bgra[index] = target.Blue;
+                bgra[index + 1] = target.Green;
+                bgra[index + 2] = target.Red;
+                continue;
+            }
+            rgbToHsl(red, green, blue, out _, out _, out var lightness);
+            hslToRgb(
+                targetHue,
+                targetSaturation,
+                Math.Clamp(
+                    targetLightness + lightness - sourceLightness,
+                    0,
+                    1),
+                out var replacedRed,
+                out var replacedGreen,
+                out var replacedBlue);
+            bgra[index] = replacedBlue;
+            bgra[index + 1] = replacedGreen;
+            bgra[index + 2] = replacedRed;
+        }
+    }
+
     private static void rgbToHsl(
         byte red,
         byte green,

@@ -139,6 +139,43 @@ public sealed class SkinPreviewAnimationTests
     }
 
     [Fact]
+    public void Extras_hitcircle_restarts_as_soon_as_its_hit_fade_finishes()
+    {
+        Assert.Equal(
+            0,
+            SkinPreviewAnimation.ExtrasTime(
+                "osu.hitcircles",
+                SkinPreviewAnimation.HitCircleLoopMilliseconds),
+            precision: 6);
+        Assert.Equal(
+            100,
+            SkinPreviewAnimation.ExtrasTime(
+                "osu.hitcircles",
+                SkinPreviewAnimation.HitCircleLoopMilliseconds + 100),
+            precision: 6);
+        Assert.Equal(
+            5000,
+            SkinPreviewAnimation.ExtrasTime("osu.cursor", 5000),
+            precision: 6);
+    }
+
+    [Theory]
+    [InlineData("osu.hitcircles", false, true)]
+    [InlineData("osu.hitcircles", true, false)]
+    [InlineData("osu.slider", false, false)]
+    public void Paused_extras_use_a_static_frame_only_for_hitcircles(
+        string familyId,
+        bool animationsEnabled,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            SkinExtrasPickerWindow.UsesStaticHitCirclePreview(
+                familyId,
+                animationsEnabled));
+    }
+
+    [Fact]
     public void Followpoints_use_source_fade_move_and_scale_timing()
     {
         var start = SkinPreviewAnimation.Followpoint(2000, 0.5);
