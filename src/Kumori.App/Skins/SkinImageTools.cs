@@ -196,6 +196,14 @@ public static class SkinImageTools
         return stream.ToArray();
     }
 
+    public static byte[] CreateTransparentPng(int width, int height)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
+        var stride = checked(width * 4);
+        return EncodePng(ToBitmap(new byte[checked(stride * height)], width, height, stride));
+    }
+
     public static byte[] Upscale2X(byte[] encoded, string targetFilename)
     {
         // An osu! @2x asset keeps the same logical size with twice the pixels.

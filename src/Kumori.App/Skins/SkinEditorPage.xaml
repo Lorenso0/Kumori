@@ -263,6 +263,11 @@
                             Style="{StaticResource SkinAction}"
                             Margin="8,0,0,0"
                             Click="DraftReview_Click" />
+                    <Button Content="Color chaos"
+                            Style="{StaticResource SkinAction}"
+                            Margin="6,0,0,0"
+                            ToolTip="Randomize every image plus hitcircle, slider-border, and slider-track colours as one action"
+                            Click="RandomizeAllElementColors_Click" />
                     <Button x:Name="CompactActionsButton"
                             Content="&#x2026;"
                             Style="{StaticResource SkinIconAction}"
@@ -275,6 +280,9 @@
                                 <MenuItem Header="Refresh skin library" Click="Refresh_Click" />
                                 <MenuItem Header="Duplicate skin&#x2026;" Click="DuplicateSkin_Click" />
                                 <MenuItem Header="Rename skin / author…" Click="EditSkinIdentity_Click" />
+                                <MenuItem Header="Delete current skin…"
+                                          Foreground="{DynamicResource Brush.Danger}"
+                                          Click="DeleteSkin_Click" />
                                 <MenuItem Header="Reset current category" Click="ResetCurrentCategory_Click" />
                                 <Separator />
                                 <MenuItem Header="Open Extras folder" Click="OpenExtrasFolder_Click" />
@@ -284,6 +292,10 @@
                                 <MenuItem Header="Extract skin to Extras…" Click="ExtractExtras_Click" />
                                 <Separator />
                                 <MenuItem Header="Back up current skin elements" Click="Backup_Click" />
+                                <MenuItem Header="Restore elements from backup…"
+                                          Click="RestoreElementsFromBackup_Click" />
+                                <MenuItem Header="Open current skin backup folder"
+                                          Click="OpenSkinBackupFolder_Click" />
                                 <MenuItem x:Name="AutoBackupElementsMenuItem"
                                           Header="Automatically back up edited elements"
                                           IsCheckable="True"
@@ -504,6 +516,10 @@
                                                   Click="AddSelectedElementsToExtras_Click" />
                                         <Separator />
                                         <MenuItem Header="Replace file…" Click="ReplaceFile_Click" />
+                                        <MenuItem Header="Make transparent"
+                                                  Click="MakeContextElementTransparent_Click" />
+                                        <MenuItem Header="Delete"
+                                                  Click="DeleteContextElement_Click" />
                                     </ContextMenu>
                                 </ListBox.ContextMenu>
                                 <ListBox.ItemTemplate>
@@ -1267,6 +1283,25 @@
                                                    FontSize="10"
                                                    TextWrapping="Wrap"
                                                    Margin="0,5,0,0" />
+                                        <Border x:Name="SelectedElementEffectiveBadge"
+                                                Margin="0,8,0,0"
+                                                Padding="8,6"
+                                                Background="{DynamicResource Brush.ControlBackground}"
+                                                BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                                BorderThickness="1"
+                                                CornerRadius="6">
+                                            <StackPanel>
+                                                <TextBlock x:Name="SelectedElementEffectiveLabel"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource Brush.Success}" />
+                                                <TextBlock x:Name="SelectedElementEffectiveDetail"
+                                                           Margin="0,2,0,0"
+                                                           FontSize="9"
+                                                           Foreground="{DynamicResource Brush.TextMuted}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
                                         <Button x:Name="OpenElementIniLinkButton"
                                                 Content="Open related skin.ini settings"
                                                 Style="{StaticResource SkinAction}"
@@ -1324,6 +1359,8 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="7" />
                                                         <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="7" />
+                                                        <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
                                                     <Border x:Name="CurrentColorSwatch"
                                                             Width="36"
@@ -1340,6 +1377,11 @@
                                                             Content="Pick…"
                                                             Style="{StaticResource SkinAction}"
                                                             Click="PickColor_Click" />
+                                                    <Button Grid.Column="6"
+                                                            Content="Random"
+                                                            Style="{StaticResource SkinAction}"
+                                                            ToolTip="Choose a random colour"
+                                                            Click="RandomElementColor_Click" />
                                                 </Grid>
                                                 <Grid Margin="0,10,0,4">
                                                     <TextBlock Text="SWATCHES"
@@ -1405,6 +1447,12 @@
                                                 Margin="0,7,0,0"
                                                 ToolTip="Stage deletion of this element and its paired resolution files"
                                                 Click="DeleteElement_Click" />
+                                        <Button x:Name="MakeTransparentButton"
+                                                Content="Make transparent…"
+                                                Style="{StaticResource SkinAction}"
+                                                Margin="0,7,0,0"
+                                                ToolTip="Keep this image file present but replace all pixels with transparency"
+                                                Click="MakeTransparentButton_Click" />
                                         <TextBlock x:Name="ElementBackupHint"
                                                    Text="Original files are backed up automatically before staging."
                                                    Margin="2,7,2,0"
@@ -1587,6 +1635,30 @@
                                      Background="Transparent"
                                      Padding="0"
                                      HorizontalContentAlignment="Stretch">
+                                <ListBox.GroupStyle>
+                                    <GroupStyle>
+                                        <GroupStyle.HeaderTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,8,0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Items[0].GroupLabel}"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource Brush.AccentPink}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                    <Button Grid.Column="1"
+                                                            Content="Discard action"
+                                                            Tag="{Binding Items}"
+                                                            Click="DiscardDraftAction_Click"
+                                                            Style="{StaticResource SkinAction}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </GroupStyle.HeaderTemplate>
+                                    </GroupStyle>
+                                </ListBox.GroupStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate DataType="{x:Type skins:SkinDraftChange}">
                                         <Grid MinHeight="44">
@@ -1635,6 +1707,12 @@
                                     BorderThickness="0,1,0,0"
                                     Padding="12,10">
                                 <StackPanel>
+                                    <TextBlock x:Name="DraftPreflightText"
+                                               Text="Open Changes to run the compatibility check."
+                                               Margin="1,0,1,7"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.TextSecondary}"
+                                               TextWrapping="Wrap" />
                                     <TextBlock Text="Nothing changes in osu!lazer until you save. Kumori creates a restore point first."
                                                Margin="1,0,1,7"
                                                FontSize="9"

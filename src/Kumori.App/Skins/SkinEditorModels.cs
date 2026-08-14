@@ -105,6 +105,17 @@ public sealed class SkinDraftSession
         return true;
     }
 
+    public bool RemoveRange(IEnumerable<string> filenames)
+    {
+        ArgumentNullException.ThrowIfNull(filenames);
+        var removed = false;
+        foreach (var filename in filenames.Distinct(StringComparer.OrdinalIgnoreCase))
+            removed |= changes.Remove(filename);
+        if (removed)
+            RecordHistory();
+        return removed;
+    }
+
     public bool Undo()
     {
         if (!CanUndo) return false;
@@ -171,9 +182,13 @@ public sealed record SkinDraftChange(
     string? ExpectedHash,
     byte[] Bytes,
     string Description,
-    SkinDraftOperation Operation = SkinDraftOperation.Upsert)
+    SkinDraftOperation Operation = SkinDraftOperation.Upsert,
+    string? ActionId = null,
+    string? ActionLabel = null)
 {
     public bool IsDeletion => Operation == SkinDraftOperation.Delete;
+    public string GroupKey => ActionId ?? Filename;
+    public string GroupLabel => ActionLabel ?? Description;
 }
 
 public enum SkinDraftOperation

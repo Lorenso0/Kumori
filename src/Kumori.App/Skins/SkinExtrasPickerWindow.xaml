@@ -211,6 +211,11 @@
                                        Margin="0,2,0,0"
                                        FontSize="9"
                                        Foreground="{DynamicResource Brush.TextMuted}" />
+                            <TextBlock Text="{Binding UsageBadge}"
+                                       Margin="0,2,0,0"
+                                       FontSize="9"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource Brush.Success}" />
                         </StackPanel>
                         <Button Grid.Column="3"
                                 Height="30"
@@ -270,6 +275,19 @@
                            TextTrimming="CharacterEllipsis" />
             </CheckBox>
         </DataTemplate>
+        <DrawingBrush x:Key="TransparencyGridBrush"
+                      TileMode="Tile"
+                      Viewport="0,0,24,24"
+                      ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="{DynamicResource Brush.CardBackground}"
+                                     Geometry="M0,0 H24 V24 H0 Z" />
+                    <GeometryDrawing Brush="{DynamicResource Brush.ControlBackground}"
+                                     Geometry="M0,0 H12 V12 H0 Z M12,12 H24 V24 H12 Z" />
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
     </UserControl.Resources>
 
     <Border x:Name="WindowFrame"
@@ -399,16 +417,31 @@
                     </TextBlock.Style>
                 </TextBlock>
             </Grid>
-            <Button x:Name="CheckExtrasUpdatesButton"
-                    Grid.Column="2"
-                    Content="Check for updates"
-                    Height="32"
-                    Margin="10,0,0,0"
-                    Padding="10,0"
-                    VerticalAlignment="Top"
-                    Click="CheckExtrasUpdates_Click"
-                    ToolTip="Check GitHub and synchronize the complete Extras catalog"
-                    AutomationProperties.Name="Check Extras for updates" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button x:Name="RandomHitsoundsButton"
+                        Content="3 random sounds"
+                        Height="32"
+                        Margin="10,0,0,0"
+                        Padding="10,0"
+                        Click="RandomHitsounds_Click"
+                        ToolTip="Pick one fresh Normal, Soft, and Drum hitsound pack" />
+                <Button x:Name="FullRandomButton"
+                        Content="Full random"
+                        Height="32"
+                        Margin="6,0,0,0"
+                        Padding="10,0"
+                        Click="FullRandom_Click"
+                        ToolTip="Pick one fresh compatible pack for every family" />
+                <Button x:Name="CheckExtrasUpdatesButton"
+                        Content="Check for updates"
+                        Height="32"
+                        Margin="6,0,0,0"
+                        Padding="10,0"
+                        VerticalAlignment="Top"
+                        Click="CheckExtrasUpdates_Click"
+                        ToolTip="Check GitHub and synchronize the complete Extras catalog"
+                        AutomationProperties.Name="Check Extras for updates" />
+            </StackPanel>
             <CheckBox x:Name="LazerUsedOnlyCheckBox"
                       Grid.Column="3"
                       Content="Lazer used"
@@ -723,6 +756,11 @@
                                                            Margin="0,2,0,0"
                                                            FontSize="9"
                                                            Foreground="{DynamicResource Brush.AccentPink}" />
+                                                <TextBlock Text="{Binding UsageBadge}"
+                                                           Margin="0,2,0,0"
+                                                           FontSize="9"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource Brush.Success}" />
                                                 <TextBlock Text="{Binding CatalogBadge}"
                                                            Margin="0,2,0,0"
                                                            FontSize="9"
@@ -849,6 +887,18 @@
                                                FontSize="9"
                                                Foreground="{DynamicResource Brush.TextSecondary}" />
                                 </Border>
+                                <Border x:Name="SelectedPackUsageBadge"
+                                        Margin="6,0,0,0"
+                                        Padding="7,2"
+                                        Background="{DynamicResource Brush.ControlBackground}"
+                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Visibility="Collapsed">
+                                    <TextBlock x:Name="SelectedPackUsageText"
+                                               FontSize="9"
+                                               Foreground="{DynamicResource Brush.Success}" />
+                                </Border>
                             </StackPanel>
                             <TextBlock x:Name="SelectedPackPath"
                                        Margin="0,4,0,0"
@@ -934,26 +984,26 @@
                                            TextWrapping="Wrap"
                                            TextAlignment="Center" />
                             </StackPanel>
-                            <Grid x:Name="AudioPlayerPreview"
-                                  Grid.RowSpan="3"
-                                  Margin="40"
-                                  MaxWidth="980"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Visibility="Collapsed">
-                                <Border Padding="28"
-                                        Background="{DynamicResource Brush.PanelBackground}"
-                                        BorderBrush="{DynamicResource Brush.BorderSubtle}"
-                                        BorderThickness="1"
-                                        CornerRadius="12">
-                                    <Grid>
+                             <Grid x:Name="AudioPlayerPreview"
+                                   Grid.RowSpan="3"
+                                   Margin="12,8"
+                                   MaxWidth="980"
+                                   HorizontalAlignment="Stretch"
+                                   VerticalAlignment="Stretch"
+                                   Visibility="Collapsed">
+                                <Border Padding="16"
+                                         Background="{DynamicResource Brush.PanelBackground}"
+                                         BorderBrush="{DynamicResource Brush.BorderSubtle}"
+                                         BorderThickness="1"
+                                         CornerRadius="12">
+                                    <Grid x:Name="AudioPreviewLayout">
                                         <Grid.Resources>
                                             <Style x:Key="AudioTrackItemStyle"
                                                    TargetType="ListBoxItem">
                                                 <EventSetter Event="PreviewMouseLeftButtonUp"
                                                              Handler="AudioTrackItem_Click" />
-                                                <Setter Property="Margin" Value="3" />
-                                                <Setter Property="Padding" Value="11,6" />
+                                                <Setter Property="Margin" Value="2" />
+                                                <Setter Property="Padding" Value="9,5" />
                                                 <Setter Property="MinWidth" Value="104" />
                                                 <Setter Property="HorizontalContentAlignment"
                                                         Value="Center" />
@@ -998,11 +1048,12 @@
                                                            TextTrimming="CharacterEllipsis" />
                                             </DataTemplate>
                                         </Grid.Resources>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
+                                         <Grid.RowDefinitions>
+                                             <RowDefinition Height="Auto" />
+                                             <RowDefinition Height="*" MinHeight="72" />
+                                             <RowDefinition Height="Auto" />
+                                             <RowDefinition Height="Auto" />
+                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <StackPanel>
                                             <TextBlock Text="AUDIO PREVIEW"
@@ -1022,14 +1073,14 @@
                                                        HorizontalAlignment="Center"
                                                        Text="With selection" />
                                         </StackPanel>
-                                        <Grid Grid.Row="1" Margin="0,18,0,0">
+                                        <Grid Grid.Row="1" Margin="0,10,0,0">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="14" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <Border Grid.Column="0"
-                                                    Padding="14"
+                                             <Border Grid.Column="0"
+                                                     Padding="10"
                                                     Background="{DynamicResource Brush.ControlBackground}"
                                                     BorderBrush="{DynamicResource Brush.BorderSubtle}"
                                                     BorderThickness="1"
@@ -1051,14 +1102,14 @@
                                                                    VerticalAlignment="Center"
                                                                    FontSize="10"
                                                                    Foreground="{DynamicResource Brush.TextMuted}" />
-                                                        <ListBox x:Name="AudioCurrentTrackPicker"
+                                                         <ListBox x:Name="AudioCurrentTrackPicker"
                                                                  HorizontalContentAlignment="Center"
                                                                  Background="Transparent"
                                                                  BorderThickness="0"
                                                                  SelectionMode="Single"
-                                                                 ScrollViewer.CanContentScroll="False"
-                                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                                 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                                                  ScrollViewer.CanContentScroll="False"
+                                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                                                  ItemContainerStyle="{StaticResource AudioTrackItemStyle}"
                                                                  ItemTemplate="{StaticResource AudioTrackItemTemplate}"
                                                                  SelectionChanged="AudioCurrentTrackPicker_SelectionChanged"
@@ -1072,8 +1123,8 @@
                                                     </Grid>
                                                 </Grid>
                                             </Border>
-                                            <Border Grid.Column="2"
-                                                    Padding="14"
+                                             <Border Grid.Column="2"
+                                                     Padding="10"
                                                     Background="{DynamicResource Brush.ControlBackground}"
                                                     BorderBrush="{DynamicResource Brush.BorderSubtle}"
                                                     BorderThickness="1"
@@ -1095,14 +1146,14 @@
                                                                    VerticalAlignment="Center"
                                                                    FontSize="10"
                                                                    Foreground="{DynamicResource Brush.TextMuted}" />
-                                                        <ListBox x:Name="AudioPackTrackPicker"
+                                                         <ListBox x:Name="AudioPackTrackPicker"
                                                                  HorizontalContentAlignment="Center"
                                                                  Background="Transparent"
                                                                  BorderThickness="0"
                                                                  SelectionMode="Single"
-                                                                 ScrollViewer.CanContentScroll="False"
-                                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                                 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                                                  ScrollViewer.CanContentScroll="False"
+                                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                                                  ItemContainerStyle="{StaticResource AudioTrackItemStyle}"
                                                                  ItemTemplate="{StaticResource AudioTrackItemTemplate}"
                                                                  SelectionChanged="AudioPackTrackPicker_SelectionChanged"
@@ -1117,8 +1168,18 @@
                                                 </Grid>
                                             </Border>
                                         </Grid>
-                                        <Grid Grid.Row="2" Margin="0,22,0,0">
+                                         <TextBlock x:Name="AudioHitsoundMapText"
+                                                    Grid.Row="2"
+                                                    Margin="0,8,0,0"
+                                                   HorizontalAlignment="Center"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                                   TextAlignment="Center"
+                                                   TextWrapping="Wrap"
+                                                   Visibility="Collapsed" />
+                                        <Grid Grid.Row="3" Margin="0,10,0,0">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
@@ -1134,11 +1195,20 @@
                                                     Content="Stop"
                                                     Width="70"
                                                     Height="34"
-                                                    Margin="8,0,14,0"
+                                                    Margin="8,0,0,0"
                                                     Click="StopAudioPreview_Click"
                                                     IsEnabled="False" />
-                                            <Slider x:Name="AudioProgressSlider"
+                                            <Button x:Name="AudioPlayPackButton"
                                                     Grid.Column="2"
+                                                    Content="Play full set"
+                                                    MinWidth="108"
+                                                    Height="34"
+                                                    Margin="8,0,14,0"
+                                                    Click="AudioPlayPack_Click"
+                                                    Visibility="Collapsed"
+                                                    ToolTip="Play the full hitsound bank as osu! hit objects" />
+                                            <Slider x:Name="AudioProgressSlider"
+                                                    Grid.Column="3"
                                                     Minimum="0"
                                                     Maximum="1"
                                                     Value="0"
@@ -1147,7 +1217,7 @@
                                                     PreviewMouseLeftButtonUp="AudioProgress_PreviewMouseLeftButtonUp"
                                                     ToolTip="Seek within the selected sound" />
                                         </Grid>
-                                        <Grid Grid.Row="3" Margin="164,6,0,0">
+                                        <Grid Grid.Row="4" Margin="164,4,0,0">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
@@ -1203,6 +1273,31 @@
                                                   Margin="3,0,0,0"
                                                   IsChecked="False"
                                                   Click="PreviewMode_Click" />
+                                    <ToggleButton x:Name="ChangedOnlyPreviewToggle"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Changed only"
+                                                  Margin="3,0,0,0"
+                                                  Click="ChangedOnlyPreviewToggle_Click"
+                                                  ToolTip="Hide unchanged files from both sides" />
+                                    <ToggleButton x:Name="BlinkCompareToggle"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Blink"
+                                                  Margin="3,0,0,0"
+                                                  Click="BlinkCompareToggle_Click" />
+                                    <ToggleButton x:Name="SwipeCompareToggle"
+                                                  Style="{StaticResource PreviewModeToggle}"
+                                                  Content="Swipe"
+                                                  Margin="3,0,0,0"
+                                                  Click="SwipeCompareToggle_Click" />
+                                    <Slider x:Name="ComparisonSwipeSlider"
+                                            Width="72"
+                                            Margin="6,0,2,0"
+                                            Minimum="10"
+                                            Maximum="90"
+                                            Value="50"
+                                            VerticalAlignment="Center"
+                                            Visibility="Collapsed"
+                                            ValueChanged="ComparisonSwipeSlider_ValueChanged" />
                                     <ToggleButton x:Name="PreviewPlaybackToggle"
                                                   Style="{StaticResource PreviewModeToggle}"
                                                   MinWidth="66"
@@ -1241,6 +1336,7 @@
                             <Grid x:Name="ComparisonPreview"
                                   Grid.Row="1"
                                   Margin="8,2"
+                                  Background="{StaticResource TransparencyGridBrush}"
                                   Visibility="Collapsed">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition x:Name="CurrentPreviewColumn" Width="*" />
@@ -1461,6 +1557,53 @@
                         Click="ValidateRepair_Click" />
             </StackPanel>
         </Grid>
+            </Grid>
+
+            <Grid x:Name="RandomMixOverlay"
+                  Grid.RowSpan="2"
+                  Panel.ZIndex="101"
+                  Background="#E8100D12"
+                  Visibility="Collapsed"
+                  Focusable="True"
+                  AutomationProperties.Name="Random skin mix in progress"
+                  AutomationProperties.LiveSetting="Polite">
+                <Border Width="520"
+                        MaxWidth="520"
+                        Padding="22"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource Brush.PanelBackground}"
+                        BorderBrush="{DynamicResource Brush.AccentPink}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                    <StackPanel>
+                        <TextBlock Text="BUILDING RANDOM MIX"
+                                   Style="{StaticResource Text.LabelUpper}"
+                                   Foreground="{DynamicResource Brush.AccentPink}" />
+                        <TextBlock x:Name="RandomMixOverlayText"
+                                   Margin="0,9,0,0"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap" />
+                        <ProgressBar x:Name="RandomMixProgressBar"
+                                     Height="9"
+                                     Margin="0,14,0,0"
+                                     Minimum="0"
+                                     Maximum="1"
+                                     Value="0"
+                                     IsIndeterminate="False" />
+                        <TextBlock x:Name="RandomMixProgressDetailText"
+                                   Margin="0,7,0,0"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource Brush.TextSecondary}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Margin="0,12,0,0"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource Brush.TextMuted}"
+                                   Text="Each selected family is staged as a reversible action in Changes."
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
             </Grid>
 
             <Grid x:Name="CatalogSyncOverlay"

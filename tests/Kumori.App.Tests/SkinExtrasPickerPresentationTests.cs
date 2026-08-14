@@ -102,6 +102,98 @@ public sealed class SkinExtrasPickerPresentationTests
         Assert.Equal("Hidden", (string?)modeBar.Attribute("Visibility"));
     }
 
+    [Fact]
+    public void Transparency_preview_brush_is_owned_by_the_extras_control()
+    {
+        var document = LoadPickerDocument();
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var resources = document.Root!
+            .Element(presentation + "UserControl.Resources");
+        Assert.NotNull(resources);
+
+        Assert.Contains(
+            resources!.Elements(presentation + "DrawingBrush"),
+            element => (string?)element.Attribute(xaml + "Key") ==
+                "TransparencyGridBrush");
+
+        var comparisonPreview = NamedElement(
+            document,
+            xaml,
+            "ComparisonPreview");
+        Assert.Equal(
+            "{StaticResource TransparencyGridBrush}",
+            (string?)comparisonPreview.Attribute("Background"));
+    }
+
+    [Fact]
+    public void Audio_preview_constrains_long_track_lists_without_clipping_controls()
+    {
+        var document = LoadPickerDocument();
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var preview = NamedElement(document, xaml, "AudioPlayerPreview");
+        Assert.Equal("Stretch", (string?)preview.Attribute("VerticalAlignment"));
+        Assert.Equal("Stretch", (string?)preview.Attribute("HorizontalAlignment"));
+
+        var layout = NamedElement(document, xaml, "AudioPreviewLayout");
+        var rows = layout.Element(presentation + "Grid.RowDefinitions")!
+            .Elements(presentation + "RowDefinition")
+            .ToArray();
+        Assert.Equal("*", (string?)rows[1].Attribute("Height"));
+
+        foreach (var name in new[]
+                 {
+                     "AudioCurrentTrackPicker",
+                     "AudioPackTrackPicker",
+                 })
+        {
+            var picker = NamedElement(document, xaml, name);
+            Assert.Equal(
+                "Auto",
+                (string?)picker.Attribute(
+                    "ScrollViewer.VerticalScrollBarVisibility"));
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 13, true, "", "", false)]
+    [InlineData(1, 13, true, "", "1/13 FILES MATCH", false)]
+    [InlineData(13, 13, false, "", "FILES MATCH · SETTINGS DIFFER", false)]
+    [InlineData(13, 13, true, "IN USE", "IN USE", true)]
+    public void Pack_usage_badge_only_claims_a_complete_active_pack(
+        int matchingFiles,
+        int totalFiles,
+        bool settingsMatch,
+        string expectedBadge,
+        string expectedDetail,
+        bool expectedInUse)
+    {
+        var result = Kumori.App.Skins.SkinExtrasPickerWindow.DescribePackUsage(
+            matchingFiles,
+            totalFiles,
+            settingsMatch);
+
+        Assert.Equal(expectedBadge, result.Badge);
+        Assert.Equal(expectedDetail, result.Detail);
+        Assert.Equal(expectedInUse, result.IsInUse);
+    }
+
+    [Fact]
+    public void Full_random_exposes_determinate_pack_progress()
+    {
+        var document = LoadPickerDocument();
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        Assert.NotNull(NamedElement(document, xaml, "FullRandomButton"));
+        var overlay = NamedElement(document, xaml, "RandomMixOverlay");
+        Assert.Equal("Collapsed", (string?)overlay.Attribute("Visibility"));
+        var progress = NamedElement(document, xaml, "RandomMixProgressBar");
+        Assert.Equal("False", (string?)progress.Attribute("IsIndeterminate"));
+    }
+
     private static void AssertPixelScrollHost(
         XElement control,
         XNamespace presentation)

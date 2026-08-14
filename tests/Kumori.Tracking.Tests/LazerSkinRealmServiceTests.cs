@@ -92,6 +92,26 @@ public sealed class LazerSkinRealmServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_skin_marks_it_pending_and_removes_it_from_the_visible_catalog()
+    {
+        await Task.Run(() =>
+        {
+            Directory.CreateDirectory(Path.Combine(root, "files"));
+            using (Realm.GetInstance(Configuration())) { }
+            var service = new LazerSkinRealmService();
+            var created = service.CreateSkin(
+                root,
+                "Disposable",
+                "Kumori",
+                System.Text.Encoding.UTF8.GetBytes("[General]\nName: Disposable\n"));
+
+            Assert.True(service.DeleteSkin(root, created.Id));
+            Assert.Empty(service.LoadCatalog(root).Skins);
+            Assert.False(service.DeleteSkin(root, created.Id));
+        });
+    }
+
+    [Fact]
     public async Task Catalog_commit_add_conflict_and_backup_use_dynamic_realm()
     {
         await Task.Run(() =>

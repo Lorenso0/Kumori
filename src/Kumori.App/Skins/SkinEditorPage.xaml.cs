@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
@@ -1184,12 +1185,27 @@ public partial class SkinEditorPage : UserControl
             ? $"{FormatSize(entry.TotalSizeBytes)} · 1× + 2× files · edits save to both"
             : $"{FormatSize(entry.File.SizeBytes)} · {entry.Hash[..Math.Min(10, entry.Hash.Length)]}";
         SelectedElementUsage.Text = SkinElementSemanticGroups.UsageForFilename(entry.Filename);
+        UpdateSelectedElementEffectiveStatus(entry);
         var deletionStaged = entry.PhysicalEntries.Any(physical =>
             draft?.Changes.Any(change =>
                 change.IsDeletion
                 && change.Filename.Equals(physical.Filename, StringComparison.OrdinalIgnoreCase)) == true);
+        var transparencyStaged = entry.PhysicalEntries.Any(physical =>
+            draft?.Changes.Any(change =>
+                !change.IsDeletion
+                && change.Filename.Equals(physical.Filename, StringComparison.OrdinalIgnoreCase)
+                && SkinElementCategorizer.IsImage(change.Filename)
+                && SkinImageTools.IsFullyTransparentImage(change.Bytes)) == true);
         DeleteElementButton.Content = deletionStaged ? "Deletion staged" : "Delete element…";
         DeleteElementButton.IsEnabled = !deletionStaged;
+        MakeTransparentButton.Content = transparencyStaged
+            ? "Transparency staged"
+            : "Make transparent…";
+        MakeTransparentButton.IsEnabled = entry.IsImage
+            && !deletionStaged
+            && !transparencyStaged
+            && entry.PhysicalEntries.All(physical => Path.GetExtension(physical.Filename)
+                .Equals(".png", StringComparison.OrdinalIgnoreCase));
         var related = RelatedIniTargetForEntry(entry);
         OpenElementIniLinkButton.Tag = related;
         OpenElementIniLinkButton.Visibility = related is null ? Visibility.Collapsed : Visibility.Visible;
@@ -1220,6 +1236,7 @@ public partial class SkinEditorPage : UserControl
             ExportElementButton.IsEnabled = false;
             OpenExternallyButton.IsEnabled = true;
             DeleteElementButton.IsEnabled = !deletionStaged;
+            MakeTransparentButton.IsEnabled = false;
             return;
         }
 
@@ -1228,6 +1245,7 @@ public partial class SkinEditorPage : UserControl
             await EnsureEntryLoadedAsync(entry);
             if (selectionVersion != selectedEntryLoadVersion || !ReferenceEquals(entry, selectedEntry))
                 return;
+            UpdateSelectedElementEffectiveStatus(entry);
             suppressEditorEvents = true;
             RecolorModePicker.SelectedIndex = entry.Mode switch
             {
@@ -1254,6 +1272,10 @@ public partial class SkinEditorPage : UserControl
             ExportElementButton.IsEnabled = true;
             OpenExternallyButton.IsEnabled = true;
             DeleteElementButton.IsEnabled = !deletionStaged;
+            MakeTransparentButton.IsEnabled = entry.PhysicalEntries.All(physical =>
+                Path.GetExtension(physical.Filename).Equals(
+                    ".png",
+                    StringComparison.OrdinalIgnoreCase));
         }
         catch (Exception ex)
         {
@@ -1263,6 +1285,39 @@ public partial class SkinEditorPage : UserControl
             ElementPreviewHint.Visibility = Visibility.Visible;
             StatusText.Text = ex.Message;
         }
+    }
+
+    private void UpdateSelectedElementEffectiveStatus(SkinElementEntry entry)
+    {
+        var component = LogicalStem(entry.Filename);
+        var transparent = (entry.HasVisiblePixels == false
+                ? new[] { component }
+                : [])
+            .Concat(draft?.Changes
+                .Where(change => !change.IsDeletion
+                                 && SkinElementCategorizer.IsImage(change.Filename)
+                                 && SkinImageTools.IsFullyTransparentImage(change.Bytes))
+                .Select(change => change.Filename)
+                ?? [])
+            .ToArray();
+        var staged = draft?.Changes
+            .Where(change => !change.IsDeletion)
+            .Select(change => change.Filename)
+            .ToArray() ?? [];
+        var resolution = SkinStudioEffectiveAssetResolver.Resolve(
+            component,
+            EffectiveSkinFilenames(),
+            transparent,
+            staged);
+        SelectedElementEffectiveLabel.Text = resolution.Label;
+        SelectedElementEffectiveDetail.Text = resolution.Detail;
+        SelectedElementEffectiveLabel.Foreground = TryFindResource(
+            resolution.State is SkinStudioEffectiveAssetState.Missing
+                or SkinStudioEffectiveAssetState.BlockedFallback
+                or SkinStudioEffectiveAssetState.Transparent
+                ? "Brush.AccentPink"
+                : "Brush.Success") as System.Windows.Media.Brush
+            ?? System.Windows.Media.Brushes.White;
     }
 
     private static (string Section, string Key)? RelatedIniTargetForEntry(SkinElementEntry entry) =>
@@ -1514,9 +1569,9 @@ public partial class SkinEditorPage : UserControl
         var hitCirclePrefix = iniDocument?.GetValue("Fonts", "HitCirclePrefix");
         if (string.IsNullOrWhiteSpace(hitCirclePrefix))
             hitCirclePrefix = "default";
+        var startEndpoint = await ResolveSliderEndpointAsync("sliderstartcircle");
+        var endEndpoint = await ResolveSliderEndpointAsync("sliderendcircle");
         var entries = await Task.WhenAll(
-            FindAndLoadAsync("hitcircle"),
-            FindAndLoadAsync("hitcircleoverlay"),
             FindAndLoadAsync($"{hitCirclePrefix}-1"),
             FindAndLoadAsync("sliderb0", "sliderb", "sliderball"),
             FindAndLoadAsync("sliderfollowcircle"),
@@ -1552,42 +1607,42 @@ public partial class SkinEditorPage : UserControl
                 0,
                 0),
             Layer(
-                entries[6],
+                entries[4],
                 geometry.Start.X,
                 geometry.Start.Y,
                 geometry.CircleDiameter * 1.67,
                 geometry.CircleDiameter * 1.67,
-                Tinted(entries[6], combo),
+                Tinted(entries[4], combo),
                 role: SkinPreviewAnimationRole.ApproachCircle),
             Layer(
-                entries[0],
+                startEndpoint.Base,
                 geometry.Start.X,
                 geometry.Start.Y,
                 geometry.CircleDiameter,
                 geometry.CircleDiameter,
-                Tinted(entries[0], combo)),
+                Tinted(startEndpoint.Base, combo)),
             Layer(
-                entries[1],
+                startEndpoint.Overlay,
                 geometry.Start.X,
                 geometry.Start.Y,
                 geometry.CircleDiameter,
                 geometry.CircleDiameter),
-            Layer(entries[2], geometry.Start.X, geometry.Start.Y, 27, 36),
+            Layer(entries[0], geometry.Start.X, geometry.Start.Y, 27, 36),
             Layer(
-                entries[0],
+                endEndpoint.Base,
                 geometry.End.X,
                 geometry.End.Y,
                 geometry.CircleDiameter,
                 geometry.CircleDiameter,
-                Tinted(entries[0], combo)),
+                Tinted(endEndpoint.Base, combo)),
             Layer(
-                entries[1],
+                endEndpoint.Overlay,
                 geometry.End.X,
                 geometry.End.Y,
                 geometry.CircleDiameter,
                 geometry.CircleDiameter),
             Layer(
-                entries[5],
+                entries[3],
                 geometry.End.X,
                 geometry.End.Y,
                 geometry.ReverseDiameter,
@@ -1595,14 +1650,14 @@ public partial class SkinEditorPage : UserControl
                 rotationDegrees: geometry.ReverseRotation,
                 role: SkinPreviewAnimationRole.ReverseArrow),
             Layer(
-                entries[4],
+                entries[2],
                 geometry.Ball.X,
                 geometry.Ball.Y,
                 geometry.FollowDiameter,
                 geometry.FollowDiameter,
                 role: SkinPreviewAnimationRole.SliderFollowCircle),
             Layer(
-                entries[3],
+                entries[1],
                 geometry.Ball.X,
                 geometry.Ball.Y,
                 geometry.BallDiameter,
@@ -1610,6 +1665,28 @@ public partial class SkinEditorPage : UserControl
                 role: SkinPreviewAnimationRole.SliderBall),
         ]);
     }
+
+    private async Task<(SkinElementEntry? Base, SkinElementEntry? Overlay)>
+        ResolveSliderEndpointAsync(string component)
+    {
+        var filenames = EffectiveSkinFilenames();
+        var resolvedBase = SkinStudioEffectiveAssetResolver.Resolve(component, filenames);
+        var resolvedOverlay = SkinStudioEffectiveAssetResolver.Resolve(
+            component + "overlay",
+            filenames);
+        return (
+            await FindAndLoadAsync(resolvedBase.ResolvedComponent ?? component),
+            await FindAndLoadAsync(resolvedOverlay.ResolvedComponent ?? component + "overlay"));
+    }
+
+    private IReadOnlyList<string> EffectiveSkinFilenames() =>
+        currentSkin is null
+            ? []
+            : SkinDraftProjection.EffectiveFiles(
+                    currentSkin.Files,
+                    draft?.Changes ?? [])
+                .Select(file => file.Filename)
+                .ToArray();
 
     internal static SliderCompositionGeometry SliderCompositionGeometryFor(
         double bodyWidth = 590)
@@ -2361,6 +2438,8 @@ public partial class SkinEditorPage : UserControl
             return false;
         entry.SynchronizeEditsToVariants();
         var staged = new List<SkinDraftChange>();
+        var actionId = $"recolour:{Guid.NewGuid():N}";
+        var actionLabel = $"Recolour · {LogicalStem(entry.Filename)}";
         foreach (var physicalEntry in entry.PhysicalEntries)
         {
             await EnsureEntryLoadedAsync(physicalEntry);
@@ -2370,7 +2449,10 @@ public partial class SkinEditorPage : UserControl
                 physicalEntry.Filename,
                 physicalEntry.Hash,
                 bytes,
-                $"{physicalEntry.Filename} (recolour)"));
+                $"{physicalEntry.Filename} (recolour)",
+                SkinDraftOperation.Upsert,
+                actionId,
+                actionLabel));
         }
         draft.StageRange(staged);
         StatusText.Text = $"{entry.Filename} added to Changes. Save to osu!lazer when ready.";
@@ -2393,6 +2475,7 @@ public partial class SkinEditorPage : UserControl
         var added = pending.Count(change => !change.IsDeletion && change.ExpectedHash is null);
         var replaced = pending.Count(change => !change.IsDeletion && change.ExpectedHash is not null);
         var deleted = pending.Count(change => change.IsDeletion);
+        var preflight = await BuildCurrentPreflightAsync();
         var selectedCategoryName =
             (CategoryPicker.SelectedItem as CategoryChoice)?.Category.Name;
         var selectedFilename = selectedEntry?.Filename;
@@ -2400,7 +2483,12 @@ public partial class SkinEditorPage : UserControl
                 Window.GetWindow(this),
                 $"Save {pending.Length} change{(pending.Length == 1 ? "" : "s")} to osu!lazer?\n\n"
                 + $"{added} added · {replaced} replaced · {deleted} deleted\n\n"
-                + "Kumori will create a restore point before writing anything.",
+                + preflight.Summary + "\n"
+                + (preflight.Issues.Count == 0
+                    ? ""
+                    : string.Join("\n", preflight.Issues.Take(3)
+                        .Select(issue => $"• {issue.Message}")) + "\n")
+                + "\nKumori will create a restore point before writing anything.",
                 "Save skin to osu!lazer",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question,
@@ -2538,6 +2626,32 @@ public partial class SkinEditorPage : UserControl
         {
             SetBusy(false);
         }
+    }
+
+    private async Task<SkinStudioPreflightReport> BuildCurrentPreflightAsync()
+    {
+        if (currentSkin is null || catalog is null)
+            return SkinStudioEffectiveAssetResolver.BuildPreflight([]);
+        var source = CreateExtrasCurrentSkinSource();
+        var described = new List<SkinExtraManifestFile>();
+        foreach (var filename in source.Filenames.Where(filename =>
+                     SkinElementCategorizer.IsImage(filename)
+                     || SkinElementCategorizer.IsAudio(filename)))
+        {
+            try
+            {
+                var bytes = await source.ReadFileAsync(filename, CancellationToken.None);
+                if (bytes is not null)
+                    described.Add(await Task.Run(() =>
+                        SkinExtraFingerprint.Describe(filename, filename, bytes)));
+            }
+            catch
+            {
+                // Save performs strict hash/concurrency checks; preflight can
+                // still report the assets it was able to inspect.
+            }
+        }
+        return SkinStudioEffectiveAssetResolver.BuildPreflight(described);
     }
 
     private async Task<bool> ExportAndImportDuplicateAsync(
@@ -2727,17 +2841,19 @@ public partial class SkinEditorPage : UserControl
         if (!forceNew && !string.IsNullOrWhiteSpace(elementBackupDirectory))
             return elementBackupDirectory;
 
-        var safeName = SafePathSegment(currentSkin?.Name ?? "unknown-skin");
         var sessionName =
             $"{DateTimeOffset.Now:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid().ToString("N")[..6]}";
         elementBackupDirectory = Path.Combine(
-            AppPaths.SkinEditorBackupsDir,
-            safeName,
+            CurrentSkinBackupRoot(),
             sessionName);
         Directory.CreateDirectory(elementBackupDirectory);
         backedUpElements.Clear();
         return elementBackupDirectory;
     }
+
+    private string CurrentSkinBackupRoot() => Path.Combine(
+        AppPaths.SkinEditorBackupsDir,
+        SafePathSegment(currentSkin?.Name ?? "unknown-skin"));
 
     private async Task<bool> BackupElementFilesAsync(IEnumerable<LazerSkinFileInfo> files)
     {
@@ -2890,10 +3006,15 @@ public partial class SkinEditorPage : UserControl
         // preview render made the editor increasingly sluggish after staging.
         if (displayedDraftRevision != draftRevision)
         {
-            DraftChangesList.ItemsSource = draft?.Changes
-                .OrderBy(change => change.Filename)
+            var changeItems = draft?.Changes
+                .OrderBy(change => change.GroupLabel, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(change => change.Filename, StringComparer.OrdinalIgnoreCase)
                 .ToArray()
-                ?? Array.Empty<SkinDraftChange>();
+                ?? [];
+            var changeView = CollectionViewSource.GetDefaultView(changeItems);
+            changeView.GroupDescriptions.Add(
+                new PropertyGroupDescription(nameof(SkinDraftChange.GroupKey)));
+            DraftChangesList.ItemsSource = changeView;
             displayedDraftRevision = draftRevision;
             UpdateSkinReadiness();
             SyncDraftRecovery();
@@ -2914,6 +3035,24 @@ public partial class SkinEditorPage : UserControl
                         StringComparison.OrdinalIgnoreCase)) == true);
             DeleteElementButton.Content = deletionStaged ? "Deletion staged" : "Delete element…";
             DeleteElementButton.IsEnabled = !deletionStaged && !busy;
+            var transparencyStaged = selectedEntry.PhysicalEntries.Any(physical =>
+                draft?.Changes.Any(change =>
+                    !change.IsDeletion
+                    && change.Filename.Equals(
+                        physical.Filename,
+                        StringComparison.OrdinalIgnoreCase)
+                    && SkinElementCategorizer.IsImage(change.Filename)
+                    && SkinImageTools.IsFullyTransparentImage(change.Bytes)) == true);
+            MakeTransparentButton.Content = transparencyStaged
+                ? "Transparency staged"
+                : "Make transparent…";
+            MakeTransparentButton.IsEnabled = !busy
+                && !deletionStaged
+                && !transparencyStaged
+                && selectedEntry.IsImage
+                && selectedEntry.PhysicalEntries.All(physical => Path.GetExtension(
+                        physical.Filename)
+                    .Equals(".png", StringComparison.OrdinalIgnoreCase));
             ImageEditorControls.IsEnabled = !deletionStaged;
         }
     }
@@ -3041,6 +3180,8 @@ public partial class SkinEditorPage : UserControl
             var scorePrefix = iniDocument?.GetValue("Fonts", "ScorePrefix");
             if (string.IsNullOrWhiteSpace(scorePrefix))
                 scorePrefix = "score";
+            var sliderStartTask = ResolveSliderEndpointAsync("sliderstartcircle");
+            var sliderEndTask = ResolveSliderEndpointAsync("sliderendcircle");
             string[][] previewRequests =
             [
                 ["hitcircle"], ["hitcircleoverlay"],
@@ -3090,6 +3231,8 @@ public partial class SkinEditorPage : UserControl
             var score2 = previewEntries[26];
             var score6 = previewEntries[27];
             var score7 = previewEntries[28];
+            var sliderStart = await sliderStartTask;
+            var sliderEnd = await sliderEndTask;
             if (version != gameplayRefreshVersion) return;
 
             var combos = Enumerable.Range(1, 8)
@@ -3137,14 +3280,14 @@ public partial class SkinEditorPage : UserControl
 
             GameplayBackground.Source = null;
             GameplaySliderBody.Source = sliderBody;
-            GameplayHitcircle.Source = Tinted(circle, comboHead);
+            GameplayHitcircle.Source = Tinted(sliderStart.Base, comboHead);
             GameplayComboCircle1.Source = Tinted(circle, comboHead);
             GameplayComboCircle2.Source = Tinted(circle, combos.Length > 1 ? combos[1] : comboHead);
             GameplayComboCircle3.Source = Tinted(circle, combos.Length > 2 ? combos[2] : comboHead);
             GameplayComboSwatch1.Fill = new SolidColorBrush(comboHead);
             GameplayComboSwatch2.Fill = new SolidColorBrush(combos.Length > 1 ? combos[1] : comboHead);
             GameplayComboSwatch3.Fill = new SolidColorBrush(combos.Length > 2 ? combos[2] : comboHead);
-            GameplayOverlay.Source = overlay?.Thumbnail;
+            GameplayOverlay.Source = sliderStart.Overlay?.Thumbnail;
             GameplayComboOverlay1.Source = overlay?.Thumbnail;
             GameplayComboOverlay2.Source = overlay?.Thumbnail;
             GameplayComboOverlay3.Source = overlay?.Thumbnail;
@@ -3154,8 +3297,8 @@ public partial class SkinEditorPage : UserControl
             GameplayComboNumber3.Source = number3?.Thumbnail;
             GameplayApproach.Source = Tinted(approach, comboHead);
             GameplayStandaloneApproach.Source = Tinted(approach, comboHead);
-            GameplayTailCircle.Source = Tinted(circle, comboTail);
-            GameplayTailOverlay.Source = overlay?.Thumbnail;
+            GameplayTailCircle.Source = Tinted(sliderEnd.Base, comboTail);
+            GameplayTailOverlay.Source = sliderEnd.Overlay?.Thumbnail;
             GameplayReverseArrow.Source = reverseArrow?.Thumbnail;
             GameplayFollowCircle.Source =
                 sliderFollowAnimationFrames.FirstOrDefault()
@@ -4994,8 +5137,17 @@ public partial class SkinEditorPage : UserControl
         UpdateStudioState();
     }
 
-    private void DraftReview_Click(object sender, RoutedEventArgs e) =>
+    private async void DraftReview_Click(object sender, RoutedEventArgs e)
+    {
         SetInspectorMode(SkinEditorInspectorMode.Review);
+        DraftPreflightText.Text = "Checking effective assets and lazer compatibility…";
+        var report = await BuildCurrentPreflightAsync();
+        DraftPreflightText.Text = report.Summary
+            + (report.Issues.Count == 0
+                ? ""
+                : "\n" + string.Join("\n", report.Issues.Take(3)
+                    .Select(issue => $"• {issue.Message}")));
+    }
 
     private void ReviewClose_Click(object sender, RoutedEventArgs e) =>
         SetInspectorMode(SkinEditorInspectorMode.Context);
@@ -5277,19 +5429,23 @@ public partial class SkinEditorPage : UserControl
 
     private async void DuplicateSkin_Click(object sender, RoutedEventArgs e)
     {
-        if (catalog is null || currentSkin is null || !await ResolveDirtyStateAsync())
+        if (catalog is null || currentSkin is null)
             return;
 
-        var source = currentSkin;
         var requested = KumoriDialog.Input(
                 Window.GetWindow(this),
                 "Create an editable copy. It stays staged in Kumori until Save exports "
                 + "the complete OSK and auto-imports it into osu!lazer.",
                 "Duplicate skin",
-                $"{source.Name} copy")
+                $"{currentSkin.Name} copy")
             .Trim();
+        await PrepareDuplicateAsync(requested);
+    }
+
+    private async Task<bool> PrepareDuplicateAsync(string requested)
+    {
         if (string.IsNullOrWhiteSpace(requested))
-            return;
+            return false;
         if (requested.IndexOfAny(['\r', '\n']) >= 0)
         {
             KumoriDialog.Show(
@@ -5298,8 +5454,11 @@ public partial class SkinEditorPage : UserControl
                 "Duplicate skin",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
-            return;
+            return false;
         }
+        if (catalog is null || currentSkin is null || !await ResolveDirtyStateAsync())
+            return false;
+        var source = currentSkin;
 
         var existingNames = allSkins
             .Select(skin => skin.Name)
@@ -5338,7 +5497,7 @@ public partial class SkinEditorPage : UserControl
                 restoreRecoveredDraft: false);
             StatusText.Text =
                 "Could not prepare the duplicate because its skin.ini could not be loaded.";
-            return;
+            return false;
         }
 
         iniDocument.SetValue("General", "Name", name);
@@ -5356,6 +5515,7 @@ public partial class SkinEditorPage : UserControl
         StatusText.Text =
             $"Editing staged duplicate {working.DisplayName}. Save will export its OSK and auto-import it into osu!lazer.";
         UpdateDirtyState();
+        return true;
     }
 
     private async Task CreateBlankSkinAsync(bool openExtrasAfterCreate)
@@ -5694,6 +5854,154 @@ public partial class SkinEditorPage : UserControl
         SkinColorPickerPopup.IsOpen = true;
     }
 
+    private void RandomElementColor_Click(object sender, RoutedEventArgs e)
+    {
+        if (selectedEntry is null)
+            return;
+        SetCurrentColor(RandomBrightColor());
+        RenderSelectedEntry(invalidateComposition: true);
+    }
+
+    private async void RandomizeAllElementColors_Click(object sender, RoutedEventArgs e)
+    {
+        if (currentSkin is null || draft is null)
+            return;
+        var sourceName = currentSkin.Name;
+        var duplicateChoice = KumoriDialog.Show(
+            Window.GetWindow(this),
+            "Create a duplicate before applying Color chaos?\n\n"
+            + $"Yes: create and edit “{sourceName} (Chaos)” (recommended)\n"
+            + "No: apply Color chaos to the current skin\n"
+            + "Cancel: make no changes\n\n"
+            + "Every effective image receives its own random colour. Transparent pixels stay transparent. "
+            + "Hitcircle combo colours, the slider border, and the slider inner track are randomized in skin.ini too.",
+            "Color chaos",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Yes);
+        if (duplicateChoice == MessageBoxResult.Cancel)
+            return;
+        if (duplicateChoice == MessageBoxResult.Yes
+            && !await PrepareDuplicateAsync($"{sourceName} (Chaos)"))
+            return;
+        if (currentSkin is null || draft is null)
+            return;
+
+        SetBusy(true, "Randomizing every skin element…");
+        try
+        {
+            if (iniDocument is null)
+            {
+                iniDocument = SkinIniDocument.Create(currentSkin.Name, currentSkin.Creator);
+            }
+            else if (rawDirty)
+            {
+                iniDocument = iniDocument.WithText(RawIniText.Text);
+            }
+            else if (!ApplyFormRowsToDocument(validate: true))
+            {
+                return;
+            }
+
+            var source = CreateExtrasCurrentSkinSource();
+            var baseline = currentSkin.Files.ToDictionary(
+                file => file.Filename,
+                StringComparer.OrdinalIgnoreCase);
+            var colours = new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
+            var transformer = new SkinImageTransformService();
+            var actionId = $"random-colours:{Guid.NewGuid():N}";
+            const string actionLabel = "Color chaos · images + gameplay colours";
+            var staged = new List<SkinDraftChange>();
+            foreach (var filename in source.Filenames
+                         .Where(SkinElementCategorizer.IsImage)
+                         .OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+            {
+                var bytes = await source.ReadFileAsync(filename, CancellationToken.None);
+                if (bytes is null)
+                    continue;
+                var stem = LogicalStem(filename);
+                if (!colours.TryGetValue(stem, out var colour))
+                    colours[stem] = colour = RandomBrightColor();
+                try
+                {
+                    var transformed = await Task.Run(() => transformer.Apply(
+                        bytes,
+                        filename,
+                        new SkinImageTransform(
+                            SkinImageTransformMode.Colorize,
+                            new SkinRgb(colour.R, colour.G, colour.B))));
+                    baseline.TryGetValue(filename, out var original);
+                    staged.Add(new SkinDraftChange(
+                        filename,
+                        original?.Hash,
+                        transformed,
+                        $"{filename} (random colour)",
+                        SkinDraftOperation.Upsert,
+                        actionId,
+                        actionLabel));
+                }
+                catch
+                {
+                    // A malformed or unsupported image should not discard the
+                    // successfully transformed elements around it.
+                }
+            }
+
+            var iniColours = ColorChaosIniColours(Random.Shared);
+            foreach (var (key, value) in iniColours)
+                iniDocument.SetValue("Colours", key, value);
+            staged.Add(new SkinDraftChange(
+                "skin.ini",
+                iniFile?.Hash,
+                iniDocument.ToBytes(),
+                "skin.ini (Color chaos gameplay colours)",
+                SkinDraftOperation.Upsert,
+                actionId,
+                actionLabel));
+            draft.StageRange(staged);
+            iniDirty = false;
+            rawDirty = false;
+            SetRawText(iniDocument.ToText());
+            BuildIniForm();
+            UpdateComboStrip();
+            StatusText.Text = $"Color chaos staged for {staged.Count - 1} image files plus hitcircle and slider colours.";
+            UpdateDirtyState();
+            await RefreshGameplayPreviewAsync();
+            await RefreshRichPreviewsAsync();
+            if (selectedEntry is not null)
+                await SelectEntryAsync(selectedEntry);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private static Color RandomBrightColor() => Color.FromRgb(
+        (byte)Random.Shared.Next(48, 256),
+        (byte)Random.Shared.Next(48, 256),
+        (byte)Random.Shared.Next(48, 256));
+
+    internal static IReadOnlyDictionary<string, string> ColorChaosIniColours(
+        Random random)
+    {
+        ArgumentNullException.ThrowIfNull(random);
+        var keys = Enumerable.Range(1, 8)
+            .Select(index => $"Combo{index}")
+            .Concat(["SliderBorder", "SliderTrackOverride"]);
+        return keys.ToDictionary(
+            key => key,
+            _ =>
+            {
+                var colour = Color.FromRgb(
+                    (byte)random.Next(48, 256),
+                    (byte)random.Next(48, 256),
+                    (byte)random.Next(48, 256));
+                return $"{colour.R},{colour.G},{colour.B}";
+            },
+            StringComparer.OrdinalIgnoreCase);
+    }
+
     private void SaveSwatch_Click(object sender, RoutedEventArgs e)
     {
         var hex = $"#{currentColor.R:X2}{currentColor.G:X2}{currentColor.B:X2}";
@@ -5773,18 +6081,155 @@ public partial class SkinEditorPage : UserControl
         catch (Exception ex) { StatusText.Text = $"Could not open externally: {ex.Message}"; }
     }
 
+    private async void MakeTransparentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (selectedEntry is not null)
+            await MakeElementsTransparentAsync([selectedEntry]);
+    }
+
+    private async void MakeContextElementTransparent_Click(object sender, RoutedEventArgs e)
+    {
+        var entries = ElementList.SelectedItems.Cast<SkinElementEntry>()
+            .Where(entry => entry.IsImage)
+            .ToArray();
+        if (contextMenuEntry is { } context
+            && !entries.Contains(context))
+            entries = [context];
+        await MakeElementsTransparentAsync(entries);
+    }
+
+    private async Task MakeElementsTransparentAsync(
+        IReadOnlyList<SkinElementEntry> logicalEntries)
+    {
+        if (draft is null || logicalEntries.Count == 0)
+            return;
+        var entries = logicalEntries
+            .Where(entry => entry.IsImage)
+            .SelectMany(entry => entry.PhysicalEntries)
+            .DistinctBy(entry => entry.Filename, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var unsupported = entries.Where(entry => !Path.GetExtension(entry.Filename)
+                .Equals(".png", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (unsupported.Length > 0)
+        {
+            KumoriDialog.Show(
+                Window.GetWindow(this),
+                "Transparency requires PNG assets. Convert or replace these files with PNG first:\n\n"
+                + string.Join("\n", unsupported.Take(8).Select(entry => $"• {entry.Filename}")),
+                "Cannot make element transparent",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+        if (KumoriDialog.Show(
+                Window.GetWindow(this),
+                $"Make {logicalEntries.Count} selected element"
+                + (logicalEntries.Count == 1 ? "" : "s")
+                + " fully transparent?\n\nThe files remain present and therefore continue to override osu!'s fallbacks. "
+                + "Use Delete when you want the files removed and fallback behavior restored.",
+                "Make skin element transparent",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+
+        SetBusy(true, "Creating transparent skin element…");
+        try
+        {
+            if (settings.Current.SkinEditor.AutoBackupElements
+                && !await BackupElementFilesAsync(entries.Select(entry => entry.File)))
+                return;
+            var actionId = $"transparent:{Guid.NewGuid():N}";
+            var actionLabel = logicalEntries.Count == 1
+                ? $"Make transparent · {LogicalStem(logicalEntries[0].Filename)}"
+                : $"Make transparent · {logicalEntries.Count} elements";
+            var changes = new List<SkinDraftChange>();
+            foreach (var entry in entries)
+            {
+                await EnsureEntryLoadedAsync(entry);
+                var bytes = SkinImageTools.CreateTransparentPng(
+                    entry.PixelWidth,
+                    entry.PixelHeight);
+                changes.Add(new SkinDraftChange(
+                    entry.Filename,
+                    entry.Hash,
+                    bytes,
+                    $"{entry.Filename} (transparent)",
+                    SkinDraftOperation.Upsert,
+                    actionId,
+                    actionLabel));
+            }
+            draft.StageRange(changes);
+            StatusText.Text = $"Staged {entries.Length} transparent PNG file"
+                + (entries.Length == 1 ? "." : "s.");
+            UpdateDirtyState();
+            await RefreshGameplayPreviewAsync();
+            await RefreshRichPreviewsAsync();
+            if (selectedEntry is not null)
+                UpdateSelectedElementEffectiveStatus(selectedEntry);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Could not make the element transparent: {ex.Message}";
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async void DeleteContextElement_Click(object sender, RoutedEventArgs e)
+    {
+        if (contextMenuEntry is not { } entry)
+            return;
+        if (!ReferenceEquals(selectedEntry, entry))
+            await SelectEntryAsync(entry);
+        DeleteElement_Click(sender, e);
+    }
+
     private async void DeleteElement_Click(object sender, RoutedEventArgs e)
     {
         if (selectedEntry is null || draft is null)
             return;
 
-        var physicalEntries = selectedEntry.PhysicalEntries.ToArray();
+        var physicalEntries = selectedEntry.PhysicalEntries.ToList();
+        var impact = SkinStudioEffectiveAssetResolver.DescribeDeletion(
+            selectedEntry.Filename,
+            EffectiveSkinFilenames());
+        if (impact.HasDependency)
+        {
+            var dependencyChoice = KumoriDialog.Show(
+                Window.GetWindow(this),
+                impact.Summary
+                + "\n\nYes: remove the dependent custom base too, restoring osu!'s normal hitcircle fallback."
+                + "\nNo: delete only the selected overlay (the fallback remains blocked)."
+                + "\nCancel: make no changes.",
+                "Slider endpoint dependency",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Warning,
+                MessageBoxResult.Yes);
+            if (dependencyChoice == MessageBoxResult.Cancel)
+                return;
+            if (dependencyChoice == MessageBoxResult.Yes)
+            {
+                var safeFallback = impact.SafeFallbackComponents
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                physicalEntries.AddRange(categories
+                    .SelectMany(category => category.Files)
+                    .Where(entry => safeFallback.Contains(LogicalStem(entry.Filename)))
+                    .SelectMany(entry => entry.PhysicalEntries));
+                physicalEntries = physicalEntries
+                    .DistinctBy(entry => entry.Filename, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+        }
         var filenames = string.Join(
             Environment.NewLine,
             physicalEntries.Select(entry => $"• {entry.Filename}"));
         var result = KumoriDialog.Show(
             Window.GetWindow(this),
-            $"Stage deletion of the following skin file{(physicalEntries.Length == 1 ? "" : "s")}?\n\n"
+            $"Stage deletion of the following skin file{(physicalEntries.Count == 1 ? "" : "s")}?\n\n"
             + filenames
             + "\n\nNothing is removed until Save to osu!lazer is pressed. "
             + "You can discard or undo the staged deletion from Changes.",
@@ -5802,20 +6247,26 @@ public partial class SkinEditorPage : UserControl
                 && !await BackupElementFilesAsync(physicalEntries.Select(entry => entry.File)))
                 return;
 
+            var actionId = $"delete:{Guid.NewGuid():N}";
             draft.StageRange(physicalEntries.Select(entry => new SkinDraftChange(
                 entry.Filename,
                 entry.Hash,
                 [],
                 $"{entry.Filename} (delete)",
-                SkinDraftOperation.Delete)));
+                SkinDraftOperation.Delete,
+                actionId,
+                $"Delete · {LogicalStem(selectedEntry.Filename)}")));
             selectedEntry.Reset();
             DeleteElementButton.Content = "Deletion staged";
             DeleteElementButton.IsEnabled = false;
             ImageEditorControls.IsEnabled = false;
-            StatusText.Text = physicalEntries.Length == 1
+            StatusText.Text = physicalEntries.Count == 1
                 ? $"{selectedEntry.Filename} deletion staged."
-                : $"{physicalEntries.Length} resolution files staged for deletion.";
+                : $"{physicalEntries.Count} resolution files staged for deletion.";
             UpdateDirtyState();
+            await RefreshGameplayPreviewAsync();
+            await RefreshRichPreviewsAsync();
+            UpdateSelectedElementEffectiveStatus(selectedEntry);
         }
         finally
         {
@@ -5868,6 +6319,25 @@ public partial class SkinEditorPage : UserControl
             return;
         }
         StatusText.Text = $"Discarded staged change: {change.Filename}.";
+        UpdateDirtyState();
+    }
+
+    private void DiscardDraftAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: System.Collections.IEnumerable items }
+            || draft is null)
+            return;
+        var changes = items.Cast<object>().OfType<SkinDraftChange>().ToArray();
+        if (changes.Length == 0
+            || !draft.RemoveRange(changes.Select(change => change.Filename)))
+            return;
+        foreach (var entry in categories.SelectMany(category => category.Files)
+                     .Where(entry => entry.PhysicalEntries.Any(file => changes.Any(change =>
+                         change.Filename.Equals(file.Filename, StringComparison.OrdinalIgnoreCase)))))
+            entry.Reset();
+        StatusText.Text = $"Discarded action: {changes[0].GroupLabel}.";
+        if (selectedEntry is not null)
+            _ = SelectEntryAsync(selectedEntry);
         UpdateDirtyState();
     }
 
@@ -6016,6 +6486,177 @@ public partial class SkinEditorPage : UserControl
         {
             SetBusy(false);
         }
+    }
+
+    private void OpenSkinBackupFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (currentSkin is null)
+            return;
+        var directory = CurrentSkinBackupRoot();
+        Directory.CreateDirectory(directory);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = directory,
+            UseShellExecute = true,
+        });
+    }
+
+    private async void RestoreElementsFromBackup_Click(object sender, RoutedEventArgs e)
+    {
+        if (currentSkin is null || catalog is null || draft is null)
+            return;
+        var skinBackupRoot = Path.GetFullPath(CurrentSkinBackupRoot());
+        Directory.CreateDirectory(skinBackupRoot);
+        var sessions = SkinElementBackupCatalog.Scan(skinBackupRoot, currentSkin.Id);
+        if (sessions.Count == 0)
+        {
+            KumoriDialog.Show(
+                Window.GetWindow(this),
+                "No complete element backups were found for this skin yet.",
+                "No skin backups",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var browser = new SkinBackupBrowserWindow(Window.GetWindow(this), sessions);
+        if (browser.ShowDialog() != true || browser.Selection is not { } selection)
+            return;
+        var session = selection.Session.DirectoryPath;
+        var backupFiles = selection.Files;
+
+        SetBusy(true, "Staging backed-up skin elements…");
+        try
+        {
+            var targetNames = backupFiles.Select(file => file.Filename)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var currentFiles = currentSkin.Files
+                .Where(file => targetNames.Contains(file.Filename))
+                .ToArray();
+            if (settings.Current.SkinEditor.AutoBackupElements
+                && currentFiles.Length > 0
+                && !await BackupElementFilesAsync(currentFiles))
+                return;
+
+            var baseline = currentSkin.Files.ToDictionary(
+                file => file.Filename,
+                StringComparer.OrdinalIgnoreCase);
+            var actionId = $"restore:{Guid.NewGuid():N}";
+            var actionLabel = $"Restore backup · {Path.GetFileName(session)}";
+            var changes = new List<SkinDraftChange>();
+            foreach (var file in backupFiles)
+            {
+                var bytes = await File.ReadAllBytesAsync(file.FullPath);
+                baseline.TryGetValue(file.Filename, out var original);
+                changes.Add(new SkinDraftChange(
+                    file.Filename,
+                    original?.Hash,
+                    bytes,
+                    $"{file.Filename} (restore from backup)",
+                    SkinDraftOperation.Upsert,
+                    actionId,
+                    actionLabel));
+                if (file.Filename.Equals("skin.ini", StringComparison.OrdinalIgnoreCase))
+                {
+                    iniDocument = SkinIniDocument.Parse(bytes);
+                    SetRawText(iniDocument.ToText());
+                    BuildIniForm();
+                    iniDirty = false;
+                    rawDirty = false;
+                }
+            }
+            draft.StageRange(changes);
+            StatusText.Text = $"Staged {changes.Count} file"
+                + (changes.Count == 1 ? "" : "s")
+                + " from backup. Review the Restore action in Changes.";
+            UpdateDirtyState();
+            await RefreshGameplayPreviewAsync();
+            await RefreshRichPreviewsAsync();
+            if (selectedEntry is not null)
+                await SelectEntryAsync(selectedEntry);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Could not restore this backup: {ex.Message}";
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async void DeleteSkin_Click(object sender, RoutedEventArgs e)
+    {
+        if (catalog is null || currentSkin is null)
+            return;
+        if (pendingDuplicate is { } duplicate
+            && duplicate.WorkingSkinId == currentSkin.Id)
+        {
+            if (KumoriDialog.Show(
+                    Window.GetWindow(this),
+                    $"Discard the unimported duplicate “{duplicate.Name}”?\n\nThe source skin will not be deleted.",
+                    "Discard duplicate draft",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.No) != MessageBoxResult.Yes)
+                return;
+            var sourceId = duplicate.SourceSkinId;
+            AbandonPendingDuplicate();
+            currentSkin = null;
+            await LoadCatalogAsync(sourceId, forceReloadSelectedSkin: true);
+            return;
+        }
+        if (!await ResolveDirtyStateAsync() || currentSkin is null || catalog is null)
+            return;
+
+        var skin = currentSkin;
+        if (KumoriDialog.Show(
+                Window.GetWindow(this),
+                $"Delete “{skin.DisplayName}” from osu!lazer?\n\n"
+                + "Kumori will create a complete recovery backup before marking the skin for deletion.",
+                "Delete skin",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+
+        var deleted = false;
+        var deletedName = skin.DisplayName;
+        string? recoveryDirectory = null;
+        SetBusy(true, "Backing up and deleting skin…");
+        try
+        {
+            var directory = GetOrCreateElementBackupDirectory(forceNew: true);
+            recoveryDirectory = directory;
+            if (!await BackupElementFilesAsync(skin.Files))
+                return;
+            await Task.Run(() => realmService.CreateBackup(
+                catalog.RootPath,
+                Path.Combine(directory, "realm")));
+            deleted = await Task.Run(() => realmService.DeleteSkin(
+                catalog.RootPath,
+                skin.Id));
+            if (!deleted)
+            {
+                StatusText.Text = "The skin no longer exists or was already pending deletion.";
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Could not delete the skin: {ex.Message}";
+            return;
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+        if (!deleted)
+            return;
+        currentSkin = null;
+        draft = null;
+        await LoadCatalogAsync();
+        StatusText.Text = $"Deleted {deletedName}. Its recovery backup is in {recoveryDirectory}.";
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)
@@ -6170,6 +6811,11 @@ public partial class SkinEditorPage : UserControl
                     selection,
                     picker!.LazerUsedOnly,
                     Window.GetWindow(this)),
+                (selections, progress) => StageExtrasSelectionsAsync(
+                    selections,
+                    picker!.LazerUsedOnly,
+                    Window.GetWindow(this),
+                    progress),
                 previewAnimationsEnabled,
                 SetPreviewAnimationsEnabled);
             embeddedExtras = picker;
@@ -6196,7 +6842,8 @@ public partial class SkinEditorPage : UserControl
     private async Task<bool> StageExtrasSelectionAsync(
         SkinExtrasSelectionResult selection,
         bool lazerUsedOnly,
-        Window? owner)
+        Window? owner,
+        MessageBoxResult? confirmationChoice = null)
     {
         if (catalog is null || currentSkin is null || draft is null)
             return false;
@@ -6365,6 +7012,14 @@ public partial class SkinEditorPage : UserControl
                     currentSkin.Files,
                     changes)
                 .ToList();
+            var actionId = $"extras:{Guid.NewGuid():N}";
+            var actionLabel = $"Extras · {packName} ({manifest.FamilyName})";
+            changes = changes.Select(change => change with
+            {
+                ActionId = actionId,
+                ActionLabel = actionLabel,
+            })
+                .ToList();
             var removed = effectiveChanges.Count(change => change.IsDeletion);
             var replaced = effectiveChanges.Count(change =>
                 !change.IsDeletion && currentFilesByName.ContainsKey(change.Filename));
@@ -6386,7 +7041,7 @@ public partial class SkinEditorPage : UserControl
                     : "\nCursor middle: every variant will be removed."
                 : "";
 
-            var choice = KumoriDialog.Show(
+            var choice = confirmationChoice ?? KumoriDialog.Show(
                 owner,
                 $"Use {packName} for {manifest.FamilyName}?\n\n"
                 + $"{selection.LogicalElementCount} selected element"
@@ -6437,11 +7092,14 @@ public partial class SkinEditorPage : UserControl
                     var patched = SkinIniDocument.Parse(iniDocument.ToBytes());
                     patched.ApplyPatch(plan.IniPatch);
                     iniDocument = patched;
-                    draft.Stage(
+                    draft.StageRange([new SkinDraftChange(
                         "skin.ini",
                         iniFile?.Hash,
                         iniDocument.ToBytes(),
-                        $"skin.ini ({manifest.FamilyName} from {packName})");
+                        $"skin.ini ({manifest.FamilyName} from {packName})",
+                        SkinDraftOperation.Upsert,
+                        actionId,
+                        actionLabel)]);
                     iniDirty = false;
                     SetRawText(iniDocument.ToText());
                     BuildIniForm();
@@ -6472,6 +7130,49 @@ public partial class SkinEditorPage : UserControl
                 MessageBoxImage.Error);
             return false;
         }
+    }
+
+    private async Task<bool> StageExtrasSelectionsAsync(
+        IReadOnlyList<SkinExtrasSelectionResult> selections,
+        bool lazerUsedOnly,
+        Window? owner,
+        IProgress<SkinExtrasBatchProgress>? progress = null)
+    {
+        if (selections.Count == 0)
+            return false;
+        var choice = KumoriDialog.Show(
+            owner,
+            $"Stage {selections.Count} randomly selected Extras packs?\n\n"
+            + "Yes: create backups for affected existing files\n"
+            + "No: stage without immediate per-pack backups\n"
+            + "Cancel: make no changes",
+            "Stage random mix",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Yes);
+        if (choice == MessageBoxResult.Cancel)
+            return false;
+        for (var index = 0; index < selections.Count; index++)
+        {
+            var selection = selections[index];
+            progress?.Report(new SkinExtrasBatchProgress(
+                index,
+                selections.Count,
+                selection.Manifest.FamilyName,
+                selection.Manifest.DisplayName));
+            if (!await StageExtrasSelectionAsync(
+                    selection,
+                    lazerUsedOnly,
+                    owner,
+                    choice))
+                return false;
+            progress?.Report(new SkinExtrasBatchProgress(
+                index + 1,
+                selections.Count,
+                selection.Manifest.FamilyName,
+                selection.Manifest.DisplayName));
+        }
+        return true;
     }
 
     private void CloseExtrasWorkspace()

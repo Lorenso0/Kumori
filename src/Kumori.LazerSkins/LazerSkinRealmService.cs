@@ -97,6 +97,7 @@ public interface ILazerSkinRealmService
         string rootPath,
         Guid skinId,
         IReadOnlyList<LazerSkinBatchMutation> mutations);
+    bool DeleteSkin(string rootPath, Guid skinId);
     string CreateBackup(string rootPath, string destinationDirectory);
 }
 
@@ -660,6 +661,28 @@ public sealed class LazerSkinRealmService : ILazerSkinRealmService
                     failure?.Message);
             }
             return new LazerSkinBatchWriteResult(true, results);
+        }
+    }
+
+    public bool DeleteSkin(string rootPath, Guid skinId)
+    {
+        lock (realmGate)
+        {
+            var root = ResolveRoot(rootPath);
+            using var realm = OpenRealm(root, readOnly: false);
+            dynamic? skin = realm.DynamicApi.Find("Skin", skinId);
+            if (skin is null || ReadBool(skin, "DeletePending"))
+                return false;
+            var deleted = false;
+            realm.Write(() =>
+            {
+                dynamic? current = realm.DynamicApi.Find("Skin", skinId);
+                if (current is null || ReadBool(current, "DeletePending"))
+                    return;
+                current!.DeletePending = true;
+                deleted = true;
+            });
+            return deleted;
         }
     }
 

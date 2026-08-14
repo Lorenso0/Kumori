@@ -86,9 +86,15 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private readonly SkinIniDocument? initialCurrentIni;
     private readonly SkinExtrasCurrentSkinSource? currentSkinSource;
     private readonly Func<SkinExtrasSelectionResult, Task<bool>>? stageSelection;
+    private readonly Func<
+        IReadOnlyList<SkinExtrasSelectionResult>,
+        IProgress<SkinExtrasBatchProgress>?,
+        Task<bool>>? stageSelections;
     private readonly DispatcherTimer reloadTimer;
     private readonly DispatcherTimer searchTimer;
     private readonly DispatcherTimer audioProgressTimer;
+    private readonly DispatcherTimer audioSequenceTimer;
+    private readonly DispatcherTimer compareBlinkTimer;
     private readonly SemaphoreSlim catalogLoadGate = new(1, 1);
     private Task? catalogLoadTask;
     private readonly SemaphoreSlim packPreviewLoadGate = new(2, 2);
@@ -121,6 +127,11 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private string? playingAudioLabel;
     private bool playingAudioLoops;
     private AudioTrackOption? selectedAudioTrack;
+    private string? activeAudioFamilyId;
+    private IReadOnlyList<AudioSequenceStep> audioSequenceSteps = [];
+    private readonly List<int> audioSequenceStreams = [];
+    private int audioSequenceIndex;
+    private string? audioSequenceSourceLabel;
     private bool updatingAudioTrackSelection;
     private bool audioSeeking;
     private double audioDurationSeconds;
@@ -143,6 +154,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private bool catalogSyncWasActive;
     private bool catalogCancelRequested;
     private int packLoadVersion;
+    private int usageScanVersion;
     private int elementThumbnailLoadVersion;
     private int fallbackThumbnailLoadVersion;
     private IncompleteImportGuide? incompleteImportGuide;
@@ -175,6 +187,10 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         SkinIniDocument? currentIni = null,
         SkinExtrasCurrentSkinSource? currentSkinSource = null,
         Func<SkinExtrasSelectionResult, Task<bool>>? stageSelection = null,
+        Func<
+            IReadOnlyList<SkinExtrasSelectionResult>,
+            IProgress<SkinExtrasBatchProgress>?,
+            Task<bool>>? stageSelections = null,
         bool previewAnimationsEnabled = true,
         Action<bool>? previewAnimationsChanged = null)
     {
@@ -186,6 +202,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         initialCurrentIni = currentIni;
         this.currentSkinSource = currentSkinSource;
         this.stageSelection = stageSelection;
+        this.stageSelections = stageSelections;
         this.previewAnimationsEnabled = previewAnimationsEnabled;
         this.previewAnimationsChanged = previewAnimationsChanged;
         lazerUsedOnly = this.modeVisibility.LazerUsedOnly;
@@ -222,6 +239,31 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             Interval = TimeSpan.FromMilliseconds(200),
         };
         audioProgressTimer.Tick += (_, _) => UpdateAudioProgress();
+        audioSequenceTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500),
+        };
+        audioSequenceTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                PlayNextAudioSequenceStep();
+            }
+            catch (Exception ex)
+            {
+                StopAudio();
+                PackDetails.Text = $"Could not preview this hitsound set: {ex.Message}";
+                PackNoticePanel.Visibility = Visibility.Visible;
+            }
+        };
+        compareBlinkTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(420),
+        };
+        compareBlinkTimer.Tick += (_, _) =>
+        {
+            ResultPreviewPane.Opacity = ResultPreviewPane.Opacity < 0.5 ? 1 : 0;
+        };
         Loaded += (_, _) => UpdateExtrasPreviewAnimationSubscription();
         IsVisibleChanged += (_, _) => UpdateExtrasPreviewAnimationSubscription();
         Unloaded += (_, _) => Dispose();
@@ -285,6 +327,8 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         reloadTimer.Stop();
         searchTimer.Stop();
         audioProgressTimer.Stop();
+        audioSequenceTimer.Stop();
+        compareBlinkTimer.Stop();
         StopLibraryScrollRendering();
         StopExtrasPreviewRendering();
         libraryScrollTargets.Clear();
@@ -756,6 +800,91 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         initialFamilySelected = true;
         ShowFamily(familyToSelect, reloadSelection.PackPath);
         loadingPacks = false;
+        _ = RefreshUsageBadgesAsync(version);
+    }
+
+    private async Task RefreshUsageBadgesAsync(int catalogVersion)
+    {
+        var source = currentSkinSource;
+        var scanVersion = ++usageScanVersion;
+        if (source is null)
+        {
+            foreach (var pack in allPacks)
+                pack.SetUsage(0, pack.Manifest.Files.Count);
+            return;
+        }
+
+        try
+        {
+            var targets = allPacks.SelectMany(pack => pack.Manifest.Files)
+                .Select(file => file.TargetFilename.Replace('\\', '/'))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var current = new Dictionary<string, SkinExtraManifestFile>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var filename in source.Filenames
+                         .Select(name => name.Replace('\\', '/'))
+                         .Where(targets.Contains))
+            {
+                var bytes = await source.ReadFileAsync(filename, CancellationToken.None);
+                if (bytes is null)
+                    continue;
+                current[filename] = SkinExtraFingerprint.Describe(filename, filename, bytes);
+            }
+            if (disposed || catalogVersion != packLoadVersion || scanVersion != usageScanVersion)
+                return;
+            foreach (var pack in allPacks)
+            {
+                var matchedTargets = pack.Manifest.Files.Where(file =>
+                    current.TryGetValue(file.TargetFilename.Replace('\\', '/'), out var installed)
+                    && SkinExtraFingerprint.EquivalentFileContent(installed, file))
+                    .Select(file => file.TargetFilename)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var targetCount = pack.Manifest.Files
+                    .Select(file => file.TargetFilename)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count();
+                var settingsMatch = pack.Manifest.IniPatch.All(entry =>
+                    DescribeIniPatchChange(entry, EffectiveCurrentIni).Length == 0);
+                pack.SetUsage(matchedTargets.Count, targetCount, settingsMatch);
+                foreach (var element in pack.Elements)
+                    element.SetUsage(
+                        element.Files.Count(file => matchedTargets.Contains(file.Name)),
+                        element.Files.Count);
+            }
+            if (selectedPack is { } selected)
+                UpdateSelectedPackUsage(selected);
+        }
+        catch
+        {
+            // Usage labels are helpful metadata; a locked Realm file must not
+            // prevent the Extras catalog itself from being usable.
+        }
+    }
+
+    private void UpdateSelectedPackUsage(SkinExtraPackPreview pack)
+    {
+        SelectedPackUsageText.Text = pack.UsageDetail;
+        SelectedPackUsageBadge.Visibility = string.IsNullOrWhiteSpace(pack.UsageDetail)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    internal static (string Badge, string Detail, bool IsInUse) DescribePackUsage(
+        int matchingFiles,
+        int totalFiles,
+        bool settingsMatch)
+    {
+        var total = Math.Max(0, totalFiles);
+        var matching = Math.Clamp(matchingFiles, 0, total);
+        var allFilesMatch = total > 0 && matching == total;
+        var isInUse = allFilesMatch && settingsMatch;
+        if (isInUse)
+            return ("IN USE", "IN USE", true);
+        if (matching == 0)
+            return ("", "", false);
+        if (allFilesMatch)
+            return ("", "FILES MATCH · SETTINGS DIFFER", false);
+        return ("", $"{matching}/{total} FILES MATCH", false);
     }
 
     internal static (string? FamilyId, string? PackPath) ResolveReloadSelection(
@@ -1079,9 +1208,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             preferredPackPath,
             StringComparison.OrdinalIgnoreCase));
         if (preferred is not null)
-            SelectPack(preferred);
+            SelectPack(preferred, forceDisplay: true);
         else if (packs.Length > 0)
-            SelectPack(packs[0]);
+            SelectPack(packs[0], forceDisplay: true);
         else
             ShowEmptyFamily(family);
     }
@@ -1860,7 +1989,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 "transparent",
                 StringComparison.OrdinalIgnoreCase) == true;
 
-    private void SelectPack(SkinExtraPackPreview pack)
+    private void SelectPack(
+        SkinExtraPackPreview pack,
+        bool forceDisplay = false)
     {
         if (!ReferenceEquals(selectedPack, pack))
             StopAudio();
@@ -1874,6 +2005,8 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             expandedPackKeys.Remove(candidate.PackKey);
         }
         selectedPack = pack;
+        if (forceDisplay)
+            displayedPack = null;
         DisplayPack(pack);
     }
 
@@ -1897,6 +2030,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             ? pack.SelectionText
             : $"by {pack.Manifest.SourceAuthor} · {pack.SelectionText}";
         SelectedPackPath.Text = pack.DirectoryPath;
+        UpdateSelectedPackUsage(pack);
         PreviewPackChanged?.Invoke(
             this,
             new SkinExtrasPreviewPackChangedEventArgs(
@@ -1924,15 +2058,19 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 : $" - {pack.Manifest.IniPatch.Count} scoped setting(s)")
             + (pack.DuplicateCount > 1 ? $" - {pack.DuplicateCount} overlapping copies collapsed" : "");
         var health = SkinExtraPackValidator.Validate(pack.Descriptor, verifyContent: false);
+        var preflight = SkinStudioEffectiveAssetResolver.BuildPreflight(
+            pack.Manifest.Files,
+            pack.Manifest.FamilyId);
         var completeness = SkinExtraCompleteness.Analyze(
             pack.Manifest.FamilyId,
             pack.Files.Select(file => file.Name));
         SelectedPackHealthBadge.Visibility = Visibility.Visible;
-        SelectedPackHealthText.Text = health.Issues.Count == 0
+        SelectedPackHealthText.Text = health.Issues.Count == 0 && preflight.Issues.Count == 0
             ? "Healthy"
-            : health.Errors > 0
-                ? $"{health.Errors} error{(health.Errors == 1 ? "" : "s")}"
-                : $"{health.Warnings} warning{(health.Warnings == 1 ? "" : "s")}";
+            : health.Errors + preflight.Issues.Count(issue => issue.Severity == "Error") is var errors
+              && errors > 0
+                ? $"{errors} error{(errors == 1 ? "" : "s")}"
+                : $"{health.Warnings + preflight.Issues.Count} warning(s)";
         SelectedPackHealthText.Foreground = TryFindResource(
             health.Issues.Count == 0 ? "Brush.Success" : "Brush.AccentPink") as Brush
             ?? Brushes.White;
@@ -1945,6 +2083,13 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             ?? Brushes.White;
         PackDetails.Text = "";
         PackNoticePanel.Visibility = Visibility.Collapsed;
+        if (preflight.Issues.Count > 0)
+        {
+            PackDetails.Text = preflight.Summary + "\n"
+                + string.Join("\n", preflight.Issues.Take(5)
+                    .Select(issue => $"• {issue.Message}"));
+            PackNoticePanel.Visibility = Visibility.Visible;
+        }
         PackFilesExpander.Header =
             $"Elements ({pack.SelectedElementCount}) · Files "
             + $"({pack.SelectedFileCount}/{pack.FileCount})";
@@ -2057,6 +2202,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
 
     private bool RenderAudioPreview(SkinExtraPackPreview pack)
     {
+        activeAudioFamilyId = pack.Manifest.FamilyId;
         var cues = pack.Files
             .Where(file => file.IsSelected && file.IsAudio)
             .Select(file => new AudioAuditionCue(
@@ -2065,17 +2211,18 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 BeforePath: null,
                 AfterPath: file.Path))
             .ToArray();
-        RenderAudioCues(cues);
+        RenderAudioCues(cues, pack);
         return cues.Length > 0;
     }
 
     private void RenderAudioComparison(
         IReadOnlyDictionary<string, string> current,
         IReadOnlyDictionary<string, string> integrated,
-        string area)
+        SkinExtraPackPreview pack)
     {
-        if (!area.Equals("Audio", StringComparison.OrdinalIgnoreCase))
+        if (!pack.Manifest.Area.Equals("Audio", StringComparison.OrdinalIgnoreCase))
             return;
+        activeAudioFamilyId = pack.Manifest.FamilyId;
         var filenames = integrated.Keys.Where(filename =>
                 SkinElementCategorizer.AudioExtensions.Contains(
                     Path.GetExtension(filename),
@@ -2092,10 +2239,12 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 current.GetValueOrDefault(filename),
                 integrated.GetValueOrDefault(filename)))
             .ToArray();
-        RenderAudioCues(cues);
+        RenderAudioCues(cues, pack);
     }
 
-    private void RenderAudioCues(IReadOnlyList<AudioAuditionCue> cues)
+    private void RenderAudioCues(
+        IReadOnlyList<AudioAuditionCue> cues,
+        SkinExtraPackPreview pack)
     {
         var selectedPath = selectedAudioTrack?.Path;
         var currentTracks = cues
@@ -2147,6 +2296,8 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 : null;
         updatingAudioTrackSelection = false;
 
+        ConfigureHitsoundAudition(pack, currentTracks, packTracks);
+
         if (selection is null)
         {
             selectedAudioTrack = null;
@@ -2156,6 +2307,83 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         }
 
         SelectAudioTrack(selection, autoplay: false);
+    }
+
+    private void ConfigureHitsoundAudition(
+        SkinExtraPackPreview pack,
+        IReadOnlyList<AudioTrackOption> currentTracks,
+        IReadOnlyList<AudioTrackOption> packTracks)
+    {
+        var usePack = packTracks.Count > 0;
+        var layered = EffectiveLayeredHitSounds(pack, withSelection: usePack);
+        var plan = SkinAudioScenarioAudition.Build(pack.Manifest.FamilyId, layered);
+        if (plan is null)
+        {
+            AudioHitsoundMapText.Visibility = Visibility.Collapsed;
+            AudioPlayPackButton.Visibility = Visibility.Collapsed;
+            AudioPlayPackButton.IsEnabled = false;
+            return;
+        }
+
+        AudioHitsoundMapText.Text = "osu! scenario · "
+            + SkinAudioScenarioAudition.Describe(plan)
+            + (SkinHitsoundAudition.IsHitsoundFamily(pack.Manifest.FamilyId)
+                ? " · LayeredHitSounds " + (layered ? "on" : "off")
+                : "");
+        AudioHitsoundMapText.Visibility = Visibility.Visible;
+        AudioPlayPackButton.Content = "Play osu! scenario";
+        AudioPlayPackButton.Visibility = Visibility.Visible;
+        AudioPlayPackButton.IsEnabled = ResolveAudioSequence(
+            plan,
+            usePack ? packTracks : currentTracks).Count > 0;
+    }
+
+    private bool EffectiveLayeredHitSounds(
+        SkinExtraPackPreview pack,
+        bool withSelection)
+    {
+        var value = EffectiveCurrentIni?.GetValue("General", "LayeredHitSounds");
+        if (withSelection)
+        {
+            var patch = SelectedPatch(pack).LastOrDefault(entry =>
+                entry.Section.Equals("General", StringComparison.OrdinalIgnoreCase)
+                && entry.Key.Equals("LayeredHitSounds", StringComparison.OrdinalIgnoreCase));
+            if (patch is not null)
+                value = patch.Value;
+        }
+        return value is null
+               || (!value.Trim().Equals("0", StringComparison.OrdinalIgnoreCase)
+                   && !value.Trim().Equals("false", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyList<AudioSequenceStep> ResolveAudioSequence(
+        SkinHitsoundAuditionPlan plan,
+        IReadOnlyList<AudioTrackOption> tracks)
+    {
+        var byComponent = tracks
+            .GroupBy(
+                track => Path.GetFileNameWithoutExtension(track.Filename),
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First(),
+                StringComparer.OrdinalIgnoreCase);
+        var result = new List<AudioSequenceStep>();
+        foreach (var step in plan.Steps)
+        {
+            // The final component is the event-specific sample. Do not turn a
+            // missing whistle/finish/clap into another normal hit.
+            if (!byComponent.ContainsKey(step.Components[^1]))
+                continue;
+            var resolved = step.Components
+                .Select(component => byComponent.GetValueOrDefault(component))
+                .OfType<AudioTrackOption>()
+                .DistinctBy(track => track.Path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (resolved.Length > 0)
+                result.Add(new AudioSequenceStep(step.Label, resolved));
+        }
+        return result;
     }
 
     private void SelectAudioTrack(AudioTrackOption track, bool autoplay)
@@ -2486,19 +2714,29 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
 
             EnsureCurrentFallbackElements(pack, currentFiles);
             var currentPatch = CurrentPatch(pack);
-            var currentPack = CreatePreviewPack(pack, currentFiles, currentPatch);
             var integratedFiles = currentFiles.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value,
                 StringComparer.OrdinalIgnoreCase);
             OverlaySelectedLogicalElements(pack, currentFiles, integratedFiles);
+            if (ChangedOnlyPreviewToggle.IsChecked == true)
+            {
+                var changed = FindChangedPreviewFiles(currentFiles, integratedFiles);
+                currentFiles = currentFiles
+                    .Where(pair => changed.Contains(pair.Key))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                integratedFiles = integratedFiles
+                    .Where(pair => changed.Contains(pair.Key))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            }
+            var currentPack = CreatePreviewPack(pack, currentFiles, currentPatch);
             var integratedPatch = OverlayPatch(currentPatch, SelectedPatch(pack));
             var integratedPack = CreatePreviewPack(
                 pack,
                 integratedFiles,
                 integratedPatch,
                 applyElementTints: true);
-            RenderAudioComparison(currentFiles, integratedFiles, pack.Manifest.Area);
+            RenderAudioComparison(currentFiles, integratedFiles, pack);
 
             var currentRendered = RenderPackToCanvas(currentPack, CurrentPreviewCanvas);
             var resultRendered = RenderPackToCanvas(integratedPack, ResultPreviewCanvas);
@@ -2533,6 +2771,22 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             ComparePreviewButton.IsChecked = false;
             PackOnlyPreviewButton.IsChecked = true;
         }
+    }
+
+    internal static IReadOnlySet<string> FindChangedPreviewFiles(
+        IReadOnlyDictionary<string, string> current,
+        IReadOnlyDictionary<string, string> integrated)
+    {
+        var changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var filename in current.Keys.Concat(integrated.Keys)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!current.TryGetValue(filename, out var before)
+                || !integrated.TryGetValue(filename, out var after)
+                || !File.ReadAllBytes(before).AsSpan().SequenceEqual(File.ReadAllBytes(after)))
+                changed.Add(filename);
+        }
+        return changed;
     }
 
     private void OverlaySelectedLogicalElements(
@@ -2765,6 +3019,51 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         SetPreviewMode(current, compare, refresh: true);
     }
 
+    private void ChangedOnlyPreviewToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (selectedPack is not null)
+            _ = RefreshComparisonPreviewAsync(selectedPack);
+    }
+
+    private void BlinkCompareToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (BlinkCompareToggle.IsChecked == true)
+        {
+            SetPreviewMode(current: false, compare: true, refresh: true);
+            compareBlinkTimer.Start();
+        }
+        else
+        {
+            compareBlinkTimer.Stop();
+            ResultPreviewPane.Opacity = 1;
+        }
+    }
+
+    private void SwipeCompareToggle_Click(object sender, RoutedEventArgs e)
+    {
+        ComparisonSwipeSlider.Visibility = SwipeCompareToggle.IsChecked == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (SwipeCompareToggle.IsChecked == true)
+            SetPreviewMode(current: false, compare: true, refresh: true);
+        UpdateComparisonSwipe();
+    }
+
+    private void ComparisonSwipeSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e) => UpdateComparisonSwipe();
+
+    private void UpdateComparisonSwipe()
+    {
+        if (CurrentPreviewColumn is null || ResultPreviewColumn is null)
+            return;
+        var swipe = SwipeCompareToggle?.IsChecked == true
+            ? ComparisonSwipeSlider.Value / 100
+            : 0.5;
+        CurrentPreviewColumn.Width = new GridLength(swipe, GridUnitType.Star);
+        ResultPreviewColumn.Width = new GridLength(1 - swipe, GridUnitType.Star);
+    }
+
     private void SetPreviewMode(bool current, bool compare, bool refresh)
     {
         CurrentSkinPreviewButton.IsChecked = current;
@@ -2777,6 +3076,16 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             : new GridLength(0);
         ComparisonDivider.Visibility = compare ? Visibility.Visible : Visibility.Collapsed;
         ResultPreviewPane.Visibility = compare ? Visibility.Visible : Visibility.Collapsed;
+        if (!compare)
+        {
+            compareBlinkTimer.Stop();
+            BlinkCompareToggle.IsChecked = false;
+            ResultPreviewPane.Opacity = 1;
+        }
+        else if (SwipeCompareToggle.IsChecked == true)
+        {
+            UpdateComparisonSwipe();
+        }
         ComparisonPreview.Visibility = current || compare
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -4586,6 +4895,153 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
 
     private async void UsePack_Click(object sender, RoutedEventArgs e) => await UseSelectedPackAsync();
 
+    private async void RandomHitsounds_Click(object sender, RoutedEventArgs e) =>
+        await StageRandomMixAsync(hitsoundsOnly: true);
+
+    private async void FullRandom_Click(object sender, RoutedEventArgs e) =>
+        await StageRandomMixAsync(hitsoundsOnly: false);
+
+    private async Task StageRandomMixAsync(bool hitsoundsOnly)
+    {
+        if (staging || allPacks.Count == 0)
+            return;
+        var candidates = allPacks
+            .Where(pack => SkinExtraPackValidator.Validate(
+                pack.Descriptor,
+                verifyContent: false).IsHealthy)
+            .Select(pack => new SkinStudioRandomPackCandidate(
+                pack.PackKey,
+                pack.NavigationFamilyId,
+                pack.IsCurrentlyInUse))
+            .ToArray();
+        var keys = hitsoundsOnly
+            ? SkinStudioRandomMix.ChooseHitsounds(candidates, Random.Shared)
+            : SkinStudioRandomMix.ChooseFull(candidates, Random.Shared);
+        var packs = keys.Select(key => allPacks.First(pack => pack.PackKey == key)).ToArray();
+        if (packs.Length == 0)
+        {
+            KumoriDialog.Show(
+                dialogOwner,
+                hitsoundsOnly
+                    ? "No complete Normal, Soft, or Drum hitsound packs are available."
+                    : "No complete compatible packs are available.",
+                "Random mix",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+        var preview = string.Join("\n", packs.Select(pack =>
+            $"• {pack.NavigationFamilyName}: {pack.Name}"));
+        if (KumoriDialog.Show(
+                dialogOwner,
+                $"Kumori rolled this {(hitsoundsOnly ? "hitsound trio" : "full-skin mix")}:\n\n"
+                + preview
+                + "\n\nAdd the whole mix to Changes?",
+                hitsoundsOnly ? "3 random hitsound packs" : "Full random skin",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.Yes) != MessageBoxResult.Yes)
+            return;
+
+        var selections = packs.Select(CreateWholePackSelection).ToArray();
+        staging = true;
+        RandomHitsoundsButton.IsEnabled = false;
+        FullRandomButton.IsEnabled = false;
+        RandomMixProgressBar.Minimum = 0;
+        RandomMixProgressBar.Maximum = packs.Length;
+        RandomMixProgressBar.Value = 0;
+        RandomMixOverlayText.Text = hitsoundsOnly
+            ? "Adding a fresh hitsound trio to Changes…"
+            : $"Building a random skin from {packs.Length} families…";
+        RandomMixProgressDetailText.Text = $"0 of {packs.Length} packs staged";
+        RandomMixOverlay.Visibility = Visibility.Visible;
+        IProgress<SkinExtrasBatchProgress> progress =
+            new Progress<SkinExtrasBatchProgress>(UpdateRandomMixProgress);
+        try
+        {
+            bool staged;
+            if (stageSelections is not null)
+            {
+                staged = await stageSelections(selections, progress);
+            }
+            else if (stageSelection is not null)
+            {
+                staged = true;
+                for (var index = 0; index < selections.Length; index++)
+                {
+                    progress.Report(new SkinExtrasBatchProgress(
+                        index,
+                        selections.Length,
+                        packs[index].NavigationFamilyName,
+                        packs[index].Name));
+                    if (!await stageSelection(selections[index]))
+                    {
+                        staged = false;
+                        break;
+                    }
+                    progress.Report(new SkinExtrasBatchProgress(
+                        index + 1,
+                        selections.Length,
+                        packs[index].NavigationFamilyName,
+                        packs[index].Name));
+                }
+            }
+            else
+            {
+                staged = false;
+            }
+            if (!staged)
+                return;
+            InvalidateCurrentPreview();
+            SubtitleText.Text = hitsoundsOnly
+                ? "A fresh Normal + Soft + Drum hitsound trio is staged in Changes."
+                : $"A full random mix from {packs.Length} families is staged in Changes.";
+        }
+        finally
+        {
+            staging = false;
+            RandomMixOverlay.Visibility = Visibility.Collapsed;
+            RandomHitsoundsButton.IsEnabled = true;
+            FullRandomButton.IsEnabled = true;
+            if (selectedPack is { } selected)
+                UpdateSelectionUi(selected);
+        }
+    }
+
+    private void UpdateRandomMixProgress(SkinExtrasBatchProgress progress)
+    {
+        var total = Math.Max(1, progress.TotalPacks);
+        var completed = Math.Clamp(progress.CompletedPacks, 0, total);
+        RandomMixProgressBar.Maximum = total;
+        RandomMixProgressBar.Value = completed;
+        RandomMixOverlayText.Text = completed >= total
+            ? "Finishing the random mix…"
+            : $"Adding {progress.FamilyName}: {progress.PackName}";
+        RandomMixProgressDetailText.Text =
+            $"{completed} of {progress.TotalPacks} packs staged";
+    }
+
+    private SkinExtrasSelectionResult CreateWholePackSelection(SkinExtraPackPreview pack)
+    {
+        var manifest = CopyManifest(
+            pack.Manifest,
+            files: pack.Manifest.Files.ToList(),
+            iniPatch: pack.Manifest.IniPatch.ToList());
+        return new SkinExtrasSelectionResult(
+            pack.DirectoryPath,
+            manifest,
+            pack.Elements.Count,
+            manifest.Files.Count,
+            manifest.IniPatch.Count,
+            ReplaceEntireFamily: false,
+            ResolutionPolicy: UseOneXResolutionOption.IsChecked == true
+                ? SkinExtraResolutionPolicy.UseOneX
+                : SkinExtraResolutionPolicy.UpscaleToTwoX,
+            DeleteCurrentFiles: [],
+            SmoothTrail: false,
+            ElementTints: null);
+    }
+
     private async Task UseSelectedPackAsync()
     {
         if (selectedPack is not { } pack)
@@ -4893,6 +5349,108 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
 
     private void StopAudioPreview_Click(object sender, RoutedEventArgs e) => StopAudio();
 
+    private void AudioPlayPack_Click(object sender, RoutedEventArgs e)
+    {
+        if (selectedPack is not { } pack
+            || activeAudioFamilyId is null
+            || SkinAudioScenarioAudition.Build(activeAudioFamilyId, true) is null)
+            return;
+
+        var useCurrent = selectedAudioTrack?.SourceLabel == "Current skin";
+        var sourceLabel = useCurrent ? "Current skin" : "With selection";
+        var picker = useCurrent ? AudioCurrentTrackPicker : AudioPackTrackPicker;
+        var tracks = picker.Items.Cast<AudioTrackOption>().ToArray();
+        if (tracks.Length == 0)
+            return;
+        var plan = SkinAudioScenarioAudition.Build(
+            activeAudioFamilyId,
+            EffectiveLayeredHitSounds(pack, withSelection: !useCurrent));
+        if (plan is null)
+            return;
+        var sequence = ResolveAudioSequence(plan, tracks);
+        if (sequence.Count == 0)
+            return;
+
+        try
+        {
+            StopAudio();
+            SelectAudioDevice();
+            audioSequenceSteps = sequence;
+            audioSequenceIndex = 0;
+            audioSequenceSourceLabel = sourceLabel;
+            audioSequenceTimer.Interval = TimeSpan.FromMilliseconds(
+                plan.IntervalMilliseconds);
+            AudioProgressSlider.Minimum = 0;
+            AudioProgressSlider.Maximum = sequence.Count;
+            AudioProgressSlider.Value = 0;
+            AudioDurationText.Text = $"{sequence.Count} hits";
+            AudioPlayPauseButton.IsEnabled = false;
+            AudioPlayPackButton.IsEnabled = false;
+            StopAudioPreviewButton.IsEnabled = true;
+            PlayNextAudioSequenceStep();
+            audioSequenceTimer.Start();
+        }
+        catch (Exception ex)
+        {
+            StopAudio();
+            PackDetails.Text = $"Could not preview this hitsound set: {ex.Message}";
+            PackNoticePanel.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void PlayNextAudioSequenceStep()
+    {
+        ReleaseFinishedAudioSequenceStreams();
+        if (audioSequenceIndex >= audioSequenceSteps.Count)
+        {
+            if (audioSequenceStreams.Count > 0)
+            {
+                AudioPlaybackStateText.Text = "Finishing last hit";
+                return;
+            }
+            audioSequenceTimer.Stop();
+            AudioPlaybackStateText.Text = "Sequence complete";
+            AudioPlayPackButton.IsEnabled = true;
+            AudioPlayPauseButton.IsEnabled = selectedAudioTrack is not null;
+            StopAudioPreviewButton.IsEnabled = false;
+            return;
+        }
+
+        var step = audioSequenceSteps[audioSequenceIndex++];
+        foreach (var track in step.Tracks)
+        {
+            var stream = Bass.CreateStream(track.Path, 0, 0, BassFlags.Default);
+            if (stream == 0)
+                throw new InvalidOperationException(
+                    $"BASS could not open {track.Filename} ({Bass.LastError}).");
+            if (!Bass.ChannelPlay(stream, true))
+            {
+                var error = Bass.LastError;
+                Bass.StreamFree(stream);
+                throw new InvalidOperationException(
+                    $"BASS could not play {track.Filename} ({error}).");
+            }
+            audioSequenceStreams.Add(stream);
+        }
+
+        AudioNowPlayingText.Text = step.Label;
+        AudioSourceStatusText.Text = $"{audioSequenceSourceLabel} · osu! hitsound sequence";
+        AudioPlaybackStateText.Text = $"Step {audioSequenceIndex} of {audioSequenceSteps.Count}";
+        AudioElapsedText.Text = $"{audioSequenceIndex}/{audioSequenceSteps.Count}";
+        AudioProgressSlider.Value = audioSequenceIndex;
+    }
+
+    private void ReleaseFinishedAudioSequenceStreams()
+    {
+        foreach (var stream in audioSequenceStreams
+                     .Where(stream => Bass.ChannelIsActive(stream) == PlaybackState.Stopped)
+                     .ToArray())
+        {
+            Bass.StreamFree(stream);
+            audioSequenceStreams.Remove(stream);
+        }
+    }
+
     private void PackFileChoice_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: PackFileEntry file })
@@ -5120,13 +5678,19 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         CurrentSkinPreviewLabel.Text = currentSkinSource?.HasStagedChanges == true
             ? "CURRENT + CHANGES"
             : "CURRENT SKIN";
+        _ = RefreshUsageBadgesAsync(packLoadVersion);
         if (selectedPack is { } pack)
         {
+            // The same pack instance is still selected after staging, but its
+            // current-skin projection has changed. Force the detail surface to
+            // publish and compose that new projection instead of accepting the
+            // normal same-pack short circuit.
+            displayedPack = null;
             SetPreviewMode(
                 current: currentSkinSource is not null,
                 compare: false,
                 refresh: false);
-            _ = RefreshComparisonPreviewAsync(pack);
+            DisplayPack(pack);
         }
     }
 
@@ -5335,12 +5899,31 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private void StopAudio()
     {
         audioProgressTimer.Stop();
+        audioSequenceTimer.Stop();
+        foreach (var stream in audioSequenceStreams)
+        {
+            try
+            {
+                Bass.ChannelStop(stream);
+                Bass.StreamFree(stream);
+            }
+            catch
+            {
+                // The audio device may already have released the stream.
+            }
+        }
+        audioSequenceStreams.Clear();
+        audioSequenceSteps = [];
+        audioSequenceIndex = 0;
+        audioSequenceSourceLabel = null;
         if (audioStream == 0)
         {
             playingAudioPath = null;
             playingAudioLabel = null;
             playingAudioLoops = false;
             SetAudioPlaybackUi(null);
+            if (AudioPlayPackButton?.Visibility == Visibility.Visible)
+                AudioPlayPackButton.IsEnabled = true;
             return;
         }
 
@@ -5360,6 +5943,8 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             playingAudioLabel = null;
             playingAudioLoops = false;
             SetAudioPlaybackUi(null);
+            if (AudioPlayPackButton?.Visibility == Visibility.Visible)
+                AudioPlayPackButton.IsEnabled = true;
         }
     }
 
@@ -5416,8 +6001,15 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             AudioPlayPauseButton.Content = buttonText;
     }
 
-    internal static bool ShouldLoopAudio(string path) =>
-        SkinElementCategorizer.IsAudio(path);
+    internal static bool ShouldLoopAudio(string path)
+    {
+        if (!SkinElementCategorizer.IsAudio(path))
+            return false;
+        var stem = Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+        return stem is "spinnerspin" or "pause-loop"
+               || stem.EndsWith("-sliderslide", StringComparison.Ordinal)
+               || stem.EndsWith("-sliderwhistle", StringComparison.Ordinal);
+    }
 
     private static void SetTextIfChanged(TextBlock textBlock, string value)
     {
@@ -5758,6 +6350,10 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         string Path,
         string SourceLabel);
 
+    private sealed record AudioSequenceStep(
+        string Label,
+        IReadOnlyList<AudioTrackOption> Tracks);
+
     private sealed record AudioPlaybackRequest(string Path, string Label);
 
     private sealed record IncompleteImportGuide(
@@ -5817,6 +6413,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         private bool isExpanded;
         private bool isSelected;
         private bool previewLoaded;
+        private string usageBadge = "";
+        private string usageDetail = "";
+        private bool isCurrentlyInUse;
         private BitmapSource? deferredThumbnail;
         public event PropertyChangedEventHandler? PropertyChanged;
         public bool IsSelected
@@ -5887,6 +6486,26 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         public string? AudioPath => AudioPaths.FirstOrDefault();
         public string FavoriteGlyph => State.Favorite ? "★" : "";
         public string CatalogBadge { get; set; } = "";
+        public string UsageBadge => usageBadge;
+        public string UsageDetail => usageDetail;
+        public bool IsCurrentlyInUse => isCurrentlyInUse;
+
+        public void SetUsage(
+            int matchingFiles,
+            int totalFiles,
+            bool settingsMatch = true)
+        {
+            var presentation = DescribePackUsage(
+                matchingFiles,
+                totalFiles,
+                settingsMatch);
+            isCurrentlyInUse = presentation.IsInUse;
+            usageBadge = presentation.Badge;
+            usageDetail = presentation.Detail;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UsageBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UsageDetail)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCurrentlyInUse)));
+        }
 
         public void SetDeferredThumbnail(BitmapSource? thumbnail)
         {
@@ -5922,6 +6541,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         private bool suppressChildEvents;
         private BitmapSource? thumbnail;
         private Color tint = Colors.White;
+        private string usageBadge = "";
 
         public PackElementEntry(
             string key,
@@ -5955,6 +6575,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         public SkinRgb TintRgb => new(tint.R, tint.G, tint.B);
         public string FileCountText =>
             $"{Files.Count} file{(Files.Count == 1 ? "" : "s")}";
+        public string UsageBadge => usageBadge;
         public string LayerDetailText => FromCurrentSkin
             ? $"Current skin · {FileCountText}"
             : FileCountText;
@@ -6009,6 +6630,16 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintHex)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TintBrush)));
+        }
+
+        public void SetUsage(int matchingFiles, int totalFiles)
+        {
+            usageBadge = matchingFiles == 0
+                ? ""
+                : matchingFiles == totalFiles
+                    ? "IN USE"
+                    : $"{matchingFiles}/{totalFiles} MATCH";
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UsageBadge)));
         }
     }
 

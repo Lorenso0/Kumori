@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.8.2",
+    "date": "2026-08-14",
+    "features": [
+      "Added an in-app backup browser for reviewing previous skin files and staging only the versions selected for restoration",
+      "Added complete hitsound-bank auditions, safe skin deletion with recovery backups, and transparent element replacements"
+    ],
+    "improvements": [
+      "Grouped related skin edits into reversible Changes actions and added compatibility checks for missing, fallback, and resolution-dependent assets",
+      "Added visible progress for Full random, made pack usage badges require an exact match, and expanded Color chaos to randomize hitcircle and slider colours"
+    ],
+    "fixes": [
+      "Fixed the Extras library opening crash, constrained long audio previews so controls remain visible, and corrected changed-only comparisons",
+      "Improved staged asset, cursor, slider, and hitsound previews so they reflect the files and settings that will actually be applied"
+    ]
+  },
+  {
     "version": "0.8.1",
     "date": "2026-08-13",
     "features": [

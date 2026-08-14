@@ -11,6 +11,36 @@ namespace Kumori.App.Tests;
 public sealed class SkinExtrasLibraryTests
 {
     [Fact]
+    public void Changed_only_comparison_keeps_added_removed_and_modified_files()
+    {
+        var root = TempDirectory();
+        try
+        {
+            var sameA = Path.Combine(root, "same-a");
+            var sameB = Path.Combine(root, "same-b");
+            var oldFile = Path.Combine(root, "old");
+            var newFile = Path.Combine(root, "new");
+            File.WriteAllBytes(sameA, [1]);
+            File.WriteAllBytes(sameB, [1]);
+            File.WriteAllBytes(oldFile, [2]);
+            File.WriteAllBytes(newFile, [3]);
+
+            var changed = SkinExtrasPickerWindow.FindChangedPreviewFiles(
+                new Dictionary<string, string> { ["same.png"] = sameA, ["edit.png"] = oldFile, ["removed.png"] = oldFile },
+                new Dictionary<string, string> { ["same.png"] = sameB, ["edit.png"] = newFile, ["added.png"] = newFile });
+
+            Assert.DoesNotContain("same.png", changed);
+            Assert.Contains("edit.png", changed);
+            Assert.Contains("removed.png", changed);
+            Assert.Contains("added.png", changed);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    [Fact]
     public void Storage_layout_uses_one_osu_root_without_a_redundant_osu_area()
     {
         var root = Path.Combine("Extras", "osu");
@@ -953,7 +983,7 @@ public sealed class SkinExtrasLibraryTests
     }
 
     [Fact]
-    public void Audio_preview_uses_readable_names_and_loops_all_auditioned_sounds()
+    public void Audio_preview_uses_readable_names_and_loops_only_continuous_sounds()
     {
         Assert.Equal("Combo break", SkinExtrasPickerWindow.AudioPadLabel("combobreak.wav"));
         Assert.Equal("Spinner spin", SkinExtrasPickerWindow.AudioPadLabel("spinnerspin.ogg"));
@@ -963,8 +993,9 @@ public sealed class SkinExtrasLibraryTests
         Assert.True(SkinExtrasPickerWindow.ShouldLoopAudio("spinnerspin.ogg"));
         Assert.True(SkinExtrasPickerWindow.ShouldLoopAudio("pause-loop.mp3"));
         Assert.True(SkinExtrasPickerWindow.ShouldLoopAudio("soft-sliderslide.wav"));
-        Assert.True(SkinExtrasPickerWindow.ShouldLoopAudio("spinnerbonus.ogg"));
-        Assert.True(SkinExtrasPickerWindow.ShouldLoopAudio("normal-hitnormal.wav"));
+        Assert.True(SkinExtrasPickerWindow.ShouldLoopAudio("drum-sliderwhistle.wav"));
+        Assert.False(SkinExtrasPickerWindow.ShouldLoopAudio("spinnerbonus.ogg"));
+        Assert.False(SkinExtrasPickerWindow.ShouldLoopAudio("normal-hitnormal.wav"));
         Assert.False(SkinExtrasPickerWindow.ShouldLoopAudio("not-a-sound.png"));
     }
 

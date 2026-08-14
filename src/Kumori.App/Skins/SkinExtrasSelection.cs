@@ -45,6 +45,12 @@ public sealed record SkinExtrasSelectionResult(
     bool SmoothTrail = false,
     IReadOnlyDictionary<string, SkinRgb>? ElementTints = null);
 
+public sealed record SkinExtrasBatchProgress(
+    int CompletedPacks,
+    int TotalPacks,
+    string FamilyName,
+    string PackName);
+
 public enum SkinExtraResolutionPolicy
 {
     UseOneX,

@@ -11,6 +11,24 @@ namespace Kumori.App.Tests;
 public sealed class SkinEditorDomainTests
 {
     [Fact]
+    public void Color_chaos_randomizes_hitcircle_palette_and_both_slider_colours()
+    {
+        var colours = SkinEditorPage.ColorChaosIniColours(new Random(42));
+
+        Assert.Equal(10, colours.Count);
+        Assert.All(Enumerable.Range(1, 8), index =>
+            Assert.True(colours.ContainsKey($"Combo{index}")));
+        Assert.True(colours.ContainsKey("SliderBorder"));
+        Assert.True(colours.ContainsKey("SliderTrackOverride"));
+        Assert.All(colours.Values, value =>
+        {
+            var channels = value.Split(',').Select(int.Parse).ToArray();
+            Assert.Equal(3, channels.Length);
+            Assert.All(channels, channel => Assert.InRange(channel, 48, 255));
+        });
+    }
+
+    [Fact]
     public void Draft_session_keeps_bytes_local_and_supports_undo_redo()
     {
         var session = new SkinDraftSession(Guid.NewGuid());
@@ -74,6 +92,22 @@ public sealed class SkinEditorDomainTests
         Assert.Empty(session.Changes);
         Assert.True(session.Redo());
         Assert.True(Assert.Single(session.Changes).IsDeletion);
+    }
+
+    [Fact]
+    public void Draft_action_can_be_discarded_as_one_undoable_history_step()
+    {
+        var session = new SkinDraftSession(Guid.NewGuid());
+        session.StageRange([
+            new SkinDraftChange("cursor.png", null, [1], "cursor", ActionId: "mix", ActionLabel: "Random mix"),
+            new SkinDraftChange("cursortrail.png", null, [2], "trail", ActionId: "mix", ActionLabel: "Random mix"),
+        ]);
+
+        Assert.True(session.RemoveRange(session.Changes.Select(change => change.Filename)));
+        Assert.Empty(session.Changes);
+        Assert.True(session.Undo());
+        Assert.Equal(2, session.Changes.Count);
+        Assert.All(session.Changes, change => Assert.Equal("Random mix", change.GroupLabel));
     }
 
     [Fact]
@@ -364,6 +398,17 @@ public sealed class SkinEditorDomainTests
             0, 0, 0, 0,
             255, 255, 255, 1,
         ]));
+    }
+
+    [Fact]
+    public void Transparent_replacement_preserves_requested_png_dimensions()
+    {
+        var bytes = SkinImageTools.CreateTransparentPng(32, 48);
+        var image = SkinImageTools.Decode(bytes);
+
+        Assert.Equal(32, image.PixelWidth);
+        Assert.Equal(48, image.PixelHeight);
+        Assert.True(SkinImageTools.IsFullyTransparentImage(bytes));
     }
 
     [Fact]
