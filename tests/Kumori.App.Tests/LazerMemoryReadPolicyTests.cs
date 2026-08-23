@@ -206,6 +206,22 @@ public sealed class LazerMemoryReadPolicyTests
     }
 
     [Fact]
+    public void ReplayDetectionOnlyUsesTopmostCurrentPlayer()
+    {
+        nint[] players = [(nint)0x30000, (nint)0x20000];
+
+        Assert.False(LazerReplayFrameMemoryReader.CurrentPlayerHasReplayScore(
+            players,
+            player => player == (nint)0x20000));
+        Assert.True(LazerReplayFrameMemoryReader.CurrentPlayerHasReplayScore(
+            players,
+            player => player == (nint)0x30000));
+        Assert.False(LazerReplayFrameMemoryReader.CurrentPlayerHasReplayScore(
+            [],
+            _ => true));
+    }
+
+    [Fact]
     public void PointerFallbackStaysAlignedAndCanResumePastAStaleMatch()
     {
         const long pointer = 0x1020_3040_5060_7080;

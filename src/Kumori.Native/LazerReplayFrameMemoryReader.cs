@@ -224,28 +224,36 @@ internal sealed partial class LazerReplayFrameMemoryReader
         }
 
         var deadline = DeadlineFromNow(LazerMemoryReadPolicy.CachedReadBudget);
-        foreach (var player in FindPlayers(allowDiscovery: false, deadline))
+        var players = FindPlayers(allowDiscovery: false, deadline);
+        return CurrentPlayerHasReplayScore(players, player =>
         {
-            if (BudgetExpired(deadline))
-                break;
             try
             {
                 var drawableRuleset = _memory.ReadIntPtr(player + _offsets.PlayerDrawableRuleset);
                 if (!IsReadablePointer(drawableRuleset))
-                    continue;
+                    return false;
 
                 var replayScore = _memory.ReadIntPtr(drawableRuleset + _offsets.DrawableRulesetReplayScore);
-                if (IsReadablePointer(replayScore))
-                    return true;
+                return IsReadablePointer(replayScore);
             }
             catch
             {
                 // A screen transition can invalidate a candidate between reads.
+                return false;
             }
-        }
-
-        return false;
+        });
     }
+
+    /// <summary>
+    /// The screen stack may retain an older replay player underneath the active live player.
+    /// <see cref="FindPlayers"/> returns candidates from topmost to oldest, so replay
+    /// suppression must only follow the first/current player rather than any stale entry.
+    /// </summary>
+    internal static bool CurrentPlayerHasReplayScore(
+        IReadOnlyList<nint> players,
+        Func<nint, bool> hasReplayScore) =>
+        players.Count > 0 && hasReplayScore(players[0]);
+
     private IReadOnlyList<LazerReplayFrame> ReadFramesAfter(
         nint player,
         long lastSequence,

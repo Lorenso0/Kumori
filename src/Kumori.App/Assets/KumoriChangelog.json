@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.8.4",
+    "date": "2026-08-24",
+    "fixes": [
+      "Prevented live osu!lazer plays from being mistaken for watched replays when an older replay screen remained cached"
+    ]
+  },
+  {
     "version": "0.8.3",
     "date": "2026-08-23",
     "features": [
