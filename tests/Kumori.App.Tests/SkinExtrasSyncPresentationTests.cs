@@ -6,6 +6,19 @@ namespace Kumori.App.Tests;
 public sealed class SkinExtrasSyncPresentationTests
 {
     [Fact]
+    public void Automatic_sync_status_is_hidden_while_local_library_mode_is_active()
+    {
+        var automatic = new SkinExtrasSyncProgress(
+            SkinExtrasSyncStage.Failed,
+            "Extras synchronization failed",
+            IsManual: false);
+        var manual = automatic with { IsManual = true };
+
+        Assert.False(SkinExtrasPickerWindow.ShouldDisplaySyncProgress(automatic));
+        Assert.True(SkinExtrasPickerWindow.ShouldDisplaySyncProgress(manual));
+    }
+
+    [Fact]
     public void Catalog_reload_keeps_navigation_changed_while_the_scan_was_running()
     {
         var selection = SkinExtrasPickerWindow.ResolveReloadSelection(

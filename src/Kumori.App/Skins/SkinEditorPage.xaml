@@ -286,8 +286,8 @@
                                 <MenuItem Header="Reset current category" Click="ResetCurrentCategory_Click" />
                                 <Separator />
                                 <MenuItem Header="Open Extras folder" Click="OpenExtrasFolder_Click" />
-                                <MenuItem Header="Check Extras for updates"
-                                          Click="CheckExtrasUpdates_Click" />
+                                <MenuItem Header="Extras updates disabled (local library only)"
+                                          IsEnabled="False" />
                                 <MenuItem Header="Replace from Extras…" Click="ReplaceFromExtras_Click" />
                                 <MenuItem Header="Extract skin to Extras…" Click="ExtractExtras_Click" />
                                 <Separator />

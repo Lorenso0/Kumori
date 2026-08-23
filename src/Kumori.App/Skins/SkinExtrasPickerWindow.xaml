@@ -185,8 +185,8 @@
                             <ColumnDefinition Width="150" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                  IsThreeState="True"
+                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  IsThreeState="False"
                                   VerticalAlignment="Center"
                                   Click="PackElementChoice_Click" />
                         <Border Grid.Column="1"
@@ -390,7 +390,7 @@
                            Margin="0,3,0,0"
                            FontSize="10"
                            Foreground="{DynamicResource Brush.AccentPink}"
-                           Text="Extras catalog has not been checked yet."
+                           Text="Using the local Extras library. Updates are manual."
                            TextWrapping="Wrap" />
             </StackPanel>
             <Grid Grid.Column="1" Height="32" VerticalAlignment="Top">
@@ -417,29 +417,36 @@
                     </TextBlock.Style>
                 </TextBlock>
             </Grid>
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
+            <StackPanel Grid.Column="2"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Top">
                 <Button x:Name="RandomHitsoundsButton"
                         Content="3 random sounds"
+                        Width="118"
                         Height="32"
                         Margin="10,0,0,0"
                         Padding="10,0"
+                        VerticalAlignment="Top"
                         Click="RandomHitsounds_Click"
                         ToolTip="Pick one fresh Normal, Soft, and Drum hitsound pack" />
                 <Button x:Name="FullRandomButton"
                         Content="Full random"
-                        Height="32"
-                        Margin="6,0,0,0"
-                        Padding="10,0"
-                        Click="FullRandom_Click"
-                        ToolTip="Pick one fresh compatible pack for every family" />
-                <Button x:Name="CheckExtrasUpdatesButton"
-                        Content="Check for updates"
+                        Width="118"
                         Height="32"
                         Margin="6,0,0,0"
                         Padding="10,0"
                         VerticalAlignment="Top"
+                        Click="FullRandom_Click"
+                        ToolTip="Pick one fresh compatible pack for every family" />
+                <Button x:Name="CheckExtrasUpdatesButton"
+                        Content="Updates disabled"
+                        Height="32"
+                        Margin="6,0,0,0"
+                        Padding="10,0"
+                        VerticalAlignment="Top"
+                        IsEnabled="False"
                         Click="CheckExtrasUpdates_Click"
-                        ToolTip="Check GitHub and synchronize the complete Extras catalog"
+                        ToolTip="Using the local Extras library; catalog updates are temporarily disabled"
                         AutomationProperties.Name="Check Extras for updates" />
             </StackPanel>
             <CheckBox x:Name="LazerUsedOnlyCheckBox"

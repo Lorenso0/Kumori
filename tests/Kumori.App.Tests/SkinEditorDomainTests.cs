@@ -11,6 +11,52 @@ namespace Kumori.App.Tests;
 public sealed class SkinEditorDomainTests
 {
     [Fact]
+    public void Extras_staging_preserves_unrelated_nonstandard_ini_values()
+    {
+        var document = SkinIniDocument.ParseText(
+            "[General]\r\nLayeredHitSounds: Maybe\r\n");
+
+        var prepared = SkinEditorPage.PrepareIniForExtrasStaging(
+            document,
+            pendingRawText: null);
+
+        Assert.Same(document, prepared);
+        Assert.Equal("Maybe", prepared.GetValue("General", "LayeredHitSounds"));
+    }
+
+    [Fact]
+    public void Recoloured_preview_keeps_animation_frame_filename()
+    {
+        var path = SkinExtrasPickerWindow.RecolouredPreviewPath(
+            "preview",
+            "0123456789abcdef",
+            "followpoint-0@2x.png");
+
+        Assert.Equal("followpoint-0@2x.png", Path.GetFileName(path));
+        Assert.Equal(
+            SkinPreviewAnimationRole.Followpoint,
+            SkinExtrasPickerWindow.ExtrasAnimationRole("followpoint-0"));
+    }
+
+    [Fact]
+    public void Extras_reload_preserves_known_file_selections()
+    {
+        var previous = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["reversearrow.png"] = false,
+        };
+
+        Assert.False(SkinExtrasPickerWindow.SelectionAfterReload(
+            "REVERSEARROW.PNG",
+            defaultSelection: true,
+            previous));
+        Assert.True(SkinExtrasPickerWindow.SelectionAfterReload(
+            "new-frame.png",
+            defaultSelection: true,
+            previous));
+    }
+
+    [Fact]
     public void Color_chaos_randomizes_hitcircle_palette_and_both_slider_colours()
     {
         var colours = SkinEditorPage.ColorChaosIniColours(new Random(42));

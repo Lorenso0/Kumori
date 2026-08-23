@@ -119,6 +119,8 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private SkinExtraPackPreview? displayedPack;
     private IReadOnlyList<PackElementEntry> currentFallbackElements = [];
     private string? currentFallbackPackKey;
+    private readonly Dictionary<string, Dictionary<string, bool>>
+        fallbackSelectionsByPack = new(StringComparer.OrdinalIgnoreCase);
     private PackElementEntry? activeTintElement;
     private PackElementEntry? activePreviewHighlightElement;
     private int audioDevice = -1;
@@ -270,8 +272,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         SkinExtrasPersistentIndex.CacheRefreshed += PersistentIndex_CacheRefreshed;
         extrasSyncService.ProgressChanged += ExtrasSyncService_ProgressChanged;
         extrasSyncService.LibraryChanged += ExtrasSyncService_LibraryChanged;
-        if (extrasSyncService.CurrentProgress is not null)
-            UpdateCatalogSyncProgress(extrasSyncService.CurrentProgress);
+        if (extrasSyncService.CurrentProgress is { } progress
+            && ShouldDisplaySyncProgress(progress))
+            UpdateCatalogSyncProgress(progress);
         if (!IsCatalogMutationActive())
             LoadPacks();
         StartWatching();
@@ -386,10 +389,16 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
 
     internal void UpdateCatalogSyncProgress(SkinExtrasSyncProgress progress)
     {
+        if (!ShouldDisplaySyncProgress(progress))
+        {
+            ExtrasSyncStatusText.Text =
+                "Using the local Extras library. Updates are manual.";
+            return;
+        }
         ExtrasSyncStatusText.Text = progress.Message;
         var running = IsSynchronizationRunningStage(progress.Stage);
         var foreground = ShouldPresentSyncInForeground(progress);
-        CheckExtrasUpdatesButton.IsEnabled = !running;
+        CheckExtrasUpdatesButton.IsEnabled = false;
         CatalogSyncOverlay.Visibility = foreground
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -495,7 +504,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         catch (Exception ex)
         {
             ExtrasSyncStatusText.Text = $"Extras update check failed: {ex.Message}";
-            CheckExtrasUpdatesButton.IsEnabled = true;
+            CheckExtrasUpdatesButton.IsEnabled = false;
         }
     }
 
@@ -590,6 +599,10 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     internal static bool ShouldPresentSyncInForeground(
         SkinExtrasSyncProgress progress) =>
         progress.IsManual && IsForegroundSyncStage(progress.Stage);
+
+    internal static bool ShouldDisplaySyncProgress(
+        SkinExtrasSyncProgress progress) =>
+        progress.IsManual;
 
     internal static bool IsInternalLibraryPath(string path)
     {
@@ -766,6 +779,9 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
 
         if (disposed || version != packLoadVersion)
             return;
+        RememberCurrentFallbackSelections();
+        var editStates = CapturePackEditStates(allPacks);
+        RestorePackEditStates(loadedPacks, editStates);
         // Navigation can change while the catalog is scanning. Resolve it
         // again on the UI thread so a stale reload cannot jump the user back
         // to the family or pack that was selected when the scan began.
@@ -897,6 +913,76 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             currentFamily ?? familyAtStart,
             explicitlyPreferredPack ?? currentPack ?? packAtStart
         );
+
+    private static IReadOnlyDictionary<string, PackEditState> CapturePackEditStates(
+        IEnumerable<SkinExtraPackPreview> packs) =>
+        packs.GroupBy(pack => pack.PackKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var pack = group.Last();
+                    return new PackEditState(
+                        pack.Files.GroupBy(
+                                file => file.Name,
+                                StringComparer.OrdinalIgnoreCase)
+                            .ToDictionary(
+                            files => files.Key,
+                            files => files.Last().IsSelected,
+                            StringComparer.OrdinalIgnoreCase),
+                        pack.Settings.GroupBy(
+                                SettingIdentity,
+                                StringComparer.OrdinalIgnoreCase)
+                            .ToDictionary(
+                            settings => settings.Key,
+                            settings => settings.Last().IsSelected,
+                            StringComparer.OrdinalIgnoreCase),
+                        pack.Elements.Where(element => element.IsTinted)
+                            .GroupBy(
+                                element => element.Key,
+                                StringComparer.OrdinalIgnoreCase)
+                            .ToDictionary(
+                                elements => elements.Key,
+                                elements => elements.Last().TintRgb,
+                                StringComparer.OrdinalIgnoreCase));
+                },
+                StringComparer.OrdinalIgnoreCase);
+
+    private static void RestorePackEditStates(
+        IEnumerable<SkinExtraPackPreview> packs,
+        IReadOnlyDictionary<string, PackEditState> states)
+    {
+        foreach (var pack in packs)
+        {
+            if (!states.TryGetValue(pack.PackKey, out var state))
+                continue;
+            foreach (var file in pack.Files)
+                file.IsSelected = SelectionAfterReload(
+                    file.Name,
+                    file.IsSelected,
+                    state.FileSelections);
+            foreach (var setting in pack.Settings)
+                if (state.SettingSelections.TryGetValue(
+                        SettingIdentity(setting),
+                        out var selected))
+                    setting.IsSelected = selected;
+            foreach (var element in pack.Elements)
+                if (state.ElementTints.TryGetValue(element.Key, out var tint))
+                    element.SetTint(Color.FromRgb(tint.Red, tint.Green, tint.Blue));
+            pack.NotifySelectionChanged();
+        }
+    }
+
+    private static string SettingIdentity(PackSettingEntry setting) =>
+        $"{setting.Patch.Section}\0{setting.Patch.ManiaKeys}\0{setting.Patch.Key}";
+
+    internal static bool SelectionAfterReload(
+        string filename,
+        bool defaultSelection,
+        IReadOnlyDictionary<string, bool> previousSelections) =>
+        previousSelections.TryGetValue(filename, out var selected)
+            ? selected
+            : defaultSelection;
 
     private IReadOnlyList<SkinExtraPackPreview> BuildPackCatalog(
         bool requestedLazerFilter,
@@ -2019,6 +2105,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         ConfigurePreviewCanvas(CurrentPreviewCanvas, pack.Manifest.FamilyId);
         ConfigurePreviewCanvas(ResultPreviewCanvas, pack.Manifest.FamilyId);
         _ = EnsurePackPreviewAsync(pack);
+        RememberCurrentFallbackSelections();
         currentFallbackElements = [];
         currentFallbackPackKey = null;
         CurrentSkinPreviewLabel.Text = currentSkinSource?.HasStagedChanges == true
@@ -2632,8 +2719,6 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             pair => pair.Key,
             pair => pair.Value,
             StringComparer.OrdinalIgnoreCase);
-        var directory = Path.Combine(previewTempRoot, "recoloured");
-        Directory.CreateDirectory(directory);
         for (var index = 0; index < recoloured.Count; index++)
         {
             if (ReferenceEquals(recoloured[index], sourceFiles[index]))
@@ -2641,15 +2726,28 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             var digest = Convert.ToHexString(
                     SHA256.HashData(recoloured[index].Bytes))
                 .ToLowerInvariant()[..16];
-            var path = Path.Combine(
-                directory,
-                $"{digest}-{Path.GetFileName(recoloured[index].Filename)}");
+            var path = RecolouredPreviewPath(
+                previewTempRoot,
+                digest,
+                recoloured[index].Filename);
+            var directory = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(directory);
             if (!File.Exists(path))
                 File.WriteAllBytes(path, recoloured[index].Bytes);
             result[recoloured[index].Filename] = path;
         }
         return result;
     }
+
+    internal static string RecolouredPreviewPath(
+        string previewRoot,
+        string digest,
+        string filename) =>
+        Path.Combine(
+            previewRoot,
+            "recoloured",
+            digest,
+            Path.GetFileName(filename));
 
     private static BitmapSource? LoadExactTarget(
         IEnumerable<KeyValuePair<string, string>> targets,
@@ -2868,6 +2966,16 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             .OfType<PackElementEntry>()
             .ToArray();
         currentFallbackPackKey = pack.PackKey;
+        if (fallbackSelectionsByPack.TryGetValue(pack.PackKey, out var selections))
+        {
+            foreach (var file in currentFallbackElements.SelectMany(element => element.Files))
+            {
+                file.IsSelected = SelectionAfterReload(
+                    file.Name,
+                    file.IsSelected,
+                    selections);
+            }
+        }
         RefreshElementList(pack);
         _ = EnsureFallbackThumbnailsAsync(pack, currentFallbackElements);
     }
@@ -4930,19 +5038,6 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 MessageBoxImage.Information);
             return;
         }
-        var preview = string.Join("\n", packs.Select(pack =>
-            $"• {pack.NavigationFamilyName}: {pack.Name}"));
-        if (KumoriDialog.Show(
-                dialogOwner,
-                $"Kumori rolled this {(hitsoundsOnly ? "hitsound trio" : "full-skin mix")}:\n\n"
-                + preview
-                + "\n\nAdd the whole mix to Changes?",
-                hitsoundsOnly ? "3 random hitsound packs" : "Full random skin",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question,
-                MessageBoxResult.Yes) != MessageBoxResult.Yes)
-            return;
-
         var selections = packs.Select(CreateWholePackSelection).ToArray();
         staging = true;
         RandomHitsoundsButton.IsEnabled = false;
@@ -5571,6 +5666,8 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
         if (pack is null)
             return;
         element.NotifySelectionChanged();
+        if (element.FromCurrentSkin)
+            RememberCurrentFallbackSelections();
         pack.NotifySelectionChanged();
         SelectPack(pack);
         UpdateSelectionUi(pack);
@@ -5671,6 +5768,7 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
     private void InvalidateCurrentPreview()
     {
         currentPreviewFiles.Clear();
+        RememberCurrentFallbackSelections();
         currentFallbackElements = [];
         currentFallbackPackKey = null;
         CurrentPreviewCanvas.Children.Clear();
@@ -5692,6 +5790,19 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
                 refresh: false);
             DisplayPack(pack);
         }
+    }
+
+    private void RememberCurrentFallbackSelections()
+    {
+        if (currentFallbackPackKey is null || currentFallbackElements.Count == 0)
+            return;
+        fallbackSelectionsByPack[currentFallbackPackKey] = currentFallbackElements
+            .SelectMany(element => element.Files)
+            .GroupBy(file => file.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Last().IsSelected,
+                StringComparer.OrdinalIgnoreCase);
     }
 
     private bool CompleteGuidedAssets(
@@ -6385,6 +6496,11 @@ public partial class SkinExtrasPickerWindow : UserControl, IDisposable
             ", ",
             RemainingAssets.Select(asset => asset.DisplayName));
     }
+
+    private sealed record PackEditState(
+        IReadOnlyDictionary<string, bool> FileSelections,
+        IReadOnlyDictionary<string, bool> SettingSelections,
+        IReadOnlyDictionary<string, SkinRgb> ElementTints);
 
     private sealed record SkinExtraPackPreview(
         string Name,

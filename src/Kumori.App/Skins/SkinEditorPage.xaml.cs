@@ -300,7 +300,6 @@ public partial class SkinEditorPage : UserControl
 
     public async Task EnsureLoadedAsync()
     {
-        BeginExtrasSynchronization(manual: false);
         if (initialized || loading)
             return;
         initialized = true;
@@ -2475,7 +2474,6 @@ public partial class SkinEditorPage : UserControl
         var added = pending.Count(change => !change.IsDeletion && change.ExpectedHash is null);
         var replaced = pending.Count(change => !change.IsDeletion && change.ExpectedHash is not null);
         var deleted = pending.Count(change => change.IsDeletion);
-        var preflight = await BuildCurrentPreflightAsync();
         var selectedCategoryName =
             (CategoryPicker.SelectedItem as CategoryChoice)?.Category.Name;
         var selectedFilename = selectedEntry?.Filename;
@@ -2483,12 +2481,7 @@ public partial class SkinEditorPage : UserControl
                 Window.GetWindow(this),
                 $"Save {pending.Length} change{(pending.Length == 1 ? "" : "s")} to osu!lazer?\n\n"
                 + $"{added} added · {replaced} replaced · {deleted} deleted\n\n"
-                + preflight.Summary + "\n"
-                + (preflight.Issues.Count == 0
-                    ? ""
-                    : string.Join("\n", preflight.Issues.Take(3)
-                        .Select(issue => $"• {issue.Message}")) + "\n")
-                + "\nKumori will create a restore point before writing anything.",
+                + "Kumori will validate the current skin and create a restore point before writing anything.",
                 "Save skin to osu!lazer",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question,
@@ -6843,11 +6836,13 @@ public partial class SkinEditorPage : UserControl
         SkinExtrasSelectionResult selection,
         bool lazerUsedOnly,
         Window? owner,
-        MessageBoxResult? confirmationChoice = null)
+        MessageBoxResult? confirmationChoice = null,
+        bool refreshPreviews = true)
     {
         if (catalog is null || currentSkin is null || draft is null)
             return false;
 
+        var stagingBusy = false;
         try
         {
             var extrasRoot = Path.GetFullPath(AppPaths.SkinExtrasDir);
@@ -6868,6 +6863,25 @@ public partial class SkinEditorPage : UserControl
 
             var manifest = selection.Manifest;
             var packName = manifest.DisplayName;
+            var choice = confirmationChoice ?? KumoriDialog.Show(
+                owner,
+                $"Use {packName} for {manifest.FamilyName}?\n\n"
+                + $"{selection.LogicalElementCount} selected element"
+                + (selection.LogicalElementCount == 1 ? "" : "s")
+                + $" · {selection.PhysicalFileCount} files"
+                + (selection.SettingCount == 0 ? "" : $" · {selection.SettingCount} settings")
+                + "\n\nYes: create a backup now, then stage the replacement\n"
+                + "No: stage without an immediate backup\n"
+                + "Cancel: make no changes",
+                $"Use {manifest.FamilyName} from Extras",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Warning,
+                MessageBoxResult.Yes);
+            if (choice is not (MessageBoxResult.Yes or MessageBoxResult.No))
+                return false;
+
+            SetBusy(true, $"Preparing {packName}...");
+            stagingBusy = true;
             var incoming = await Task.Run(() => manifest.Files.Select(file =>
             {
                 var path = Path.GetFullPath(Path.Combine(
@@ -6891,17 +6905,13 @@ public partial class SkinEditorPage : UserControl
             }).ToArray());
             if (iniDocument is null && manifest.IniPatch.Count > 0)
                 throw new InvalidDataException("This pack needs skin.ini, but the current skin.ini could not be loaded.");
-            if (iniDocument is not null)
+            if (iniDocument is not null && rawDirty)
             {
-                if (rawDirty)
-                {
-                    iniDocument = iniDocument.WithText(RawIniText.Text);
-                    rawDirty = false;
-                }
-                else if (!ApplyFormRowsToDocument(validate: true))
-                {
-                    return false;
-                }
+                iniDocument = PrepareIniForExtrasStaging(
+                    iniDocument,
+                    RawIniText.Text);
+                rawDirty = false;
+                InvalidateIniCompositionCache();
             }
             IReadOnlyList<SkinExtraPackFile> effectiveIncoming = incoming
                 .Where(file => !lazerUsedOnly
@@ -7026,98 +7036,55 @@ public partial class SkinEditorPage : UserControl
             var added = effectiveChanges.Count(change =>
                 !change.IsDeletion && !currentFilesByName.ContainsKey(change.Filename));
             var linkedSettings = plan.IniPatch.Count;
-            var resolutionSummary = resolutionMismatches.Count == 0
-                ? ""
-                : selection.ResolutionPolicy == SkinExtraResolutionPolicy.UpscaleToTwoX
-                    ? $"\n{resolutionMismatches.Count} matching @2x "
-                      + (resolutionMismatches.Count == 1 ? "file" : "files")
-                      + " will be generated automatically."
-                    : $"\n{resolutionMismatches.Count} conflicting @2x "
-                      + (resolutionMismatches.Count == 1 ? "file" : "files")
-                      + " will be removed so the selected 1× files are used.";
-            var cursorSummary = SkinCursorMiddlePolicy.IsCursorFamily(manifest.FamilyId)
-                ? selection.SmoothTrail
-                    ? "\nCursor middle: every variant will be removed and replaced by the transparent 1×1 Smooth Trail placeholder."
-                    : "\nCursor middle: every variant will be removed."
-                : "";
-
-            var choice = confirmationChoice ?? KumoriDialog.Show(
-                owner,
-                $"Use {packName} for {manifest.FamilyName}?\n\n"
-                + $"{selection.LogicalElementCount} selected element"
-                + (selection.LogicalElementCount == 1 ? "" : "s")
-                + $" · {resolvedIncoming.Count + (selection.SmoothTrail ? 1 : 0)} files"
-                + (selection.SettingCount == 0 ? "" : $" · {selection.SettingCount} settings")
-                + $"\n{replaced} replaced · {added} added"
-                + (removed == 0 ? "" : $" · {removed} family-owned files removed")
-                + (linkedSettings == 0 ? "" : $" · {linkedSettings} linked skin.ini settings")
-                + resolutionSummary
-                + cursorSummary
-                + "\n\nChecked current-skin fallback layers are kept. Unchecked fallback layers are removed; all other neighboring assets and unrelated skin.ini settings remain unchanged.\n\n"
-                + "Yes: create a backup now, then stage the replacement\n"
-                + "No: stage without an immediate backup\n"
-                + "Cancel: make no changes",
-                $"Use {manifest.FamilyName} from Extras",
-                MessageBoxButton.YesNoCancel,
-                MessageBoxImage.Warning,
-                MessageBoxResult.Yes);
-            if (choice == MessageBoxResult.Cancel)
-                return false;
-
-            SetBusy(true, $"Preparing {packName}...");
-            try
+            var touchedNames = replacementNames;
+            var ownedCurrentFiles = currentSkin.Files.Where(file =>
+                touchedNames.Contains(file.Filename)).ToList();
+            if (plan.IniPatch.Count > 0 && iniFile is not null)
+                ownedCurrentFiles.Add(iniFile);
+            if (choice == MessageBoxResult.Yes && ownedCurrentFiles.Count > 0)
             {
-                var touchedNames = replacementNames;
-                var ownedCurrentFiles = currentSkin.Files.Where(file =>
-                    touchedNames.Contains(file.Filename)).ToList();
-                if (plan.IniPatch.Count > 0 && iniFile is not null)
-                    ownedCurrentFiles.Add(iniFile);
-                if (choice == MessageBoxResult.Yes && ownedCurrentFiles.Count > 0)
-                {
-                    var backupDirectory = GetOrCreateElementBackupDirectory(forceNew: true);
-                    if (!await BackupElementFilesAsync(ownedCurrentFiles))
-                        return false;
-                    await Task.Run(() => realmService.CreateBackup(
-                        catalog.RootPath,
-                        Path.Combine(backupDirectory, "realm")));
-                    backupCreated = true;
-                    backupRoot = catalog.RootPath;
-                }
+                var backupDirectory = GetOrCreateElementBackupDirectory(forceNew: true);
+                if (!await BackupElementFilesAsync(ownedCurrentFiles))
+                    return false;
+                await Task.Run(() => realmService.CreateBackup(
+                    catalog.RootPath,
+                    Path.Combine(backupDirectory, "realm")));
+                backupCreated = true;
+                backupRoot = catalog.RootPath;
+            }
 
-                draft.ReplaceWhere(
-                    change => replacementNames.Contains(change.Filename),
-                    changes);
-                if (plan.IniPatch.Count > 0 && iniDocument is not null)
-                {
-                    var patched = SkinIniDocument.Parse(iniDocument.ToBytes());
-                    patched.ApplyPatch(plan.IniPatch);
-                    iniDocument = patched;
-                    draft.StageRange([new SkinDraftChange(
-                        "skin.ini",
-                        iniFile?.Hash,
-                        iniDocument.ToBytes(),
-                        $"skin.ini ({manifest.FamilyName} from {packName})",
-                        SkinDraftOperation.Upsert,
-                        actionId,
-                        actionLabel)]);
-                    iniDirty = false;
-                    SetRawText(iniDocument.ToText());
-                    BuildIniForm();
-                    UpdateComboStrip();
-                }
+            draft.ReplaceWhere(
+                change => replacementNames.Contains(change.Filename),
+                changes);
+            if (plan.IniPatch.Count > 0 && iniDocument is not null)
+            {
+                var patched = SkinIniDocument.Parse(iniDocument.ToBytes());
+                patched.ApplyPatch(plan.IniPatch);
+                iniDocument = patched;
+                draft.StageRange([new SkinDraftChange(
+                    "skin.ini",
+                    iniFile?.Hash,
+                    iniDocument.ToBytes(),
+                    $"skin.ini ({manifest.FamilyName} from {packName})",
+                    SkinDraftOperation.Upsert,
+                    actionId,
+                    actionLabel)]);
+                iniDirty = false;
+                SetRawText(iniDocument.ToText());
+                BuildIniForm();
+                UpdateComboStrip();
+            }
+            if (refreshPreviews)
+            {
                 await RefreshGameplayPreviewAsync();
                 await RefreshRichPreviewsAsync();
-                StatusText.Text =
-                    $"{packName} staged for {manifest.FamilyName}: "
-                    + $"{replaced} replaced, {added} added, {removed} removed"
-                    + (linkedSettings == 0 ? "." : $", {linkedSettings} linked settings.");
-                UpdateDirtyState();
-                return true;
             }
-            finally
-            {
-                SetBusy(false);
-            }
+            StatusText.Text =
+                $"{packName} staged for {manifest.FamilyName}: "
+                + $"{replaced} replaced, {added} added, {removed} removed"
+                + (linkedSettings == 0 ? "." : $", {linkedSettings} linked settings.");
+            UpdateDirtyState();
+            return true;
         }
         catch (Exception ex)
         {
@@ -7130,6 +7097,11 @@ public partial class SkinEditorPage : UserControl
                 MessageBoxImage.Error);
             return false;
         }
+        finally
+        {
+            if (stagingBusy)
+                SetBusy(false);
+        }
     }
 
     private async Task<bool> StageExtrasSelectionsAsync(
@@ -7140,9 +7112,13 @@ public partial class SkinEditorPage : UserControl
     {
         if (selections.Count == 0)
             return false;
+        var preview = string.Join("\n", selections.Select(selection =>
+            $"• {selection.Manifest.FamilyName}: {selection.Manifest.DisplayName}"));
         var choice = KumoriDialog.Show(
             owner,
-            $"Stage {selections.Count} randomly selected Extras packs?\n\n"
+            $"Kumori rolled these {selections.Count} Extras packs:\n\n"
+            + preview
+            + "\n\nStage the whole mix?\n\n"
             + "Yes: create backups for affected existing files\n"
             + "No: stage without immediate per-pack backups\n"
             + "Cancel: make no changes",
@@ -7150,7 +7126,7 @@ public partial class SkinEditorPage : UserControl
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Warning,
             MessageBoxResult.Yes);
-        if (choice == MessageBoxResult.Cancel)
+        if (!ShouldStageRandomMix(choice))
             return false;
         for (var index = 0; index < selections.Count; index++)
         {
@@ -7164,7 +7140,8 @@ public partial class SkinEditorPage : UserControl
                     selection,
                     lazerUsedOnly,
                     owner,
-                    choice))
+                    choice,
+                    refreshPreviews: false))
                 return false;
             progress?.Report(new SkinExtrasBatchProgress(
                 index + 1,
@@ -7172,8 +7149,19 @@ public partial class SkinEditorPage : UserControl
                 selection.Manifest.FamilyName,
                 selection.Manifest.DisplayName));
         }
+        await RefreshGameplayPreviewAsync();
+        await RefreshRichPreviewsAsync();
+        UpdateDirtyState();
         return true;
     }
+
+    internal static bool ShouldStageRandomMix(MessageBoxResult choice) =>
+        choice is MessageBoxResult.Yes or MessageBoxResult.No;
+
+    internal static SkinIniDocument PrepareIniForExtrasStaging(
+        SkinIniDocument document,
+        string? pendingRawText) =>
+        pendingRawText is null ? document : document.WithText(pendingRawText);
 
     private void CloseExtrasWorkspace()
     {

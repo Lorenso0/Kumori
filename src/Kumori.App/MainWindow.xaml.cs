@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly ImportsViewModel? _importsViewModel;
     private readonly PlaySharePackageService? _playShare;
     private readonly ILazerSkinReloadService? _lazerSkinReload;
+    private readonly WallpaperSourceSearchService _wallpaperSourceSearch = new();
     private readonly SemaphoreSlim _importGate = new(1, 1);
     private ResponsiveLayoutState _layoutState;
     private bool _compactInspectorOpen;
@@ -288,10 +289,12 @@ public partial class MainWindow : Window
         if (DashboardRoot.DataContext is ImportsViewModel imports)
         {
             replay.Click += async (_, _) => await TryUiActionAsync(() => imports.OpenReplayInspectorAsync(row, this));
+            var findImportedWallpaperSource = CreateWallpaperSourceMenuItem(row);
             var deleteImport = new MenuItem { Header = "Delete imported play" };
             deleteImport.Click += async (_, _) => await TryUiActionAsync(() => imports.DeleteAsync(row, this));
             menu.Items.Add(replay);
             menu.Items.Add(new Separator());
+            menu.Items.Add(findImportedWallpaperSource);
             menu.Items.Add(deleteImport);
             menu.PlacementTarget = button;
             menu.IsOpen = true;
@@ -304,6 +307,7 @@ public partial class MainWindow : Window
         export.Click += async (_, _) => await TryUiActionAsync(() => vm.ExportPlayAsync(row));
         var showAll = new MenuItem { Header = "Show all plays for this map" };
         showAll.Click += async (_, _) => await vm.ShowAllPlaysForMapAsync(row);
+        var findWallpaperSource = CreateWallpaperSourceMenuItem(row);
         var delete = new MenuItem { Header = "Delete this attempt", IsEnabled = !vm.HasActiveSession };
         delete.Click += async (_, _) => await vm.DeleteAttemptAsync(row);
         menu.Items.Add(replay);
@@ -311,9 +315,31 @@ public partial class MainWindow : Window
         menu.Items.Add(new Separator());
         menu.Items.Add(showAll);
         menu.Items.Add(new Separator());
+        menu.Items.Add(findWallpaperSource);
         menu.Items.Add(delete);
         menu.PlacementTarget = button;
         menu.IsOpen = true;
+    }
+
+    private MenuItem CreateWallpaperSourceMenuItem(AttemptRowViewModel row)
+    {
+        var item = new MenuItem
+        {
+            Header = "Find wallpaper source",
+            IsEnabled = !string.IsNullOrWhiteSpace(row.ArtworkSource),
+            ToolTip = "Search and preview matching wallpapers without leaving Kumori",
+        };
+        item.Click += (_, _) =>
+        {
+            var results = new WallpaperSourceResultsWindow(
+                _wallpaperSourceSearch,
+                row.ArtworkSource!)
+            {
+                Owner = this,
+            };
+            results.ShowDialog();
+        };
+        return item;
     }
 
     private async void ReplayAnalyzer_Click(object sender, RoutedEventArgs e)

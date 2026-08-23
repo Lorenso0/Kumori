@@ -187,11 +187,60 @@ public sealed class SkinExtrasPickerPresentationTests
         var document = LoadPickerDocument();
         XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
 
-        Assert.NotNull(NamedElement(document, xaml, "FullRandomButton"));
+        var hitsounds = NamedElement(document, xaml, "RandomHitsoundsButton");
+        var fullRandom = NamedElement(document, xaml, "FullRandomButton");
+        Assert.Equal(
+            (string?)hitsounds.Attribute("Width"),
+            (string?)fullRandom.Attribute("Width"));
+        Assert.Equal("Top", (string?)hitsounds.Attribute("VerticalAlignment"));
+        Assert.Equal("Top", (string?)fullRandom.Attribute("VerticalAlignment"));
         var overlay = NamedElement(document, xaml, "RandomMixOverlay");
         Assert.Equal("Collapsed", (string?)overlay.Attribute("Visibility"));
         var progress = NamedElement(document, xaml, "RandomMixProgressBar");
         Assert.Equal("False", (string?)progress.Attribute("IsIndeterminate"));
+    }
+
+    [Fact]
+    public void Element_checkbox_toggles_all_physical_files_on_the_first_click()
+    {
+        var document = LoadPickerDocument();
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var template = document.Descendants(presentation + "DataTemplate")
+            .Single(element => (string?)element.Attribute(xaml + "Key") == "PackElementChoiceTemplate");
+        var checkBox = template.Descendants(presentation + "CheckBox").First();
+
+        Assert.Equal("False", (string?)checkBox.Attribute("IsThreeState"));
+        Assert.Contains(
+            "UpdateSourceTrigger=PropertyChanged",
+            (string?)checkBox.Attribute("IsChecked"));
+    }
+
+    [Fact]
+    public void Extras_catalog_updates_are_disabled_in_local_library_mode()
+    {
+        var document = LoadPickerDocument();
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var button = NamedElement(document, xaml, "CheckExtrasUpdatesButton");
+
+        Assert.Equal("False", (string?)button.Attribute("IsEnabled"));
+        Assert.Equal("Updates disabled", (string?)button.Attribute("Content"));
+    }
+
+    [Theory]
+    [InlineData(System.Windows.MessageBoxResult.Yes, true)]
+    [InlineData(System.Windows.MessageBoxResult.No, true)]
+    [InlineData(System.Windows.MessageBoxResult.Cancel, false)]
+    [InlineData(System.Windows.MessageBoxResult.None, false)]
+    public void Random_mix_no_means_stage_without_backup(
+        System.Windows.MessageBoxResult choice,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            Kumori.App.Skins.SkinEditorPage.ShouldStageRandomMix(choice));
     }
 
     private static void AssertPixelScrollHost(

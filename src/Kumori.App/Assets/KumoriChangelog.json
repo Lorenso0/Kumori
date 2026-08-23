@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.8.3",
+    "date": "2026-08-23",
+    "features": [
+      "Added an in-app wallpaper source finder that searches the stored map background, ranks matches by resolution, previews results, and saves selected images locally"
+    ],
+    "improvements": [
+      "Made Extras a local-library workflow, preserved pack choices and recoloured animation frames across reloads, and streamlined random mix staging and previews"
+    ],
+    "fixes": [
+      "Prevented the wallpaper source results window from crashing when result cards load",
+      "Preserved nonstandard skin.ini values and fallback selections while staging Extras packs, and made the first element checkbox click toggle every physical file"
+    ]
+  },
+  {
     "version": "0.8.2",
     "date": "2026-08-14",
     "features": [
