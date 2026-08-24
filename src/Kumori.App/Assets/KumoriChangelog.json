@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.8.6",
+    "date": "2026-08-25",
+    "improvements": [
+      "Redesigned Discord top-play cards with a shorter, denser layout that prioritizes accuracy, score, combo, and PP while preserving every play detail"
+    ]
+  },
+  {
     "version": "0.8.5",
     "date": "2026-08-24",
     "improvements": [

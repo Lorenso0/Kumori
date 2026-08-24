@@ -50,7 +50,7 @@ public sealed class HinamizawaTopScoresProvider :
         requestInterval = minimumRequestInterval ?? productionRequestInterval;
         if (!http.DefaultRequestHeaders.UserAgent.Any())
             http.DefaultRequestHeaders.UserAgent.ParseAdd(
-                "Kumori-FarmFinder/0.8.5 (+https://github.com/Lorenzo0111/Kumori)");
+                "Kumori-FarmFinder/0.8.6 (+https://github.com/Lorenzo0111/Kumori)");
         if (!http.DefaultRequestHeaders.Accept.Any())
             http.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));

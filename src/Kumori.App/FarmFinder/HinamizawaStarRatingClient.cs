@@ -289,7 +289,7 @@ internal sealed class HinamizawaStarRatingClient
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "Kumori-FarmFinder/0.8.5 (+https://github.com/Lorenzo0111/Kumori)");
+            "Kumori-FarmFinder/0.8.6 (+https://github.com/Lorenzo0111/Kumori)");
         client.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/json"));
         return client;

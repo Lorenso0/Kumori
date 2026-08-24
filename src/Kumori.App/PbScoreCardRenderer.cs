@@ -18,7 +18,7 @@ namespace Kumori.App;
 internal static class PbScoreCardRenderer
 {
     internal const int Width = 1120;
-    internal const int Height = 620;
+    internal const int Height = 500;
 
     private static readonly CultureInfo Culture = CultureInfo.InvariantCulture;
     private static readonly Typeface Regular = new("Segoe UI");
@@ -95,11 +95,11 @@ internal static class PbScoreCardRenderer
         {
             var full = new Rect(0, 0, Width, Height);
             drawing.DrawRectangle(Brush("#100A0E"), null, full);
-            var hero = new Rect(8, 8, Width - 16, 158);
+            var hero = new Rect(8, 8, Width - 16, 116);
             DrawHeroArtwork(drawing, artworkPath, hero);
             drawing.DrawRoundedRectangle(
                 null,
-                Pen("#78415D", 1.5),
+                Pen("#593348", 1),
                 new Rect(hero.X + 0.5, hero.Y + 0.5, hero.Width - 1, hero.Height - 1),
                 8,
                 8);
@@ -107,27 +107,25 @@ internal static class PbScoreCardRenderer
             string heading = beatmapRank is > 0
                 ? Invariant($"NEW #{beatmapRank:N0} BEST PLAY")
                 : isTest ? "TOP-PLAY ALERT PREVIEW" : "NEW TOP PLAY";
-            var titlePlate = new Rect(20, 20, 430, 100);
-            drawing.DrawRoundedRectangle(Brush("#D90F090D"), Pen("#5D3448", 1), titlePlate, 7, 7);
-            DrawPlayerAvatar(drawing, avatarPath, playerName, new Rect(32, 43, 56, 56));
-            DrawText(drawing, heading, 100, 29, 11, "#FF7AAF", Bold, 330);
-            DrawText(drawing, $"{summary.Artist} — {summary.Title}", 100, 50, 21, "#FFFFFF", Bold, 330);
+            DrawPlayerAvatar(drawing, avatarPath, playerName, new Rect(24, 34, 58, 58));
+            DrawText(drawing, heading, 96, 25, 10.5, "#FF7AAF", Bold, 430);
+            DrawText(drawing, $"{summary.Artist} — {summary.Title}", 96, 45, 20, "#FFFFFF", Bold, 500);
             DrawText(
                 drawing,
                 $"[{Fallback(summary.Difficulty, "Unknown")}] · played by {Fallback(playerName, "Kumori user")}",
-                100,
-                80,
-                13,
+                96,
+                73,
+                12.5,
                 "#E2D4DC",
                 Regular,
-                330);
+                500);
 
-            DrawText(drawing, $"mapped by {Fallback(attempt.Mapper, summary.Mapper, "Unknown")}", 20, 137, 12, "#FFFFFF", Semibold, 360);
+            DrawText(drawing, $"mapped by {Fallback(attempt.Mapper, summary.Mapper, "Unknown")}", 96, 95, 11, "#D8C5D0", Semibold, 420);
             string outcome = string.Equals(summary.Outcome, "completed", StringComparison.OrdinalIgnoreCase)
                 ? "COMPLETED"
                 : Invariant($"{summary.Progress:P0}");
-            DrawCenteredText(drawing, outcome, Width / 2, 137, 12, "#FFFFFF", Bold, 280);
-            DrawRightText(drawing, DateText(summary.EndedAt ?? summary.StartedAt), Width - 20, 137, 12, "#FFFFFF", Semibold, 390);
+            DrawRightText(drawing, outcome, Width - 24, 53, 12, "#FFFFFF", Bold, 240);
+            DrawRightText(drawing, DateText(summary.EndedAt ?? summary.StartedAt), Width - 24, 76, 11.5, "#E2D4DC", Semibold, 320);
 
             DrawMapStatStrip(drawing, attempt);
             DrawScoreDetailsTable(drawing, attempt);
@@ -322,40 +320,37 @@ internal static class PbScoreCardRenderer
             ("DIFFICULTY", StarNumber(adjustedStars, baseStars), "#B08BFF"),
         ];
 
-        var rect = new Rect(8, 174, Width - 16, 56);
-        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#4D2B3B", 1), rect, 8, 8);
+        var rect = new Rect(8, 130, Width - 16, 44);
+        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#3F2733", 1), rect, 8, 8);
         double width = rect.Width / stats.Length;
         for (int index = 0; index < stats.Length; index++)
         {
             double left = rect.Left + index * width;
             if (index > 0)
-                drawing.DrawLine(Pen("#422635", 1), new WpfPoint(left, rect.Top), new WpfPoint(left, rect.Bottom));
-            DrawCenteredText(drawing, stats[index].Label, left + width / 2, rect.Top + 8, 10, stats[index].Accent, Semibold, width - 16);
-            DrawCenteredText(drawing, stats[index].Value, left + width / 2, rect.Top + 27, 15, stats[index].Accent == "#B08BFF" ? "#B08BFF" : "#FFFFFF", Semibold, width - 16);
+                drawing.DrawLine(Pen("#49303D", 1), new WpfPoint(left, rect.Top + 9), new WpfPoint(left, rect.Bottom - 9));
+            DrawCenteredText(drawing, stats[index].Label, left + width / 2, rect.Top + 6, 9, stats[index].Accent, Semibold, width - 16);
+            DrawCenteredText(drawing, stats[index].Value, left + width / 2, rect.Top + 22, 14, stats[index].Accent == "#B08BFF" ? "#B08BFF" : "#FFFFFF", Semibold, width - 16);
         }
     }
 
     private static void DrawScoreDetailsTable(DrawingContext drawing, AttemptDetails attempt)
     {
         AttemptSummary summary = attempt.Summary;
-        var panel = new Rect(8, 238, Width - 16, 216);
-        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#4D2B3B", 1), panel, 8, 8);
-        double cellWidth = panel.Width / 4;
-        const double performanceBottom = 314;
-        const double judgementsBottom = 376;
+        var panel = new Rect(8, 180, Width - 16, 192);
+        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#3F2733", 1), panel, 8, 8);
+        const double performanceBottom = 258;
+        const double judgementsBottom = 318;
         drawing.DrawLine(Pen("#422635", 1), new WpfPoint(panel.Left, performanceBottom), new WpfPoint(panel.Right, performanceBottom));
         drawing.DrawLine(Pen("#422635", 1), new WpfPoint(panel.Left, judgementsBottom), new WpfPoint(panel.Right, judgementsBottom));
-        for (int index = 1; index < 4; index++)
-        {
-            double left = panel.Left + index * cellWidth;
-            drawing.DrawLine(Pen("#422635", 1), new WpfPoint(left, panel.Top), new WpfPoint(left, performanceBottom));
-            if (index < 3)
-                drawing.DrawLine(Pen("#422635", 1), new WpfPoint(left, judgementsBottom), new WpfPoint(left, panel.Bottom));
-        }
 
-        double gradeCenter = panel.Left + cellWidth / 2;
-        DrawRank(drawing, summary.Grade ?? "—", summary.Accuracy / 100d, gradeCenter, panel.Top + 31);
-        DrawCenteredText(drawing, "GRADE", gradeCenter, panel.Top + 59, 10, "#A98D9C", Semibold, cellWidth - 24);
+        const double gradeWidth = 184;
+        double gradeCenter = panel.Left + gradeWidth / 2;
+        DrawRank(drawing, summary.Grade ?? "—", summary.Accuracy / 100d, gradeCenter, panel.Top + 29);
+        DrawCenteredText(drawing, "GRADE", gradeCenter, panel.Top + 57, 9.5, "#A98D9C", Semibold, gradeWidth - 24);
+        drawing.DrawLine(
+            Pen("#49303D", 1),
+            new WpfPoint(panel.Left + gradeWidth, panel.Top + 12),
+            new WpfPoint(panel.Left + gradeWidth, performanceBottom - 12));
 
         int maxCombo = summary.BeatmapMaxCombo > 0
             ? summary.BeatmapMaxCombo
@@ -363,17 +358,31 @@ internal static class PbScoreCardRenderer
         string combo = maxCombo > 0
             ? Invariant($"{summary.Combo:N0} / {maxCombo:N0}x")
             : Invariant($"{summary.Combo:N0}x");
-        (string Label, string Value)[] primary =
+        (string Label, string Value, double Weight, double FontSize)[] primary =
         [
-            ("ACCURACY", Invariant($"{summary.Accuracy:0.00}%")),
-            ("SCORE", Invariant($"{summary.Score:N0}")),
-            ("COMBO", combo),
+            ("ACCURACY", Invariant($"{summary.Accuracy:0.00}%"), 1.16, 22),
+            ("SCORE", Invariant($"{summary.Score:N0}"), 1.30, 22),
+            ("COMBO", combo, 1.18, 18),
+            ("PP", Invariant($"{attempt.Summary.Pp:0.##}pp"), 0.92, 18),
         ];
+        double metricsLeft = panel.Left + gradeWidth;
+        double metricsWidth = panel.Width - gradeWidth;
+        double totalWeight = primary.Sum(item => item.Weight);
+        double currentLeft = metricsLeft;
         for (int index = 0; index < primary.Length; index++)
         {
-            double center = panel.Left + (index + 1.5) * cellWidth;
-            DrawCenteredText(drawing, primary[index].Label, center, panel.Top + 13, 10, "#A98D9C", Semibold, cellWidth - 24);
-            DrawCenteredText(drawing, primary[index].Value, center, panel.Top + 38, 19, "#FFFFFF", Semibold, cellWidth - 24);
+            double width = metricsWidth * primary[index].Weight / totalWeight;
+            double center = currentLeft + width / 2;
+            if (index > 0)
+            {
+                drawing.DrawLine(
+                    Pen("#49303D", 1),
+                    new WpfPoint(currentLeft, panel.Top + 12),
+                    new WpfPoint(currentLeft, performanceBottom - 12));
+            }
+            DrawCenteredText(drawing, primary[index].Label, center, panel.Top + 14, 9.5, "#A98D9C", Semibold, width - 24);
+            DrawCenteredText(drawing, primary[index].Value, center, panel.Top + 38, primary[index].FontSize, "#FFFFFF", Semibold, width - 24);
+            currentLeft += width;
         }
 
         DrawJudgements(drawing, attempt, new Rect(panel.Left, performanceBottom, panel.Width, judgementsBottom - performanceBottom));
@@ -382,44 +391,37 @@ internal static class PbScoreCardRenderer
 
     private static void DrawScoreDataRow(DrawingContext drawing, AttemptDetails attempt, Rect rect)
     {
-        double width = rect.Width / 4;
-        DrawText(drawing, "MODS", rect.Left + 14, rect.Top + 9, 10, "#A98D9C", Semibold, width - 28);
+        double divider = rect.Left + rect.Width * 0.50;
+        DrawText(drawing, "MODS", rect.Left + 16, rect.Top + 16, 9.5, "#A98D9C", Semibold, 62);
         IEnumerable<string> mods = (attempt.Mods.Count > 0 ? attempt.Mods : attempt.Summary.Mods)
             .Select(mod => mod.Acronym);
-        _ = ScoreCardModRenderer.Draw(drawing, mods, EffectiveBpm(attempt), rect.Left + 14, rect.Top + 31, width - 28, compact: true);
+        _ = ScoreCardModRenderer.Draw(drawing, mods, EffectiveBpm(attempt), rect.Left + 84, rect.Top + 9, divider - rect.Left - 100, compact: true);
 
-        double performanceLeft = rect.Left + width;
-        DrawCenteredText(drawing, "PP", performanceLeft + width / 2, rect.Top + 15, 10, "#A98D9C", Semibold, width - 28);
-        DrawCenteredText(drawing, Invariant($"{attempt.Summary.Pp:0.##}pp"), performanceLeft + width / 2, rect.Top + 38, 17, "#FFFFFF", Semibold, width - 28);
+        drawing.DrawLine(
+            Pen("#49303D", 1),
+            new WpfPoint(divider, rect.Top + 10),
+            new WpfPoint(divider, rect.Bottom - 10));
 
         int key1 = attempt.Input?.Key1Presses ?? attempt.Key1Count;
         int key2 = attempt.Input?.Key2Presses ?? attempt.Key2Count;
-        DrawCenteredText(
+        DrawText(drawing, "KEY PRESSES", divider + 22, rect.Top + 16, 9.5, "#A98D9C", Semibold, 105);
+        DrawText(
             drawing,
-            "KEY PRESSES",
-            rect.Left + width * 3,
-            rect.Top + 12,
-            10,
-            "#A98D9C",
-            Semibold,
-            width * 2 - 32);
-        DrawCenteredText(
-            drawing,
-            Invariant($"K1 {key1:N0}  ·  K2 {key2:N0}"),
-            rect.Left + width * 3,
-            rect.Top + 36,
-            17,
+            Invariant($"K1 {key1:N0}   ·   K2 {key2:N0}"),
+            divider + 132,
+            rect.Top + 13,
+            15,
             "#FFFFFF",
             Semibold,
-            width * 2 - 32);
+            rect.Right - divider - 148);
     }
 
     private static void DrawProgression(DrawingContext drawing, ScoreAlertProfileChange? change)
     {
-        var panel = new Rect(8, 462, Width - 16, 70);
-        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#4D2B3B", 1), panel, 8, 8);
+        var panel = new Rect(8, 378, Width - 16, 60);
+        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#3F2733", 1), panel, 8, 8);
         double width = panel.Width / 2;
-        drawing.DrawLine(Pen("#422635", 1), new WpfPoint(panel.Left + width, panel.Top), new WpfPoint(panel.Left + width, panel.Bottom));
+        drawing.DrawLine(Pen("#49303D", 1), new WpfPoint(panel.Left + width, panel.Top + 10), new WpfPoint(panel.Left + width, panel.Bottom - 10));
         DrawProgressCell(
             drawing,
             new Rect(panel.Left, panel.Top, width, panel.Height),
@@ -444,9 +446,13 @@ internal static class PbScoreCardRenderer
         string delta,
         string accent)
     {
-        DrawText(drawing, label, rect.X + 18, rect.Y + 12, 10, accent, Bold, rect.Width - 36);
-        DrawText(drawing, transition, rect.X + 18, rect.Y + 32, 19, "#FFFFFF", Bold, rect.Width - 190);
-        DrawRightText(drawing, delta, rect.Right - 18, rect.Y + 35, 13, accent, Semibold, 170);
+        DrawText(drawing, label, rect.X + 18, rect.Y + 9, 9.5, accent, Bold, rect.Width - 36);
+        DrawText(drawing, transition, rect.X + 18, rect.Y + 29, 17, "#FFFFFF", Bold, rect.Width - 170);
+
+        const double badgeWidth = 116;
+        var badge = new Rect(rect.Right - badgeWidth - 16, rect.Y + 20, badgeWidth, 25);
+        drawing.DrawRoundedRectangle(Brush("#2B1822"), null, badge, 12.5, 12.5);
+        DrawCenteredText(drawing, delta, badge.X + badge.Width / 2, badge.Y + 5, 11.5, accent, Semibold, badge.Width - 16);
     }
 
     private static string RankTransition(ScoreAlertProfileChange? change)
@@ -492,20 +498,22 @@ internal static class PbScoreCardRenderer
             ("SLIDER TAIL", stable ? unavailable : HitTotal(attempt.SliderTailHits, attempt.SliderTailMisses), "#76E57B"),
         ];
 
-        double cellWidth = rect.Width / values.Length;
+        var strip = new Rect(rect.Left + 10, rect.Top + 7, rect.Width - 20, rect.Height - 13);
+        drawing.DrawRoundedRectangle(Brush("#1D1319"), null, strip, 6, 6);
+        double cellWidth = strip.Width / values.Length;
         for (int index = 0; index < values.Length; index++)
         {
-            double left = rect.Left + index * cellWidth;
+            double left = strip.Left + index * cellWidth;
             double center = left + cellWidth / 2;
             if (index > 0)
             {
                 drawing.DrawLine(
-                    Pen("#422635", 1),
-                    new WpfPoint(left, rect.Top + 1),
-                    new WpfPoint(left, rect.Bottom - 1));
+                    Pen("#49303D", 1),
+                    new WpfPoint(left, strip.Top + 7),
+                    new WpfPoint(left, strip.Bottom - 7));
             }
-            DrawCenteredText(drawing, values[index].Label, center, rect.Top + 10, 9.5, values[index].Accent, Bold, cellWidth - 16);
-            DrawCenteredText(drawing, values[index].Value, center, rect.Top + 32, 17, "#FFFFFF", Semibold, cellWidth - 16);
+            DrawCenteredText(drawing, values[index].Label, center, strip.Top + 6, 9, values[index].Accent, Bold, cellWidth - 14);
+            DrawCenteredText(drawing, values[index].Value, center, strip.Top + 24, 15.5, "#FFFFFF", Semibold, cellWidth - 14);
         }
     }
 
@@ -514,8 +522,8 @@ internal static class PbScoreCardRenderer
 
     private static void DrawFooterStrip(DrawingContext drawing, AttemptDetails attempt, bool replayAttached)
     {
-        var rect = new Rect(8, 540, Width - 16, 60);
-        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#4D2B3B", 1), rect, 8, 8);
+        var rect = new Rect(8, 444, Width - 16, 48);
+        drawing.DrawRoundedRectangle(Brush("#181015"), Pen("#3F2733", 1), rect, 8, 8);
         double width = rect.Width / 3;
         string timing = attempt.UnstableRate > 0
             ? attempt.Timing is { } summary
@@ -538,9 +546,9 @@ internal static class PbScoreCardRenderer
         {
             double left = rect.Left + index * width;
             if (index > 0)
-                drawing.DrawLine(Pen("#422635", 1), new WpfPoint(left, rect.Top), new WpfPoint(left, rect.Bottom));
-            DrawText(drawing, cells[index].Label, left + 16, rect.Top + 9, 10, cells[index].Accent, Bold, width - 32);
-            DrawText(drawing, cells[index].Value, left + 16, rect.Top + 28, 15, "#FFFFFF", Semibold, width - 32);
+                drawing.DrawLine(Pen("#49303D", 1), new WpfPoint(left, rect.Top + 8), new WpfPoint(left, rect.Bottom - 8));
+            DrawText(drawing, cells[index].Label, left + 16, rect.Top + 6, 9, cells[index].Accent, Bold, width - 32);
+            DrawText(drawing, cells[index].Value, left + 16, rect.Top + 22, 13.5, "#FFFFFF", Semibold, width - 32);
         }
     }
 
