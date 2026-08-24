@@ -13,6 +13,8 @@ public sealed class OsuApiClient :
     IPlayerTopScoresProvider,
     IPlayerTopScoresProviderMetadata,
     IOsuBeatmapScoreProvider,
+    IOsuUserProfileProvider,
+    IOsuScoreReplayProvider,
     IOsuRateLimitSource,
     IDisposable
 {
@@ -496,7 +498,46 @@ public sealed class OsuApiClient :
             Uri.TryCreate(coverUrl, UriKind.Absolute, out var coverUri)
             && coverUri.Scheme == Uri.UriSchemeHttps
                 ? coverUri.AbsoluteUri
-                : null);
+                : null,
+            payload.Statistics?.Pp is >= 0 ? payload.Statistics.Pp : null,
+            payload.Statistics?.GlobalRank is > 0 ? payload.Statistics.GlobalRank : null);
+    }
+
+    public async Task<byte[]?> DownloadScoreReplayAsync(
+        long scoreId,
+        int maximumBytes,
+        CancellationToken cancellationToken = default)
+    {
+        if (scoreId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(scoreId));
+        if (maximumBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+
+        using var response = await SendApiAsync(
+            () =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, $"scores/{scoreId}/download");
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
+                return request;
+            },
+            cancellationToken);
+        if (response.Content.Headers.ContentLength is > 0 and var declaredLength
+            && declaredLength > maximumBytes)
+            throw new InvalidDataException("The official osu! replay exceeds the attachment size limit.");
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            int read = await input.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+                break;
+            if (output.Length + read > maximumBytes)
+                throw new InvalidDataException("The official osu! replay exceeds the attachment size limit.");
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+        return output.Length == 0 ? null : output.ToArray();
     }
 
     public void InvalidateToken()
@@ -816,7 +857,9 @@ public sealed class OsuApiClient :
         [property: JsonPropertyName("url")] string? Url);
 
     private sealed record UserStatisticsResponse(
-        [property: JsonPropertyName("country_rank")] long? CountryRank);
+        [property: JsonPropertyName("country_rank")] long? CountryRank,
+        [property: JsonPropertyName("pp")] double? Pp = null,
+        [property: JsonPropertyName("global_rank")] long? GlobalRank = null);
 
     private sealed record ScoreResponse
     {

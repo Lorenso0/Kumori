@@ -69,6 +69,21 @@ public sealed class ScoreWebhookServiceTests : IDisposable
     }
 
     [Fact]
+    public void OfficialProfile_OverlaysStalePlayCountOnlyTelemetry()
+    {
+        var stale = new ScoreAlertProfileChange(7161.67, 7161.67, 34_247, 34_247);
+
+        ScoreAlertProfileChange merged = Assert.IsType<ScoreAlertProfileChange>(
+            ScoreWebhookService.MergeOfficialProfileChange(
+                stale,
+                stale,
+                new OsuUserProfileStats(1_200, "NL", null, 7163.8, 34_211)));
+
+        Assert.InRange(Assert.IsType<double>(merged.PpGained), 2.129, 2.131);
+        Assert.Equal(36, merged.RanksGained);
+    }
+
+    [Fact]
     public void Payload_FormatsPbCardAndDisablesMentions()
     {
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(
@@ -171,6 +186,67 @@ public sealed class ScoreWebhookServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task MissingLocalCapture_DownloadsNamedOfficialReplayFallback()
+    {
+        byte[] expected = Encoding.UTF8.GetBytes("official replay bytes");
+        ScoreWebhookService service = CreateService(
+            new HttpClient(new CaptureHandler()),
+            new OfficialReplayProvider(expected));
+        var delivery = new ScoreWebhookDelivery(
+            1,
+            99,
+            "Crow",
+            "confirmed",
+            0,
+            0,
+            0,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            33,
+            7_339_235_691,
+            DateTimeOffset.UtcNow.AddMinutes(1),
+            null);
+
+        ScoreWebhookService.ReplayAttachment replay = Assert.IsType<ScoreWebhookService.ReplayAttachment>(
+            await service.TryDownloadOfficialReplayAsync(delivery, Attempt(), CancellationToken.None));
+        try
+        {
+            Assert.Equal(expected, await File.ReadAllBytesAsync(replay.Path));
+            Assert.Equal("Crow - Yellow [Insane].osr", replay.Name);
+        }
+        finally
+        {
+            File.Delete(replay.Path);
+        }
+    }
+
+    [Fact]
+    public void OfficialReplayFrames_FillMissingMovementAndKeyCounts()
+    {
+        MovementSample[] samples =
+        [
+            new() { MonotonicMs = 0, Buttons = 0 },
+            new() { MonotonicMs = 100, Buttons = 0x10 },
+            new() { MonotonicMs = 150, Buttons = 0x10 },
+            new() { MonotonicMs = 200, Buttons = 0 },
+            new() { MonotonicMs = 300, Buttons = 0x20 },
+            new() { MonotonicMs = 350, Buttons = 0x30 },
+            new() { MonotonicMs = 400, Buttons = 0 },
+        ];
+
+        InputSummary input = ScoreWebhookService.SummarizeReplayInput(samples);
+
+        Assert.Equal(2, input.Key1Presses);
+        Assert.Equal(1, input.Key2Presses);
+        Assert.Equal(2, input.Alternations);
+        Assert.Equal(1, input.SimultaneousPresses);
+        Assert.Equal(150, input.Key1HoldMs);
+        Assert.Equal(100, input.Key2HoldMs);
+        Assert.Equal(3, input.PeakKps);
+        Assert.Equal(7.5, input.AverageKps);
+    }
+
+    [Fact]
     public async Task TestAlert_ExportsExtensionlessLazerBeatmapAsValidCompactReplay()
     {
         string database = Path.Combine(directory.FullName, "lazer-test.sqlite3");
@@ -256,7 +332,9 @@ public sealed class ScoreWebhookServiceTests : IDisposable
         Assert.Contains("Lorenzo - Yellow [Insane].kumori", handler.Bodies[1]);
     }
 
-    private ScoreWebhookService CreateService(HttpClient http)
+    private ScoreWebhookService CreateService(
+        HttpClient http,
+        IOsuBeatmapScoreProvider? scoreProvider = null)
     {
         string database = Path.Combine(directory.FullName, "tracking.sqlite3");
         var factory = new SqliteConnectionFactory(database, readOnly: false);
@@ -274,7 +352,7 @@ public sealed class ScoreWebhookServiceTests : IDisposable
                 new MovementRepository(factory),
                 new SessionRepository(factory),
                 Path.Combine(directory.FullName, "imports.sqlite3")),
-            new NullScoreProvider(),
+            scoreProvider ?? new NullScoreProvider(),
             () => null,
             http);
     }
@@ -357,6 +435,32 @@ public sealed class ScoreWebhookServiceTests : IDisposable
             int limit,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<OsuBeatmapUserScore>>([]);
+    }
+
+    private sealed class OfficialReplayProvider(byte[] replay) :
+        IOsuBeatmapScoreProvider,
+        IOsuScoreReplayProvider
+    {
+        public Task<OsuBeatmapUserScore?> GetBeatmapUserScoreAsync(
+            long beatmapId,
+            long userId,
+            CancellationToken cancellationToken = default) => Task.FromResult<OsuBeatmapUserScore?>(null);
+
+        public Task<IReadOnlyList<OsuBeatmapUserScore>> GetUserBestScoresAsync(
+            long userId,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OsuBeatmapUserScore>>([]);
+
+        public Task<byte[]?> DownloadScoreReplayAsync(
+            long scoreId,
+            int maximumBytes,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(7_339_235_691, scoreId);
+            Assert.Equal(10 * 1024 * 1024, maximumBytes);
+            return Task.FromResult<byte[]?>(replay);
+        }
     }
 
     private sealed class CaptureHandler : HttpMessageHandler

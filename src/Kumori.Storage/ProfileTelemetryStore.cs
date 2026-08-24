@@ -100,15 +100,38 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
                 : ProfileReading.From(profile, snapshot.WallTime, previous?.CountryRank);
 
             // A profile update is attributed to the oldest completed attempt
-            // awaiting an update for this same account. Never cross accounts.
+            // awaiting the matching play-count increment for this same account.
+            // This distinguishes rapid consecutive results while PP/rank settle.
             var pending = _pendingResults
-                .OrderBy(pair => pair.Key)
-                .FirstOrDefault(pair => pair.Value.PlayerId == current.PlayerId);
+                .Where(pair => pair.Value.PlayerId == current.PlayerId)
+                .OrderBy(pair => ProfileReading.MatchesNextPlayCount(pair.Value, current) ? 0 : 1)
+                .ThenBy(pair => pair.Key)
+                .FirstOrDefault();
 
-            (long AttemptId, ProfileReading Baseline)? pendingResult =
+            (long AttemptId, ProfileReading Baseline)? pendingCandidate =
                 _pendingProfileWrites.TryGetValue(current.PlayerId, out var existingWrite)
                     ? existingWrite.Pending ?? (pending.Value is null ? null : (pending.Key, pending.Value))
                     : pending.Value is null ? null : (pending.Key, pending.Value);
+            // Once a newer play-count has an exact pending attempt, older no-gain
+            // results can no longer receive a distinct profile update. Retire them
+            // so long sessions do not retain one entry for every no-gain play.
+            foreach (long obsoleteAttemptId in _pendingResults
+                         .Where(pair => pair.Value.PlayerId == current.PlayerId
+                                        && pair.Key != pendingCandidate?.AttemptId
+                                        && ProfileReading.IsPastExpectedPlayCount(pair.Value, current))
+                         .Select(pair => pair.Key)
+                         .ToArray())
+            {
+                _pendingResults.Remove(obsoleteAttemptId);
+            }
+            // osu! commonly publishes the play-count increment before weighted
+            // PP and rank settle. Do not consume the attempt on that intermediate
+            // packet or the score card will permanently record "No change".
+            (long AttemptId, ProfileReading Baseline)? pendingResult =
+                pendingCandidate is { } candidate
+                && ProfileReading.HasProgressionChange(candidate.Baseline, current)
+                    ? candidate
+                    : null;
             if (_deferPersistence is null)
             {
                 PersistUpdate(current, pendingResult, CancellationToken.None);
@@ -121,9 +144,9 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
                     schedulePlayerId = current.PlayerId;
             }
             _latest[current.PlayerId] = current;
-            if (_deferPersistence is null && pending.Value is not null)
+            if (_deferPersistence is null && pendingResult is { } completed)
             {
-                _pendingResults.Remove(pending.Key);
+                _pendingResults.Remove(completed.AttemptId);
             }
         }
         if (schedulePlayerId is { } playerId)
@@ -285,12 +308,7 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
                 return;
             }
 
-            // One update cannot be reliably assigned to multiple rapid results.
-            // Preserve the first pending result until its profile update arrives.
-            if (!_pendingResults.Values.Any(value => value.PlayerId == baseline.PlayerId))
-            {
-                _pendingResults[attemptId] = baseline;
-            }
+            _pendingResults[attemptId] = baseline;
         }
     }
 
@@ -535,6 +553,19 @@ public sealed class ProfileTelemetryStore : IProfileTelemetrySink
             && RankedScore == other.RankedScore
             && CountryRank == other.CountryRank
             && string.Equals(CountryCode, other.CountryCode, StringComparison.Ordinal);
+
+        public static bool HasProgressionChange(ProfileReading baseline, ProfileReading current) =>
+            baseline.TotalPp != current.TotalPp
+            || baseline.GlobalRank != current.GlobalRank;
+
+        public static bool MatchesNextPlayCount(ProfileReading baseline, ProfileReading current) =>
+            baseline.PlayCount is { } oldCount
+            && current.PlayCount == oldCount + 1;
+
+        public static bool IsPastExpectedPlayCount(ProfileReading baseline, ProfileReading current) =>
+            baseline.PlayCount is { } oldCount
+            && current.PlayCount is { } currentCount
+            && currentCount > oldCount + 1;
 
         public string CreateFingerprint() => JsonSerializer.Serialize(new
         {

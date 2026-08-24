@@ -30,6 +30,42 @@ public sealed class MovementRepository
     public MovementMetadata? GetMetadata(long attemptId)
         => GetMetadata(attemptId, CancellationToken.None);
 
+    public void ReplaceWithOfficialReplay(
+        long attemptId,
+        IReadOnlyList<MovementSample> samples,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(attemptId);
+        ArgumentNullException.ThrowIfNull(samples);
+        if (samples.Count is <= 1 or > MaxSamplesPerAttempt)
+            throw new InvalidDataException("Replay movement sample count is outside the supported range.");
+
+        var capture = new MovementCaptureStore(_factory);
+        capture.Start(attemptId);
+        const int persistenceChunkSize = 25_000;
+        for (int offset = 0; offset < samples.Count; offset += persistenceChunkSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int count = Math.Min(persistenceChunkSize, samples.Count - offset);
+            if (samples is MovementSample[] array)
+            {
+                capture.AddSamples(new ArraySegment<MovementSample>(array, offset, count));
+            }
+            else
+            {
+                var chunk = new MovementSample[count];
+                for (int index = 0; index < count; index++)
+                    chunk[index] = samples[offset + index];
+                capture.AddSamples(chunk);
+            }
+        }
+        capture.Complete(
+            droppedSamples: 0,
+            "official_replay",
+            "{\"source\":\"official_replay\",\"recovered\":true}",
+            cancellationToken);
+    }
+
     public MovementMetadata? GetMetadata(long attemptId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

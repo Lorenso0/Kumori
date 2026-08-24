@@ -121,6 +121,21 @@ public interface IOsuBeatmapScoreProvider
         CancellationToken cancellationToken = default);
 }
 
+public interface IOsuUserProfileProvider
+{
+    Task<OsuUserProfileStats> GetUserProfileStatsAsync(
+        long userId,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IOsuScoreReplayProvider
+{
+    Task<byte[]?> DownloadScoreReplayAsync(
+        long scoreId,
+        int maximumBytes,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IFarmFinderRepository
 {
     Task InitializeAsync(CancellationToken cancellationToken = default);

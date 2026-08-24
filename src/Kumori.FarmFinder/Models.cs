@@ -522,7 +522,9 @@ public sealed record OsuApiCredentials(long ClientId, string ClientSecret)
 public sealed record OsuUserProfileStats(
     long? CountryRank,
     string? CountryCode,
-    string? CoverUrl = null);
+    string? CoverUrl = null,
+    double? TotalPp = null,
+    long? GlobalRank = null);
 
 public sealed record OsuBeatmapUserScore(
     int Position,

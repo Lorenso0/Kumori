@@ -103,7 +103,7 @@ public sealed class OsuApiClientTests
     }
 
     [Fact]
-    public async Task UserProfile_ReturnsOfficialCountryRankAndCountryCode()
+    public async Task UserProfile_ReturnsOfficialRanksPpCountryAndCover()
     {
         using var client = CreateClient(new StubHandler(request =>
         {
@@ -112,15 +112,39 @@ public sealed class OsuApiClientTests
             Assert.Equal("/api/v2/users/4214858/osu", request.RequestUri.AbsolutePath);
             Assert.Contains("key=id", request.RequestUri.Query);
             return Task.FromResult(Json("""
-                {"country_code":"nl","cover":{"url":"https://assets.ppy.sh/profile-cover.jpeg"},"statistics":{"country_rank":561}}
+                {"country_code":"nl","cover":{"url":"https://assets.ppy.sh/profile-cover.jpeg"},
+                 "statistics":{"country_rank":561,"global_rank":34211,"pp":7163.8}}
                 """));
         }));
 
         var profile = await client.GetUserProfileStatsAsync(4_214_858);
 
         Assert.Equal(561, profile.CountryRank);
+        Assert.Equal(34_211, profile.GlobalRank);
+        Assert.Equal(7163.8, profile.TotalPp);
         Assert.Equal("NL", profile.CountryCode);
         Assert.Equal("https://assets.ppy.sh/profile-cover.jpeg", profile.CoverUrl);
+    }
+
+    [Fact]
+    public async Task ScoreReplay_DownloadsOfficialBytesAndEnforcesLimit()
+    {
+        byte[] replay = Encoding.UTF8.GetBytes("official replay bytes");
+        using var client = CreateClient(new StubHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/oauth/token")
+                return Task.FromResult(Json("""{"access_token":"token","expires_in":3600}"""));
+            Assert.Equal("/api/v2/scores/7339235691/download", request.RequestUri.AbsolutePath);
+            Assert.Contains(request.Headers.Accept, value => value.MediaType == "application/octet-stream");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(replay),
+            });
+        }));
+
+        Assert.Equal(replay, await client.DownloadScoreReplayAsync(7_339_235_691, 1024));
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            client.DownloadScoreReplayAsync(7_339_235_691, 4));
     }
 
     [Fact]

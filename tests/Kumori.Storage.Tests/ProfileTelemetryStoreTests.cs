@@ -90,6 +90,72 @@ public sealed class ProfileTelemetryStoreTests : IDisposable
     }
 
     [Fact]
+    public void PlayCountOnlyUpdate_DoesNotConsumePendingPpAndRankChange()
+    {
+        using (var con = new SqliteConnection($"Data Source={_path}"))
+        {
+            con.Open();
+            using var command = con.CreateCommand();
+            command.CommandText = "CREATE TABLE attempts(id INTEGER PRIMARY KEY); INSERT INTO attempts VALUES(1);";
+            command.ExecuteNonQuery();
+        }
+
+        var store = new ProfileTelemetryStore(new SqliteConnectionFactory(_path, readOnly: false));
+        store.Ingest(Snapshot(1, "Crow", 7161.67, 34_247, 91_489));
+        store.BeginAttempt(1);
+        store.CompleteAttempt(1, "completed");
+
+        store.Ingest(Snapshot(1, "Crow", 7161.67, 34_247, 91_490));
+        using (var verifyIntermediate = new SqliteConnection($"Data Source={_path}"))
+        {
+            verifyIntermediate.Open();
+            using var query = verifyIntermediate.CreateCommand();
+            query.CommandText = "SELECT COUNT(*) FROM attempt_profile_changes";
+            Assert.Equal(0L, query.ExecuteScalar());
+        }
+
+        store.Ingest(Snapshot(1, "Crow", 7163.8, 34_211, 91_490));
+        using var verify = new SqliteConnection($"Data Source={_path}");
+        verify.Open();
+        using var change = verify.CreateCommand();
+        change.CommandText = "SELECT old_total_pp, new_total_pp, old_global_rank, new_global_rank FROM attempt_profile_changes WHERE attempt_id=1";
+        using var reader = change.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(7161.67, reader.GetDouble(0));
+        Assert.Equal(7163.8, reader.GetDouble(1));
+        Assert.Equal(34_247, reader.GetInt64(2));
+        Assert.Equal(34_211, reader.GetInt64(3));
+    }
+
+    [Fact]
+    public void ConsecutivePlay_UsesMatchingPlayCountInsteadOfOlderNoGainResult()
+    {
+        using (var con = new SqliteConnection($"Data Source={_path}"))
+        {
+            con.Open();
+            using var command = con.CreateCommand();
+            command.CommandText = "CREATE TABLE attempts(id INTEGER PRIMARY KEY); INSERT INTO attempts VALUES(1), (2);";
+            command.ExecuteNonQuery();
+        }
+
+        var store = new ProfileTelemetryStore(new SqliteConnectionFactory(_path, readOnly: false));
+        store.Ingest(Snapshot(1, "Crow", 7161.67, 34_247, 91_489));
+        store.BeginAttempt(1);
+        store.CompleteAttempt(1, "completed");
+        store.Ingest(Snapshot(1, "Crow", 7161.67, 34_247, 91_490));
+
+        store.BeginAttempt(2);
+        store.CompleteAttempt(2, "completed");
+        store.Ingest(Snapshot(1, "Crow", 7163.8, 34_211, 91_491));
+
+        using var verify = new SqliteConnection($"Data Source={_path}");
+        verify.Open();
+        using var change = verify.CreateCommand();
+        change.CommandText = "SELECT attempt_id FROM attempt_profile_changes";
+        Assert.Equal(2L, change.ExecuteScalar());
+    }
+
+    [Fact]
     public void CountryRank_IsMigratedAndStoredWithLatestProfileSnapshot()
     {
         var store = new ProfileTelemetryStore(new SqliteConnectionFactory(_path, readOnly: false));

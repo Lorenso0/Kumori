@@ -177,6 +177,7 @@ public sealed class ScoreWebhookService
                 rank,
                 scoreId,
                 profile?.PlayerId ?? 0,
+                deliveries.GetProfileChange(attempt.Summary.Id),
                 replayAttached: true,
                 isTest: true,
                 cancellationToken);
@@ -266,11 +267,6 @@ public sealed class ScoreWebhookService
             MovementMetadata? metadata = await Task.Run(
                 () => movement.GetMetadata(delivery.AttemptId, cancellationToken),
                 cancellationToken);
-            if (metadata is null && delivery.ReplayDeadlineAt is { } deadline && now < deadline)
-            {
-                deliveries.PostponeDelivery(delivery.AttemptId, now.AddSeconds(30), "waiting_for_replay");
-                return;
-            }
             if (metadata is not null)
             {
                 try
@@ -317,7 +313,52 @@ public sealed class ScoreWebhookService
                 }
             }
 
+            int recordedPresses = (attempt.Input?.Key1Presses ?? attempt.Key1Count)
+                + (attempt.Input?.Key2Presses ?? attempt.Key2Count);
+            if (attachmentPath is null || recordedPresses == 0)
+            {
+                ReplayAttachment? officialReplay = await TryDownloadOfficialReplayAsync(
+                    delivery,
+                    attempt,
+                    cancellationToken);
+                if (officialReplay is not null)
+                {
+                    bool useAsAttachment = attachmentPath is null;
+                    if (useAsAttachment)
+                    {
+                        attachmentPath = officialReplay.Path;
+                        attachmentName = officialReplay.Name;
+                        replayStatus = "official";
+                    }
+                    try
+                    {
+                        attempt = await EnrichAttemptFromOfficialReplayAsync(
+                            attempt,
+                            officialReplay.Path,
+                            cancellationToken);
+                    }
+                    finally
+                    {
+                        if (!useAsAttachment)
+                        {
+                            try { File.Delete(officialReplay.Path); } catch { }
+                        }
+                    }
+                }
+            }
+            if (attachmentPath is null
+                && metadata is null
+                && delivery.ReplayDeadlineAt is { } deadline
+                && now < deadline)
+            {
+                deliveries.PostponeDelivery(delivery.AttemptId, now.AddSeconds(15), "waiting_for_replay");
+                return;
+            }
+
             string webhookUrl = settings.Current.DailyWebhook.ScoreAlertsWebhookUrl;
+            ScoreAlertProfileChange? profileChange = await ResolveProfileChangeAsync(
+                delivery,
+                cancellationToken);
             await SendScoreCardAsync(
                 webhookUrl,
                 attempt,
@@ -325,7 +366,8 @@ public sealed class ScoreWebhookService
                 delivery.ConfirmedRank.Value,
                 delivery.ConfirmedScoreId.Value,
                 delivery.PlayerId,
-                replayStatus == "attached",
+                profileChange,
+                replayAttached: attachmentPath is not null,
                 isTest: false,
                 cancellationToken);
             if (attachmentPath is not null && attachmentName is not null)
@@ -519,6 +561,7 @@ public sealed class ScoreWebhookService
         int? rank,
         long scoreId,
         long playerId,
+        ScoreAlertProfileChange? profileChange,
         bool replayAttached,
         bool isTest,
         CancellationToken cancellationToken)
@@ -561,7 +604,7 @@ public sealed class ScoreWebhookService
                     playerName,
                     rank,
                     scoreId,
-                    deliveries.GetProfileChange(attempt.Summary.Id),
+                    profileChange,
                     replayAttached,
                     isTest,
                     ResolveScoreCardArtwork(attempt),
@@ -611,6 +654,259 @@ public sealed class ScoreWebhookService
             {
                 try { File.Delete(avatarPath); } catch { }
             }
+        }
+    }
+
+    private async Task<ScoreAlertProfileChange?> ResolveProfileChangeAsync(
+        ScoreWebhookDelivery delivery,
+        CancellationToken cancellationToken)
+    {
+        ScoreAlertProfileChange? stored = deliveries.GetProfileChange(delivery.AttemptId);
+        ScoreAlertProfileChange? baseline = deliveries.GetProfileBaseline(
+            delivery.AttemptId,
+            delivery.PlayerId) ?? stored;
+        if (osuApi is not IOsuUserProfileProvider profiles)
+            return stored;
+
+        try
+        {
+            OsuUserProfileStats current = await profiles.GetUserProfileStatsAsync(
+                delivery.PlayerId,
+                cancellationToken);
+            return MergeOfficialProfileChange(baseline, stored, current);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                                          && exception is HttpRequestException
+                                              or TaskCanceledException
+                                              or OsuApiAuthenticationException
+                                              or OsuApiRateLimitException
+                                              or InvalidDataException)
+        {
+            Log.Debug(exception, "Could not refresh official profile totals for score card");
+            return stored;
+        }
+    }
+
+    internal static ScoreAlertProfileChange? MergeOfficialProfileChange(
+        ScoreAlertProfileChange? baseline,
+        ScoreAlertProfileChange? stored,
+        OsuUserProfileStats current)
+    {
+        double? oldPp = baseline?.OldTotalPp ?? stored?.OldTotalPp;
+        long? oldRank = baseline?.OldGlobalRank ?? stored?.OldGlobalRank;
+        double? newPp = current.TotalPp ?? stored?.NewTotalPp;
+        long? newRank = current.GlobalRank ?? stored?.NewGlobalRank;
+        return oldPp is null && oldRank is null && newPp is null && newRank is null
+            ? stored
+            : new ScoreAlertProfileChange(oldPp, newPp, oldRank, newRank);
+    }
+
+    internal async Task<ReplayAttachment?> TryDownloadOfficialReplayAsync(
+        ScoreWebhookDelivery delivery,
+        AttemptDetails attempt,
+        CancellationToken cancellationToken)
+    {
+        if (osuApi is not IOsuScoreReplayProvider replays
+            || delivery.ConfirmedScoreId is not > 0)
+            return null;
+        try
+        {
+            byte[]? replay = await replays.DownloadScoreReplayAsync(
+                delivery.ConfirmedScoreId.Value,
+                checked((int)DiscordAttachmentLimit),
+                cancellationToken);
+            if (replay is not { Length: > 0 })
+                return null;
+            string path = Path.Combine(
+                Path.GetTempPath(),
+                $"kumori-official-score-{Guid.NewGuid():N}.osr");
+            await File.WriteAllBytesAsync(path, replay, cancellationToken);
+            return new ReplayAttachment(
+                path,
+                SafeReplayFileName(delivery.PlayerName, attempt, ".osr"));
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                                          && exception is HttpRequestException
+                                              or TaskCanceledException
+                                              or OsuApiAuthenticationException
+                                              or OsuApiRateLimitException
+                                              or IOException
+                                              or InvalidDataException)
+        {
+            Log.Debug(exception, "Could not download official osu! replay for score {ScoreId}", delivery.ConfirmedScoreId);
+            return null;
+        }
+    }
+
+    private async Task<AttemptDetails> EnrichAttemptFromOfficialReplayAsync(
+        AttemptDetails attempt,
+        string replayPath,
+        CancellationToken cancellationToken)
+    {
+        int existingPresses = (attempt.Input?.Key1Presses ?? attempt.Key1Count)
+            + (attempt.Input?.Key2Presses ?? attempt.Key2Count);
+        if (existingPresses > 0
+            || string.IsNullOrWhiteSpace(attempt.LocalBeatmapPath)
+            || !File.Exists(attempt.LocalBeatmapPath))
+            return attempt;
+
+        try
+        {
+            return await Task.Run(() =>
+            {
+                if (!StableReplayFrameRecoverySink.TryRead(
+                        replayPath,
+                        attempt.LocalBeatmapPath,
+                        checksum: null,
+                        out IReadOnlyList<MovementSample> samples,
+                        out _,
+                        cancellationToken))
+                    return attempt;
+
+                InputSummary input = SummarizeReplayInput(samples);
+                if (input.Key1Presses + input.Key2Presses == 0)
+                    return attempt;
+
+                try
+                {
+                    movement.ReplaceWithOfficialReplay(
+                        attempt.Summary.Id,
+                        samples,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                                                  && exception is IOException
+                                                      or UnauthorizedAccessException
+                                                      or InvalidDataException
+                                                      or InvalidOperationException
+                                                      or Microsoft.Data.Sqlite.SqliteException)
+                {
+                    // The card can still use the decoded in-memory summary even
+                    // if a concurrent replay recovery owns the SQLite write.
+                    Log.Debug(exception, "Could not persist official replay movement for attempt {AttemptId}", attempt.Summary.Id);
+                }
+
+                double durationMs = Math.Max(
+                    0,
+                    samples[^1].MonotonicMs - samples[0].MonotonicMs);
+                return attempt with
+                {
+                    Key1Count = input.Key1Presses,
+                    Key2Count = input.Key2Presses,
+                    Input = input,
+                    Movement = new MovementSummary
+                    {
+                        Available = true,
+                        Source = "official_replay",
+                        SampleCount = samples.Count,
+                        SampleRate = durationMs > 0 ? samples.Count * 1000d / durationMs : 0,
+                    },
+                };
+            }, cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                                          && exception is IOException
+                                              or UnauthorizedAccessException
+                                              or InvalidDataException
+                                              or InvalidOperationException)
+        {
+            Log.Debug(exception, "Could not read input from official replay attachment");
+            return attempt;
+        }
+    }
+
+    internal static InputSummary SummarizeReplayInput(IReadOnlyList<MovementSample> samples)
+    {
+        const int key1Button = 0x10;
+        const int key2Button = 0x20;
+        int key1Presses = 0;
+        int key2Presses = 0;
+        int alternations = 0;
+        int simultaneousPresses = 0;
+        int lastButtons = 0;
+        int lastPressedKey = 0;
+        double? key1DownAt = null;
+        double? key2DownAt = null;
+        double key1HoldMs = 0;
+        double key2HoldMs = 0;
+        var pressTimes = new List<double>();
+
+        foreach (MovementSample sample in samples)
+        {
+            double now = sample.MonotonicMs;
+            int buttons = sample.Buttons;
+            int pressed = buttons & ~lastButtons;
+            int released = lastButtons & ~buttons;
+            if ((pressed & key1Button) != 0)
+            {
+                ObservePress(1, buttons, now);
+                key1DownAt = now;
+            }
+            if ((pressed & key2Button) != 0)
+            {
+                ObservePress(2, buttons, now);
+                key2DownAt = now;
+            }
+            if ((released & key1Button) != 0 && key1DownAt is { } key1Start)
+            {
+                key1HoldMs += Math.Max(0, now - key1Start);
+                key1DownAt = null;
+            }
+            if ((released & key2Button) != 0 && key2DownAt is { } key2Start)
+            {
+                key2HoldMs += Math.Max(0, now - key2Start);
+                key2DownAt = null;
+            }
+            lastButtons = buttons;
+        }
+
+        double? lastTime = samples.Count > 0 ? samples[^1].MonotonicMs : null;
+        if (key1DownAt is { } unfinishedKey1 && lastTime is { } end1)
+            key1HoldMs += Math.Max(0, end1 - unfinishedKey1);
+        if (key2DownAt is { } unfinishedKey2 && lastTime is { } end2)
+            key2HoldMs += Math.Max(0, end2 - unfinishedKey2);
+
+        double durationMs = samples.Count > 1
+            ? Math.Max(0, samples[^1].MonotonicMs - samples[0].MonotonicMs)
+            : 0;
+        int totalPresses = key1Presses + key2Presses;
+        return new InputSummary
+        {
+            Key1Presses = key1Presses,
+            Key2Presses = key2Presses,
+            Alternations = alternations,
+            SimultaneousPresses = simultaneousPresses,
+            Key1HoldMs = key1HoldMs,
+            Key2HoldMs = key2HoldMs,
+            PeakKps = PeakKps(pressTimes),
+            AverageKps = durationMs > 0 ? totalPresses * 1000d / durationMs : 0,
+        };
+
+        void ObservePress(int key, int buttons, double time)
+        {
+            if (key == 1)
+                key1Presses++;
+            else
+                key2Presses++;
+            if (lastPressedKey != 0 && lastPressedKey != key)
+                alternations++;
+            lastPressedKey = key;
+            if ((buttons & (key1Button | key2Button)) == (key1Button | key2Button))
+                simultaneousPresses++;
+            pressTimes.Add(time);
+        }
+
+        static int PeakKps(IReadOnlyList<double> times)
+        {
+            int peak = 0;
+            int left = 0;
+            for (int right = 0; right < times.Count; right++)
+            {
+                while (left < right && times[right] - times[left] > 1000)
+                    left++;
+                peak = Math.Max(peak, right - left + 1);
+            }
+            return peak;
         }
     }
 
@@ -769,7 +1065,10 @@ public sealed class ScoreWebhookService
         ];
     }
 
-    private static string SafeReplayFileName(string playerName, AttemptDetails attempt)
+    private static string SafeReplayFileName(
+        string playerName,
+        AttemptDetails attempt,
+        string extension = PlaySharePackageService.FileExtension)
     {
         string raw = $"{playerName} - {attempt.Summary.Title} [{attempt.Summary.Difficulty}]";
         char[] invalid = Path.GetInvalidFileNameChars();
@@ -777,7 +1076,7 @@ public sealed class ScoreWebhookService
         safe = string.Join(" ", safe.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().TrimEnd('.');
         if (safe.Length > 160)
             safe = safe[..160].TrimEnd();
-        return safe + PlaySharePackageService.FileExtension;
+        return safe + extension;
     }
 
     private static string Escape(string value) => value
@@ -787,5 +1086,6 @@ public sealed class ScoreWebhookService
         .Replace("~", "\\~", StringComparison.Ordinal)
         .Replace("`", "\\`", StringComparison.Ordinal);
 
+    internal sealed record ReplayAttachment(string Path, string Name);
     private sealed class DiscordAttachmentRejectedException : Exception;
 }

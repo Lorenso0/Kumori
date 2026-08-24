@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.8.5",
+    "date": "2026-08-24",
+    "improvements": [
+      "Made top-play alerts deliver sooner and fall back to the official osu! replay when local capture is unavailable"
+    ],
+    "fixes": [
+      "Fixed delayed or missing replay attachments and restored movement and key-press data from official replays when local capture is empty",
+      "Fixed top-play cards showing stale PP and global rank changes when osu! publishes play count before profile progression settles"
+    ]
+  },
+  {
     "version": "0.8.4",
     "date": "2026-08-24",
     "fixes": [

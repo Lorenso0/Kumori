@@ -284,6 +284,41 @@ public class AttemptSqliteSinkTests : IDisposable
     }
 
     [Fact]
+    public void OfficialReplayRecovery_ReplacesEmptyCaptureAndRestoresInput()
+    {
+        var factory = new SqliteConnectionFactory(_dbPath, readOnly: false);
+        var sink = new AttemptSqliteSink(factory, (_, work) => work(CancellationToken.None));
+        sink.StartAttempt(new AttemptStart
+        {
+            Identity = "official-replay",
+            WallTime = 1_788_000_000,
+        });
+        long attemptId = Assert.IsType<long>(sink.CurrentAttemptId);
+        PersistStartedAttempt(sink, 1_788_000_003, identity: "official-replay");
+
+        var repository = new MovementRepository(factory);
+        repository.ReplaceWithOfficialReplay(
+            attemptId,
+            [
+                new MovementSample { MapTimeMs = 0, MonotonicMs = 0 },
+                new MovementSample { MapTimeMs = 10, MonotonicMs = 10, Buttons = 0x10 },
+                new MovementSample { MapTimeMs = 20, MonotonicMs = 20 },
+                new MovementSample { MapTimeMs = 30, MonotonicMs = 30, Buttons = 0x20 },
+                new MovementSample { MapTimeMs = 40, MonotonicMs = 40 },
+            ],
+            CancellationToken.None);
+
+        Assert.Equal("official_replay", repository.GetMetadata(attemptId)!.Source);
+        Assert.Equal(5, repository.GetSamples(attemptId).Count);
+        AttemptDetails details = Assert.IsType<AttemptDetails>(
+            new AttemptDetailsRepository(factory).GetDetails(attemptId));
+        Assert.Equal(1, details.Input!.Key1Presses);
+        Assert.Equal(1, details.Input.Key2Presses);
+        Assert.Equal(1, details.Key1Count);
+        Assert.Equal(1, details.Key2Count);
+    }
+
+    [Fact]
     public void MovementCaptureStore_PreservesExistingCaptureUntilReplacementCompletes()
     {
         var factory = new SqliteConnectionFactory(_dbPath, readOnly: false);

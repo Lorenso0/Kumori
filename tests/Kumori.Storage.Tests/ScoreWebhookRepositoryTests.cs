@@ -52,7 +52,7 @@ public sealed class ScoreWebhookRepositoryTests : IDisposable
             repository.GetNextDue(now.AddMinutes(3)));
         Assert.Equal("confirmed", confirmed.State);
         Assert.Equal(20, confirmed.ConfirmedRank);
-        Assert.Equal(now.AddMinutes(8), confirmed.ReplayDeadlineAt);
+        Assert.Equal(now.AddMinutes(4), confirmed.ReplayDeadlineAt);
         Assert.Null(repository.GetProfileChange(attemptId));
 
         using (SqliteConnection connection = factory.Open())
@@ -79,6 +79,10 @@ public sealed class ScoreWebhookRepositoryTests : IDisposable
             repository.GetProfileChange(attemptId));
         Assert.InRange(Assert.IsType<double>(change.PpGained), 8.289, 8.291);
         Assert.Equal(80, change.RanksGained);
+        ScoreAlertProfileChange baseline = Assert.IsType<ScoreAlertProfileChange>(
+            repository.GetProfileBaseline(attemptId, 99));
+        Assert.Equal(12_450.25, baseline.OldTotalPp);
+        Assert.Equal(25_500, baseline.OldGlobalRank);
 
         repository.MarkDelivered(attemptId, now.AddMinutes(4), "attached");
         Assert.Null(repository.GetNextDue(now.AddDays(1)));

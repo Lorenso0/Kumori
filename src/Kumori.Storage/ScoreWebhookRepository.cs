@@ -162,6 +162,58 @@ public sealed class ScoreWebhookRepository
             reader.IsDBNull(3) ? null : reader.GetInt64(3));
     }
 
+    public ScoreAlertProfileChange? GetProfileBaseline(long attemptId, long playerId)
+    {
+        if (!factory.DatabaseExists || attemptId <= 0 || playerId <= 0)
+            return null;
+        using var connection = factory.Open();
+        if (TableExists(connection, "attempt_profile_changes"))
+        {
+            using var recorded = connection.CreateCommand();
+            recorded.CommandText = """
+                SELECT old_total_pp, old_global_rank
+                FROM attempt_profile_changes
+                WHERE attempt_id = @attempt_id
+                """;
+            recorded.Parameters.AddWithValue("@attempt_id", attemptId);
+            using var reader = recorded.ExecuteReader();
+            if (reader.Read())
+            {
+                double? oldPp = reader.IsDBNull(0) ? null : reader.GetDouble(0);
+                long? oldRank = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+                if (oldPp is not null || oldRank is not null)
+                    return new ScoreAlertProfileChange(
+                        oldPp,
+                        null,
+                        oldRank,
+                        null);
+            }
+        }
+        if (!TableExists(connection, "profile_snapshots"))
+            return null;
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT p.total_pp, p.global_rank
+            FROM profile_snapshots p
+            JOIN attempts a ON a.id = @attempt_id
+            WHERE p.player_id = @player_id
+              AND julianday(p.captured_at) <= julianday(a.started_at)
+            ORDER BY julianday(p.captured_at) DESC, p.id DESC
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("@attempt_id", attemptId);
+        command.Parameters.AddWithValue("@player_id", playerId);
+        using var baselineReader = command.ExecuteReader();
+        if (!baselineReader.Read())
+            return null;
+        return new ScoreAlertProfileChange(
+            baselineReader.IsDBNull(0) ? null : baselineReader.GetDouble(0),
+            null,
+            baselineReader.IsDBNull(1) ? null : baselineReader.GetInt64(1),
+            null);
+    }
+
     public void ScheduleVerification(long attemptId, DateTimeOffset next, string? category = null)
         => Update(attemptId, """
             UPDATE score_webhook_deliveries
@@ -190,7 +242,7 @@ public sealed class ScoreWebhookRepository
                 replay_deadline_at = @replay_deadline,
                 next_attempt_at = @next, failure_category = NULL
             WHERE attempt_id = @attempt_id
-            """, now, null, rank, scoreId, now.AddMinutes(5));
+            """, now, null, rank, scoreId, now.AddMinutes(1));
 
     public void ScheduleDelivery(long attemptId, DateTimeOffset next, string? category)
         => Update(attemptId, """
