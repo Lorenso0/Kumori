@@ -653,7 +653,7 @@ public sealed class DailyProgressWebhookService
             fields.Add(Field(
                 "Most played map",
                 $"**{MapName(mostPlayed.Artist, mostPlayed.Title, mostPlayed.Difficulty)}**\n" +
-                Invariant($"{mostPlayed.Plays:N0} play{(mostPlayed.Plays == 1 ? "" : "s")}")));
+                Invariant($"{mostPlayed.Plays:N0} play{(mostPlayed.Plays == 1 ? "" : "s")} · {DisplayMods(mostPlayed.ModsKey)}")));
         }
 
         var titlePrefix = isTest ? "TEST · " : "";

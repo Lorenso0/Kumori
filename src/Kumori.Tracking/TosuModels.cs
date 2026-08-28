@@ -6,6 +6,17 @@ public enum OsuClientKind
     Unknown,
     Stable,
     Lazer,
+    Tachyon,
+}
+
+public static class OsuClientKindExtensions
+{
+    /// <summary>
+    /// Tachyon is osu!lazer's prerelease stream and uses the same telemetry,
+    /// replay-memory and Realm storage paths as the regular lazer stream.
+    /// </summary>
+    public static bool IsLazerFamily(this OsuClientKind clientKind) =>
+        clientKind is OsuClientKind.Lazer or OsuClientKind.Tachyon;
 }
 
 public sealed record TosuSnapshot

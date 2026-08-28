@@ -4,7 +4,7 @@ Kumori is a Windows companion for [osu!](https://osu.ppy.sh/) that keeps your pl
 
 ![A quick tour of the Kumori dashboard, performance, maps, and Replay Analyzer](docs/media/kumori-product-tour-1180x920.gif)
 
-Kumori works with both osu!stable and osu!lazer. It does not change your osu! installation, and your play history stays on your computer.
+Kumori works with osu!stable and both osu!lazer release streams (Lazer and Tachyon). It does not change your osu! installation, and your play history stays on your computer.
 
 ## What can Kumori do?
 

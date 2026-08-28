@@ -86,7 +86,7 @@ public class AnalyticsRepositoryTests : IDisposable
     }
 
     [Fact]
-    public void GetDailyProgress_PreservesConfirmedBpmTargetInModCombinations()
+    public void GetDailyProgress_RecognizesRulesetBpmWithoutAuthoritativeResultMods()
     {
         using (var con = new SqliteConnection($"Data Source={_dbPath}"))
         {
@@ -108,12 +108,12 @@ public class AnalyticsRepositoryTests : IDisposable
                     attempt_id INTEGER NOT NULL,
                     acronym TEXT NOT NULL,
                     settings_json TEXT NOT NULL);
-                INSERT INTO attempt_mods VALUES(3, 'BPM', '{"target_bpm":230}');
+                INSERT INTO attempt_mods VALUES(3, 'BPM', '{"target_bpm":230,"speed_change":1.28}');
                 CREATE TABLE attempt_context(
                     attempt_id INTEGER PRIMARY KEY,
                     beatmap_json TEXT,
                     score_json TEXT);
-                INSERT INTO attempt_context VALUES(3, NULL, '{"mods_authoritative_result":true}');
+                INSERT INTO attempt_context VALUES(3, NULL, '{"mods_authoritative_result":false}');
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -126,6 +126,11 @@ public class AnalyticsRepositoryTests : IDisposable
         Assert.Equal("HDDABPM", combination.ModsKey);
         Assert.Equal(230, combination.Bpm);
         Assert.Equal(1, combination.Plays);
+        Assert.Equal("HDDABPM", report.MostPlayedMap!.ModsKey);
+        Assert.Equal(230, report.MostPlayedMap.ModBpm);
+        Assert.True(report.BestPlay!.UsedBpmAdjust);
+        Assert.Equal(230, report.BestPlay.Bpm);
+        Assert.Equal(230 / 1.28, report.BestPlay.BaseBpm);
     }
 
     [Fact]
@@ -199,6 +204,8 @@ public class AnalyticsRepositoryTests : IDisposable
         Assert.Equal(200, report.MostPlayedMap.BeatmapSetId);
         Assert.Equal(5.8, report.MostPlayedMap.Stars);
         Assert.Equal(180, report.MostPlayedMap.Bpm);
+        Assert.Equal("HD,DA", report.MostPlayedMap.ModsKey);
+        Assert.Null(report.MostPlayedMap.ModBpm);
         Assert.Equal(120, report.BestPlay!.Pp);
         Assert.Equal(600, report.BestPlay.Combo);
         Assert.Equal(1200, report.BestPlay.MaxCombo);

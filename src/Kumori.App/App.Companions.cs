@@ -251,7 +251,7 @@ public partial class App
     {
         lock (_osuCompanionGate)
         {
-            if (clientKind == OsuClientKind.Lazer && !_lazerReplayCaptureStarted && _lazerReplayFrames is not null)
+            if (clientKind.IsLazerFamily() && !_lazerReplayCaptureStarted && _lazerReplayFrames is not null)
             {
                 _lazerReplayCaptureStarted = true;
                 _lazerReplayFrames.Start();

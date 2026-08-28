@@ -37,8 +37,31 @@ public sealed partial class TosuClient
         {
             return OsuClientKind.Stable;
         }
+        if (client?.Equals("tachyon", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return OsuClientKind.Tachyon;
+        }
         if (client?.Equals("lazer", StringComparison.OrdinalIgnoreCase) == true)
         {
+            // tosu intentionally exposes every 64-bit osu! build as "lazer".
+            // Its v2 settings payload carries the actual ppy release stream:
+            // 0 = Lazer, 1 = Tachyon. Keep accepting named/suffixed variants
+            // as well so recorded packets and future tosu output remain useful.
+            if (root.TryGetProperty("settings", out var settings)
+                && settings.ValueKind == JsonValueKind.Object
+                && settings.TryGetProperty("client", out var clientSettings)
+                && clientSettings.ValueKind == JsonValueKind.Object)
+            {
+                var branch = GetString(clientSettings, "branch");
+                var branchNumber = GetLong(clientSettings, "branch");
+                var version = GetString(clientSettings, "version");
+                if (branch?.Equals("tachyon", StringComparison.OrdinalIgnoreCase) == true
+                    || branchNumber == 1
+                    || version?.EndsWith("-tachyon", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return OsuClientKind.Tachyon;
+                }
+            }
             return OsuClientKind.Lazer;
         }
         return OsuClientKind.Unknown;
@@ -403,7 +426,7 @@ public sealed partial class TosuClient
         bool continuousAttemptTelemetry,
         bool authoritativeResult)
     {
-        if (clientKind != OsuClientKind.Lazer
+        if (!clientKind.IsLazerFamily()
             || !continuousAttemptTelemetry
             || authoritativeResult)
             return parsedMods;

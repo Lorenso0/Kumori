@@ -76,7 +76,8 @@ public sealed class DailyProgressWebhookServiceTests : IDisposable
                                          && field.GetProperty("value").GetString() == "#53,254 → #53,509 (-255)");
         Assert.Contains(fields, field => field.GetProperty("name").GetString() == "🇳🇱 Country rank"
                                          && field.GetProperty("value").GetString() == "#581 → #561 (+20)");
-        Assert.Contains(fields, field => field.GetProperty("name").GetString() == "Most played map");
+        Assert.Contains(fields, field => field.GetProperty("name").GetString() == "Most played map"
+                                         && field.GetProperty("value").GetString()!.Contains("HD,BPM"));
         Assert.Contains(fields, field => field.GetProperty("name").GetString() == "Playtime"
                                          && field.GetProperty("value").GetString() == "3h 22m playtime · K1 15,000 · K2 15,105 · 30,105 total");
         Assert.Contains(fields, field => field.GetProperty("name").GetString() == "Daily results"
@@ -240,7 +241,7 @@ public sealed class DailyProgressWebhookServiceTests : IDisposable
             AdjustedCs = 4,
             BaseBpm = 158,
             Bpm = longMapNames ? 237 : 270,
-            UsedBpmAdjust = false,
+            UsedBpmAdjust = longMapNames,
         },
         MostPlayedMap = new DailyMapHighlight
         {
@@ -254,6 +255,8 @@ public sealed class DailyProgressWebhookServiceTests : IDisposable
             Od = 8.5,
             Cs = 4,
             Bpm = 185,
+            ModsKey = "HD,BPM",
+            ModBpm = 230,
         },
         MostUsedModCombinations =
         [

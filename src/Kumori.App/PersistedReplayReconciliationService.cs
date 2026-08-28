@@ -47,7 +47,8 @@ internal sealed class PersistedReplayReconciliationService
             {
                 if (candidate.ClientKind.Equals("stable", StringComparison.OrdinalIgnoreCase))
                     ReconcileStable(candidate, cancellationToken);
-                else if (candidate.ClientKind.Equals("lazer", StringComparison.OrdinalIgnoreCase))
+                else if (candidate.ClientKind.Equals("lazer", StringComparison.OrdinalIgnoreCase)
+                         || candidate.ClientKind.Equals("tachyon", StringComparison.OrdinalIgnoreCase))
                     ReconcileLazer(candidate, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

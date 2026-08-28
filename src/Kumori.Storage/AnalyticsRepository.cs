@@ -231,18 +231,18 @@ public sealed class AnalyticsRepository
         {
             string modsKey = reader.GetString(0);
             double? baseBpm = reader.IsDBNull(2) ? null : reader.GetDouble(2);
-            double? targetBpm = ReadTargetBpm(reader.IsDBNull(3) ? null : reader.GetString(3));
-            bool activeBpmAdjust = targetBpm is > 0
-                                   && baseBpm is > 0
-                                   && Math.Abs(targetBpm.Value - baseBpm.Value) > 0.05
-                                   && HasAuthoritativeResultMods(reader.IsDBNull(4) ? null : reader.GetString(4));
+            DailyBpmAdjust bpmAdjust = ReadBpmAdjust(reader.IsDBNull(3) ? null : reader.GetString(3));
+            bool activeBpmAdjust = IsActiveBpmAdjust(
+                bpmAdjust,
+                baseBpm,
+                reader.IsDBNull(4) ? null : reader.GetString(4));
             if (!activeBpmAdjust)
                 modsKey = RemoveBpmMarker(modsKey);
 
             long attemptId = reader.GetInt64(1);
             var key = new DailyModCombinationKey(
                 modsKey,
-                activeBpmAdjust ? targetBpm : null);
+                activeBpmAdjust ? bpmAdjust.TargetBpm : null);
             if (totals.TryGetValue(key, out var current))
                 totals[key] = (current.Plays + 1, Math.Max(current.LatestAttempt, attemptId));
             else
@@ -294,6 +294,7 @@ public sealed class AnalyticsRepository
         bool hasOd = HasColumn(con, "beatmaps", "od");
         bool hasCs = HasColumn(con, "beatmaps", "cs");
         bool hasBpm = HasColumn(con, "beatmaps", "bpm");
+        bool hasModsKey = HasColumn(con, "attempts", "mods_key");
         using var command = con.CreateCommand();
         command.CommandText = $"""
             SELECT COALESCE(b.artist, ''), COALESCE(b.title, ''),
@@ -304,7 +305,8 @@ public sealed class AnalyticsRepository
                    {(hasAr ? "b.ar" : "NULL")},
                    {(hasOd ? "b.od" : "NULL")},
                    {(hasCs ? "b.cs" : "NULL")},
-                   {(hasBpm ? "b.bpm" : "NULL")}
+                   {(hasBpm ? "b.bpm" : "NULL")},
+                   b.id
             FROM attempts a
             JOIN beatmaps b ON b.id = a.beatmap_id
             WHERE {dayExpression} = @day
@@ -314,22 +316,97 @@ public sealed class AnalyticsRepository
             """;
         command.Parameters.AddWithValue("@day", day);
         using var reader = command.ExecuteReader();
-        return reader.Read()
-            ? new DailyMapHighlight
-            {
-                Artist = reader.GetString(0),
-                Title = reader.GetString(1),
-                Difficulty = reader.GetString(2),
-                Plays = reader.GetInt64(3),
-                BeatmapId = reader.GetInt64(4),
-                BeatmapSetId = reader.GetInt64(5),
-                Stars = reader.IsDBNull(6) ? null : reader.GetDouble(6),
-                Ar = reader.IsDBNull(7) ? null : reader.GetDouble(7),
-                Od = reader.IsDBNull(8) ? null : reader.GetDouble(8),
-                Cs = reader.IsDBNull(9) ? null : reader.GetDouble(9),
-                Bpm = reader.IsDBNull(10) ? null : reader.GetDouble(10),
-            }
+        if (!reader.Read())
+            return null;
+
+        var map = new DailyMapHighlight
+        {
+            Artist = reader.GetString(0),
+            Title = reader.GetString(1),
+            Difficulty = reader.GetString(2),
+            Plays = reader.GetInt64(3),
+            BeatmapId = reader.GetInt64(4),
+            BeatmapSetId = reader.GetInt64(5),
+            Stars = reader.IsDBNull(6) ? null : reader.GetDouble(6),
+            Ar = reader.IsDBNull(7) ? null : reader.GetDouble(7),
+            Od = reader.IsDBNull(8) ? null : reader.GetDouble(8),
+            Cs = reader.IsDBNull(9) ? null : reader.GetDouble(9),
+            Bpm = reader.IsDBNull(10) ? null : reader.GetDouble(10),
+        };
+        long storedBeatmapId = reader.GetInt64(11);
+        reader.Close();
+
+        DailyModCombinationUsage? mods = hasModsKey
+            ? ReadMostPlayedMapMods(con, dayExpression, day, storedBeatmapId, map.Bpm)
             : null;
+        return map with
+        {
+            ModsKey = mods?.ModsKey ?? "NM",
+            ModBpm = mods?.Bpm,
+        };
+    }
+
+    private static DailyModCombinationUsage? ReadMostPlayedMapMods(
+        Microsoft.Data.Sqlite.SqliteConnection con,
+        string dayExpression,
+        string day,
+        long storedBeatmapId,
+        double? baseBpm)
+    {
+        bool hasAttemptMods = HasTable(con, "attempt_mods");
+        bool hasContext = HasTable(con, "attempt_context");
+        using var command = con.CreateCommand();
+        command.CommandText = $"""
+            SELECT CASE
+                       WHEN TRIM(COALESCE(a.mods_key, '')) = '' THEN 'NM'
+                       ELSE UPPER(TRIM(a.mods_key))
+                   END AS mods_key,
+                   a.id,
+                   {(hasAttemptMods ? "(SELECT m.settings_json FROM attempt_mods m WHERE m.attempt_id = a.id AND UPPER(m.acronym) = 'BPM' LIMIT 1)" : "NULL")},
+                   {(hasContext ? "c.score_json" : "NULL")}
+            FROM attempts a
+            {(hasContext ? "LEFT JOIN attempt_context c ON c.attempt_id = a.id" : "")}
+            WHERE {dayExpression} = @day AND a.beatmap_id = @beatmap_id
+            ORDER BY a.id DESC
+            """;
+        command.Parameters.AddWithValue("@day", day);
+        command.Parameters.AddWithValue("@beatmap_id", storedBeatmapId);
+        using var reader = command.ExecuteReader();
+        var totals = new Dictionary<DailyModCombinationKey, (long Plays, long LatestAttempt)>();
+        while (reader.Read())
+        {
+            string modsKey = reader.GetString(0);
+            DailyBpmAdjust bpmAdjust = ReadBpmAdjust(reader.IsDBNull(2) ? null : reader.GetString(2));
+            bool activeBpmAdjust = IsActiveBpmAdjust(
+                bpmAdjust,
+                baseBpm,
+                reader.IsDBNull(3) ? null : reader.GetString(3));
+            if (!activeBpmAdjust)
+                modsKey = RemoveBpmMarker(modsKey);
+
+            long attemptId = reader.GetInt64(1);
+            var key = new DailyModCombinationKey(
+                modsKey,
+                activeBpmAdjust ? bpmAdjust.TargetBpm : null);
+            if (totals.TryGetValue(key, out var current))
+                totals[key] = (current.Plays + 1, Math.Max(current.LatestAttempt, attemptId));
+            else
+                totals[key] = (1, attemptId);
+        }
+
+        if (totals.Count == 0)
+            return null;
+
+        KeyValuePair<DailyModCombinationKey, (long Plays, long LatestAttempt)> mostUsed = totals
+            .OrderByDescending(pair => pair.Value.Plays)
+            .ThenByDescending(pair => pair.Value.LatestAttempt)
+            .First();
+        return new DailyModCombinationUsage
+        {
+            ModsKey = mostUsed.Key.ModsKey,
+            Bpm = mostUsed.Key.Bpm,
+            Plays = mostUsed.Value.Plays,
+        };
     }
 
     private static DailyPlayHighlight? ReadBestPlay(
@@ -391,11 +468,11 @@ public sealed class AnalyticsRepository
         double? baseBpm = reader.IsDBNull(7) ? null : reader.GetDouble(7);
         string modsKey = reader.GetString(6);
         string? bpmSettings = reader.IsDBNull(16) ? null : reader.GetString(16);
-        double? targetBpm = ReadTargetBpm(bpmSettings);
-        bool usedBpmAdjust = targetBpm is > 0
-                             && baseBpm is > 0
-                             && Math.Abs(targetBpm.Value - baseBpm.Value) > 0.05
-                             && HasAuthoritativeResultMods(reader.IsDBNull(23) ? null : reader.GetString(23));
+        DailyBpmAdjust bpmAdjust = ReadBpmAdjust(bpmSettings);
+        bool usedBpmAdjust = IsActiveBpmAdjust(
+            bpmAdjust,
+            baseBpm,
+            reader.IsDBNull(23) ? null : reader.GetString(23));
         string? beatmapJson = reader.IsDBNull(8) ? null : reader.GetString(8);
         (double? Base, double? Adjusted) ar = ResolveDailyStat(
             beatmapJson,
@@ -430,9 +507,9 @@ public sealed class AnalyticsRepository
             AdjustedOd = od.Adjusted,
             BaseCs = cs.Base,
             AdjustedCs = cs.Adjusted,
-            BaseBpm = baseBpm,
+            BaseBpm = ResolveBaseBpm(baseBpm, bpmAdjust, usedBpmAdjust),
             Bpm = usedBpmAdjust
-                ? targetBpm
+                ? bpmAdjust.TargetBpm
                 : ResolveDailyBpm(
                     baseBpm,
                     modsKey,
@@ -480,28 +557,85 @@ public sealed class AnalyticsRepository
         }
     }
 
-    private static double? ReadTargetBpm(string? settingsJson)
+    private static DailyBpmAdjust ReadBpmAdjust(string? settingsJson)
     {
         if (string.IsNullOrWhiteSpace(settingsJson))
-            return null;
+            return default;
         try
         {
             using var document = JsonDocument.Parse(settingsJson);
-            if (!document.RootElement.TryGetProperty("target_bpm", out JsonElement target)
-                || !target.TryGetDouble(out double targetBpm)
-                || !double.IsFinite(targetBpm)
-                || targetBpm <= 0)
-            {
-                return null;
-            }
-
-            return targetBpm;
+            JsonElement root = document.RootElement;
+            double? targetBpm = ReadPositiveNumber(root, "target_bpm");
+            double? speedChange = ReadPositiveNumber(root, "speed_change");
+            bool rulesetCapture = speedChange is not null
+                                  || root.TryGetProperty("kumori_spectator", out JsonElement spectator)
+                                  && spectator.ValueKind is JsonValueKind.True;
+            return new DailyBpmAdjust(targetBpm, speedChange, rulesetCapture);
         }
         catch (JsonException)
         {
-            return null;
+            return default;
         }
     }
+
+    private static double? ReadPositiveNumber(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out JsonElement value))
+            return null;
+        double parsed;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out parsed)
+            || value.ValueKind == JsonValueKind.String
+            && double.TryParse(
+                value.GetString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out parsed))
+        {
+            return parsed > 0 && double.IsFinite(parsed) ? parsed : null;
+        }
+        return null;
+    }
+
+    private static bool IsActiveBpmAdjust(
+        DailyBpmAdjust bpmAdjust,
+        double? baseBpm,
+        string? scoreJson)
+    {
+        if (bpmAdjust.TargetBpm is not > 0)
+            return false;
+
+        // The Kumori BPM ruleset serializes its effective speed into the BPM
+        // entry, but its result screen is not an osu!standard ScoreInfo source.
+        // That makes this settings payload authoritative even though tosu marks
+        // the generic result-mod list as non-authoritative.
+        if (bpmAdjust.IsRulesetCapture)
+            return true;
+
+        return baseBpm is > 0
+               && Math.Abs(bpmAdjust.TargetBpm.Value - baseBpm.Value) > 0.05
+               && HasAuthoritativeResultMods(scoreJson);
+    }
+
+    private static double? ResolveBaseBpm(
+        double? capturedBaseBpm,
+        DailyBpmAdjust bpmAdjust,
+        bool activeBpmAdjust)
+    {
+        if (activeBpmAdjust
+            && bpmAdjust.TargetBpm is > 0
+            && bpmAdjust.SpeedChange is > 0)
+        {
+            double sourceBpm = bpmAdjust.TargetBpm.Value / bpmAdjust.SpeedChange.Value;
+            if (sourceBpm > 0 && double.IsFinite(sourceBpm))
+                return sourceBpm;
+        }
+        return capturedBaseBpm;
+    }
+
+    private readonly record struct DailyBpmAdjust(
+        double? TargetBpm,
+        double? SpeedChange,
+        bool IsRulesetCapture);
 
     private static bool HasAuthoritativeResultMods(string? scoreJson)
     {

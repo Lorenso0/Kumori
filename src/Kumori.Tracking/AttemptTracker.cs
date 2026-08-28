@@ -591,7 +591,7 @@ public sealed class AttemptTracker
         // positional menu mapping does not. Once BPM has been observed during
         // this attempt, a later FR/empty transition packet cannot represent a
         // real mod change and must not replace the authoritative settings.
-        if (frame.ClientKind == OsuClientKind.Lazer
+        if (frame.ClientKind.IsLazerFamily()
             && !frame.ModsAreAuthoritativeResult
             && _attemptMods.Any(mod => mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase))
             && !frame.Mods.Any(mod => mod.Acronym.Equals("BPM", StringComparison.OrdinalIgnoreCase)))

@@ -66,12 +66,11 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector, IDispos
 
             lastKind = clientKind;
             lastCheck = now;
-            lastResult = clientKind switch
-            {
-                OsuClientKind.Lazer => detectLazer(),
-                OsuClientKind.Stable => detectStable(),
-                _ => false,
-            };
+            lastResult = clientKind.IsLazerFamily()
+                ? detectLazer()
+                : clientKind == OsuClientKind.Stable
+                    ? detectStable()
+                    : false;
             return lastResult;
         }
         finally
@@ -91,7 +90,7 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector, IDispos
             lastCheck = DateTimeOffset.MinValue;
             lastKind = clientKind;
             lastResult = false;
-            if (clientKind is OsuClientKind.Lazer or OsuClientKind.Unknown)
+            if (clientKind.IsLazerFamily() || clientKind == OsuClientKind.Unknown)
                 lazerLastResult = false;
             if (clientKind is OsuClientKind.Stable or OsuClientKind.Unknown)
                 stableLastResult = false;
@@ -133,7 +132,7 @@ public sealed class OsuReplayPlaybackDetector : IReplayPlaybackDetector, IDispos
                 if (!disposed && lazerCheckGeneration == replayStateGeneration)
                 {
                     lazerLastResult = result;
-                    if (lastKind == OsuClientKind.Lazer)
+                    if (lastKind.IsLazerFamily())
                         lastResult = result;
                 }
                 lazerCheckRunning = false;

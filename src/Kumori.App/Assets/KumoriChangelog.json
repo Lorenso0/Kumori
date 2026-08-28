@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.8.7",
+    "date": "2026-08-28",
+    "improvements": [
+      "Added Tachyon release-stream support across play tracking, replay recording, replay recovery, and replay playback detection"
+    ],
+    "fixes": [
+      "Restored BPM Adjust ruleset detection in daily progress summaries and showed the most-used mods on the most-played map"
+    ]
+  },
+  {
     "version": "0.8.6",
     "date": "2026-08-25",
     "improvements": [

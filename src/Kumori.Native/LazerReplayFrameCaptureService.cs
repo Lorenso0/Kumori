@@ -94,8 +94,10 @@ public sealed class LazerReplayFrameCaptureService : IAttemptSink, IAsyncDisposa
 
     public void StartAttempt(AttemptStart start)
     {
-        if (start.ClientKind != _clientKind &&
-            !(_clientKind == OsuClientKind.Lazer && start.ClientKind == OsuClientKind.Unknown))
+        bool acceptsLazerFamily = _clientKind == OsuClientKind.Lazer;
+        if (start.ClientKind != _clientKind
+            && !(acceptsLazerFamily && (start.ClientKind.IsLazerFamily()
+                                        || start.ClientKind == OsuClientKind.Unknown)))
         {
             return;
         }

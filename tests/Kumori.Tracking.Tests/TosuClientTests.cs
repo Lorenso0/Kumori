@@ -97,6 +97,36 @@ public class TosuClientTests
         Assert.Equal(8, client.LastSnapshot.Play.LargeTickHit);
     }
 
+    [Theory]
+    [InlineData("""{"client":"lazer","settings":{"client":{"branch":1,"version":"2026.731.0"}}}""")]
+    [InlineData("""{"client":"lazer","settings":{"client":{"branch":"tachyon"}}}""")]
+    [InlineData("""{"client":"lazer","settings":{"client":{"version":"2026.731.0-tachyon"}}}""")]
+    [InlineData("""{"client":"tachyon"}""")]
+    public void Ingest_RecognizesTachyonReleaseStream(string packet)
+    {
+        var client = new TosuClient();
+
+        client.Ingest(Packet(packet));
+
+        Assert.Equal(OsuClientKind.Tachyon, client.LastSnapshot!.ClientKind);
+        Assert.True(client.LastSnapshot.ClientKind.IsLazerFamily());
+    }
+
+    [Fact]
+    public void Ingest_TachyonUsesLazerTelemetryModel()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {"client":"lazer","settings":{"client":{"branch":1}},
+             "play":{"mods":[{"acronym":"HD"}],"hits":{"sliderBreaks":2,"largeTickHits":8}}}
+            """));
+
+        Assert.Equal(OsuClientKind.Tachyon, client.LastSnapshot!.ClientKind);
+        Assert.Equal("HD", client.LastSnapshot.ModsKey);
+        Assert.Equal(2, client.LastSnapshot.Play.SliderBreak);
+        Assert.Equal(8, client.LastSnapshot.Play.LargeTickHit);
+    }
+
     private static TosuPacket Packet(string raw, double mono = 100.0) =>
         new(raw, 1_700_000_000.0, mono);
 

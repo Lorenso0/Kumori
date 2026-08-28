@@ -439,10 +439,18 @@ internal static class DailyStatsCardRenderer
                 mostRect.Width - 44);
             DrawHighlightMetric(
                 drawing,
-                new Rect(mostRect.Left + 22, mostRect.Top + 118, 142, 46),
+                new Rect(mostRect.Right - 108, mostRect.Top + 118, 86, 46),
                 "PLAYS",
                 Invariant($"{most.Plays:N0}"),
                 "#B79AFF");
+            ScoreCardModRenderer.Draw(
+                drawing,
+                ParseModAcronyms(most.ModsKey),
+                most.ModBpm,
+                mostRect.Left + 22,
+                mostRect.Top + 120,
+                mostRect.Width - 152,
+                compact: true);
         }
         else
         {

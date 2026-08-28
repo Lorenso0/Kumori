@@ -56,7 +56,7 @@ internal sealed class LazerReplayFrameRecoverySink : IAttemptSink
     public void StartAttempt(AttemptStart value)
     {
         sawGameplayResult = false;
-        start = value.ClientKind == OsuClientKind.Lazer ? value : null;
+        start = value.ClientKind.IsLazerFamily() ? value : null;
         if (start is not null)
         {
             Interlocked.Increment(ref generation);

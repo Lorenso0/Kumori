@@ -14,6 +14,30 @@ public sealed class ReplayFrameCaptureLifecycleTests : IDisposable
     private readonly string databasePath = Path.Combine(Path.GetTempPath(), $"kumori-capture-{Guid.NewGuid():N}.sqlite3");
 
     [Fact]
+    public async Task LazerCaptureArmsForTachyonAttempts()
+    {
+        var status = new MemoryStatusSink();
+        var source = new PushAttemptAwareSource();
+        var capture = new LazerReplayFrameCaptureService(
+            new AppStateStore(),
+            new SqliteConnectionFactory(databasePath, readOnly: false),
+            () => 812,
+            source,
+            status,
+            sourceName: "lazer_memory");
+
+        capture.StartAttempt(new AttemptStart
+        {
+            Identity = "tachyon-attempt",
+            ClientKind = OsuClientKind.Tachyon,
+        });
+
+        Assert.Equal(812, status.Load().ActiveAttemptId);
+        Assert.Equal("attempt_armed", status.Load().State);
+        await capture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task StartedServicePreReadsBeforeAttemptAndArmsConsumerBeforeSourceWakeup()
     {
         var status = new MemoryStatusSink();

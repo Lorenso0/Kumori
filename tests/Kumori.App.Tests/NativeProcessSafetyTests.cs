@@ -139,6 +139,7 @@ public sealed class NativeProcessSafetyTests
         detector.Dispose();
 
         Assert.False(detector.IsWatchingReplay(OsuClientKind.Lazer));
+        Assert.False(detector.IsWatchingReplay(OsuClientKind.Tachyon));
         Assert.False(detector.IsWatchingReplay(OsuClientKind.Stable));
     }
 

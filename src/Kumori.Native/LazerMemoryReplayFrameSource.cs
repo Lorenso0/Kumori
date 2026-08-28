@@ -11,7 +11,7 @@ namespace Kumori.Native;
 
 public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILazerReplayFrameSnapshotSource, IAttemptAwareReplayFrameSource, IDisposable, IAsyncDisposable
 {
-    private static readonly string[] ProcessNames = ["osu!", "osu"];
+    private static readonly string[] ProcessNames = ["osu!", "osu", "osu.Desktop", "osulazer"];
     private static readonly TimeSpan ProcessSearchInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan TosuGameBaseHintInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan FinalTailDrainBudget = TimeSpan.FromMilliseconds(25);
@@ -706,6 +706,32 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     private static Process? FindProcess(int? preferredProcessId = null)
     {
         var processes = new Dictionary<int, Process>();
+        if (preferredProcessId is { } preferred)
+        {
+            try
+            {
+                // tosu already found and validated this exact 64-bit osu!
+                // process. Follow its PID even when a prerelease/package uses
+                // an executable label outside Kumori's compatibility aliases.
+                var preferredProcess = Process.GetProcessById(preferred);
+                if (!preferredProcess.HasExited && IsLikelyLazer(preferredProcess))
+                    processes.TryAdd(preferredProcess.Id, preferredProcess);
+                else
+                    preferredProcess.Dispose();
+            }
+            catch (ArgumentException)
+            {
+                // The process exited after tosu published its log hint.
+            }
+            catch (InvalidOperationException)
+            {
+                // The process exited while it was being inspected.
+            }
+            catch (Win32Exception)
+            {
+                // Access can disappear during an elevation or update handoff.
+            }
+        }
         foreach (var name in ProcessNames)
         {
             foreach (var process in Process.GetProcessesByName(name))

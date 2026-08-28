@@ -76,6 +76,9 @@ public sealed record DailyMapHighlight
     public double? Od { get; init; }
     public double? Cs { get; init; }
     public double? Bpm { get; init; }
+    /// <summary>The most frequently used mod combination for this map during the report day.</summary>
+    public string ModsKey { get; init; } = "NM";
+    public double? ModBpm { get; init; }
 }
 
 public sealed record DailyPlayHighlight
