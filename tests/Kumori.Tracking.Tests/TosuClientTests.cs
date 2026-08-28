@@ -198,6 +198,67 @@ public class TosuClientTests
     }
 
     [Fact]
+    public void Ingest_BpmRulesetModeMinusOne_IsStandard()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "Gameplay"},
+                "profile": {"mode": {"number": 0, "name": "osu"}},
+                "play": {
+                    "mode": {"number": -1, "name": ""},
+                    "mods": {"array": [{"acronym": "HD"}, {"acronym": "BPM"}, {"acronym": "DA"}]}
+                }
+            }
+            """));
+
+        Assert.True(client.LastSnapshot!.IsStandardMode);
+    }
+
+    [Fact]
+    public void Ingest_BpmRulesetRetainedResultModeMinusOne_IsStandard()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "selectPlay"},
+                "profile": {"mode": {"number": 0, "name": "osu"}},
+                "play": {"mode": {"number": -1, "name": ""}, "mods": {"array": []}},
+                "resultsScreen": {
+                    "mode": {"number": -1, "name": ""},
+                    "mods": {"array": [{"acronym": "HD"}, {"acronym": "BPM"}, {"acronym": "DA"}]}
+                }
+            }
+            """));
+
+        Assert.True(client.LastSnapshot!.IsStandardMode);
+    }
+
+    [Fact]
+    public void Ingest_UnrelatedCustomRulesetModeMinusOne_RemainsNonStandard()
+    {
+        var client = new TosuClient();
+        client.Ingest(Packet("""
+            {
+                "client": "lazer",
+                "state": {"name": "Gameplay"},
+                "profile": {"mode": {"number": 0, "name": "osu"}},
+                "play": {
+                    "mode": {"number": -1, "name": ""},
+                    "mods": {"array": [{"acronym": "HD"}]}
+                },
+                "resultsScreen": {
+                    "mods": {"array": [{"acronym": "BPM"}]}
+                }
+            }
+            """));
+
+        Assert.False(client.LastSnapshot!.IsStandardMode);
+    }
+
+    [Fact]
     public void Ingest_DifferentProfileAndPlayerNames_FlagsWatchedReplay()
     {
         var client = new TosuClient();

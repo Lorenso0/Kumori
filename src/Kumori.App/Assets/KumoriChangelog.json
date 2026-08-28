@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.8.8",
+    "date": "2026-08-28",
+    "fixes": [
+      "Fixed intermittent play tracking when the BPM Adjust ruleset is reported as a custom game mode"
+    ]
+  },
+  {
     "version": "0.8.7",
     "date": "2026-08-28",
     "improvements": [

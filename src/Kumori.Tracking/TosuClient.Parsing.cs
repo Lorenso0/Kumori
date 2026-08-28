@@ -133,13 +133,36 @@ public sealed partial class TosuClient
         }
         if (mode.ValueKind == JsonValueKind.Object)
         {
-            isStandardMode = (GetLong(mode, "number") ?? 0) == 0;
+            long modeNumber = GetLong(mode, "number") ?? 0;
+            isStandardMode = modeNumber == 0
+                             || modeNumber == -1 && HasBpmRulesetEvidence(root);
             return true;
         }
         var text = (mode.ValueKind == JsonValueKind.String ? mode.GetString() : mode.GetRawText())?
             .ToLowerInvariant();
-        isStandardMode = text is "0" or "osu" or "standard";
+        isStandardMode = text is "0" or "osu" or "standard"
+                         || text == "-1" && HasBpmRulesetEvidence(root);
         return true;
+    }
+
+    private static bool HasBpmRulesetEvidence(JsonElement root)
+    {
+        // Custom lazer rulesets are reported by tosu as mode -1. The Kumori
+        // BPM ruleset is still osu!standard gameplay and identifies itself
+        // through its BPM mod. Inspect both the live and retained result
+        // containers because lazer keeps the completed score populated while
+        // entering the next map, before the new live mod array is available.
+        if (TryGetObject(root, "play", out JsonElement play)
+            && ParseMods(play).Any(IsBpmAdjust))
+        {
+            return true;
+        }
+
+        if (PlayingStates.Contains(NormalizedState(root)))
+            return false;
+
+        return ResultModSources(root)
+            .Any(source => ParseMods(source).Any(IsBpmAdjust));
     }
 
     /// <summary>
