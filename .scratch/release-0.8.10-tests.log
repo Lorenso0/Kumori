@@ -1,0 +1,20 @@
+Test run for D:\Off Limits Tools\Kumori\tests\Kumori.Skins.Tests\bin\Release\net10.0\Kumori.Skins.Tests.dll (.NETCoreApp,Version=v10.0)
+Test run for D:\Off Limits Tools\Kumori\tests\Kumori.Tracking.Tests\bin\Release\net10.0\Kumori.Tracking.Tests.dll (.NETCoreApp,Version=v10.0)
+Test run for D:\Off Limits Tools\Kumori\tests\Kumori.Core.Tests\bin\Release\net10.0\Kumori.Core.Tests.dll (.NETCoreApp,Version=v10.0)
+Test run for D:\Off Limits Tools\Kumori\tests\Kumori.Storage.Tests\bin\Release\net10.0\Kumori.Storage.Tests.dll (.NETCoreApp,Version=v10.0)
+Test run for D:\Off Limits Tools\Kumori\tests\Kumori.App.Tests\bin\Release\net10.0-windows10.0.17763.0\Kumori.App.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:   165, Skipped:     0, Total:   165, Duration: 653 ms - Kumori.Core.Tests.dll (net10.0)
+
+Passed!  - Failed:     0, Passed:   144, Skipped:     0, Total:   144, Duration: 753 ms - Kumori.Tracking.Tests.dll (net10.0)
+
+Passed!  - Failed:     0, Passed:    86, Skipped:     0, Total:    86, Duration: 910 ms - Kumori.Skins.Tests.dll (net10.0)
+
+Passed!  - Failed:     0, Passed:   654, Skipped:     0, Total:   654, Duration: 3 s - Kumori.App.Tests.dll (net10.0)
+
+Passed!  - Failed:     0, Passed:   204, Skipped:     0, Total:   204, Duration: 6 s - Kumori.Storage.Tests.dll (net10.0)

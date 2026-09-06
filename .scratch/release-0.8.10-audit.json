@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "parameters": "--vulnerable --include-transitive",
+  "sources": [
+    "https://api.nuget.org/v3/index.json"
+  ],
+  "projects": [
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.App/Kumori.App.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.Core/Kumori.Core.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.Gameplay/Kumori.Gameplay.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.Storage/Kumori.Storage.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.FarmFinder/Kumori.FarmFinder.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.Tracking/Kumori.Tracking.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.Native/Kumori.Native.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/tests/Kumori.Core.Tests/Kumori.Core.Tests.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/tests/Kumori.Storage.Tests/Kumori.Storage.Tests.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/tests/Kumori.Tracking.Tests/Kumori.Tracking.Tests.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.FixtureDiff/Kumori.FixtureDiff.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/tests/Kumori.App.Tests/Kumori.App.Tests.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.ReplayFrameTool/Kumori.ReplayFrameTool.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.StableFrameBridge/Kumori.StableFrameBridge.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/replay_viewer/Kumori.ReplayViewer.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/tools/Kumori.AutoMapperCompatPatcher/Kumori.AutoMapperCompatPatcher.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/tools/Kumori.FarmFinderCachePublisher/Kumori.FarmFinderCachePublisher.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.Skins/Kumori.Skins.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/tests/Kumori.Skins.Tests/Kumori.Skins.Tests.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.Tracking.RealmModels/Kumori.Tracking.RealmModels.csproj"
+    },
+    {
+      "path": "D:/Off Limits Tools/Kumori/src/Kumori.LazerSkins/Kumori.LazerSkins.csproj"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using osu.Framework.Audio;
 using osu.Framework.Bindables;
 using osu.Framework.Graphics.Sprites;
@@ -78,6 +79,13 @@ public sealed class OsuModBpmAdjust : OsuModDoubleTime, IApplicableToDifficulty,
 
     public override Mod DeepClone() =>
         new OsuModBpmAdjust(TargetBpm, SourceBpm, AudioMode, ScaleMapStatsWithBpm, SpeedChange.Value);
+
+    /// <summary>
+    /// The BPM fork compensates difficulty after all other difficulty mods.
+    /// Official lazer lacks that hook, so keep BPM last in runtime mod lists.
+    /// </summary>
+    public static Mod[] OrderForApplication(IEnumerable<Mod> mods) =>
+        mods.OrderBy(mod => mod is OsuModBpmAdjust ? 1 : 0).ToArray();
 
     public void ApplyToDifficulty(BeatmapDifficulty difficulty)
     {

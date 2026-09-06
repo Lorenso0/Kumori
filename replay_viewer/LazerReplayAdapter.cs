@@ -77,7 +77,7 @@ public static class LazerReplayAdapter
                 resolved.Add(decoded);
         }
 
-        return resolved.ToArray();
+        return OsuModBpmAdjust.OrderForApplication(resolved);
     }
 
     private static Mod[] createMods(IEnumerable<ModEntry> entries, IBeatmap? beatmap)
@@ -105,7 +105,7 @@ public static class LazerReplayAdapter
             };
             result.AddRange(createModsFromApiJson(JsonSerializer.Serialize(structured)));
         }
-        return result.ToArray();
+        return OsuModBpmAdjust.OrderForApplication(result);
     }
 
     private static IReadOnlyDictionary<string, JsonElement> NormaliseSettings(IReadOnlyDictionary<string, JsonElement> settings)

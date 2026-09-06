@@ -58,3 +58,7 @@ git diff 285bcf68a571ce325cee2f89e2d3edf61fd39b42..origin/kumori -- `
 Recheck serialization, source-BPM selection, clock-rate calculation, stat
 compensation order, replay frame timestamps, difficulty/performance output, and
 all three audio modes before advancing the pin.
+
+## Difficulty compensation order
+
+The fork applies unscaled AR/OD compensation through `IApplicableToDifficultyAfterMods`, after DA and other difficulty mods. The pinned official lazer source lacks this hook. Kumori therefore places BPM last in runtime mod arrays via `OsuModBpmAdjust.OrderForApplication` for replay playback, difficulty calculation, and strain curves. Apply this ordering after merging decoded replay fallback mods as well. Stored mod order and settings remain intact.

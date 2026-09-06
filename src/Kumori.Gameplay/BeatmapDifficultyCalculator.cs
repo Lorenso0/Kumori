@@ -62,7 +62,7 @@ public static class BeatmapDifficultyCalculator
         }
 
         ApplyDifficultyAdjustSettings(mods, settings);
-        return mods.ToArray();
+        return OsuModBpmAdjust.OrderForApplication(mods);
     }
 
     private static void ApplyDifficultyAdjustSettings(

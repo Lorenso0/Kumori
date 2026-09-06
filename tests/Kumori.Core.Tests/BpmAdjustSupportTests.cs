@@ -176,6 +176,73 @@ public sealed class BpmAdjustSupportTests
         Assert.False(mod.ScaleMapStatsWithBpm);
     }
 
+    [Theory]
+    [InlineData(180, false, false)]
+    [InlineData(180, false, true)]
+    [InlineData(90, false, false)]
+    [InlineData(90, false, true)]
+    [InlineData(180, true, false)]
+    [InlineData(180, true, true)]
+    [InlineData(90, true, false)]
+    [InlineData(90, true, true)]
+    public void ReplayDifficultyAdjustTimingMatchesBpmScaling(double targetBpm, bool scaleStats, bool daFirst)
+    {
+        Beatmap beatmap = beatmapWithTiming("0,500,4,2,1,60,1,0");
+        var bpm = new ModContract
+        {
+            Acronym = "BPM",
+            Settings = settings(JsonSerializer.Serialize(new { target_bpm = targetBpm, scale_map_stats_with_bpm = scaleStats })),
+        };
+        var da = new ModContract
+        {
+            Acronym = "DA",
+            Settings = settings("""{"approach_rate":10,"overall_difficulty":8,"circle_size":3,"drain_rate":6}"""),
+        };
+        var attempt = new AttemptContract { Mods = daFirst ? [da, bpm] : [bpm, da] };
+        // Player clones the resolved mods before creating the playable beatmap.
+        var mods = LazerReplayAdapter.ResolveMods(attempt, beatmap: beatmap)
+            .Select(mod => mod.DeepClone()).ToArray();
+        var ruleset = new OsuRuleset();
+        var playable = new FlatWorkingBeatmap(beatmap).GetPlayableBeatmap(ruleset.RulesetInfo, mods);
+        double rate = targetBpm / 120;
+        double expectedPreempt = 450 / (scaleStats ? rate : 1);
+        var hitCircle = Assert.IsType<HitCircle>(playable.HitObjects[0]);
+        // lazer truncates object preempt to whole map-time milliseconds.
+        Assert.InRange(Math.Abs(expectedPreempt - hitCircle.TimePreempt / rate), 0, 1 / rate);
+        double great = IBeatmapDifficultyInfo.DifficultyRange(playable.Difficulty.OverallDifficulty, OsuHitWindows.GREAT_WINDOW_RANGE);
+        double expectedGreat = IBeatmapDifficultyInfo.DifficultyRange(8, OsuHitWindows.GREAT_WINDOW_RANGE);
+        Assert.Equal(expectedGreat / (scaleStats ? rate : 1), great / rate, 3);
+        Assert.Equal(3, playable.Difficulty.CircleSize);
+        Assert.Equal(6, playable.Difficulty.DrainRate);
+        var display = ruleset.GetAdjustedDisplayDifficulty(beatmap.BeatmapInfo, mods);
+        Assert.Equal(expectedPreempt, IBeatmapDifficultyInfo.DifficultyRange(display.ApproachRate, OsuHitObject.PREEMPT_RANGE), 3);
+    }
+
+    [Fact]
+    public void DecodedDifficultyAdjustIsAppliedBeforeCapturedBpmCompensation()
+    {
+        Beatmap beatmap = beatmapWithTiming("0,500,4,2,1,60,1,0");
+        var attempt = new AttemptContract
+        {
+            Mods = [new ModContract { Acronym = "BPM", Settings = settings("""{"target_bpm":180,"scale_map_stats_with_bpm":false}""") }],
+        };
+        var da = new osu.Game.Rulesets.Osu.Mods.OsuModDifficultyAdjust();
+        da.ApproachRate.Value = 10;
+        var mods = LazerReplayAdapter.ResolveMods(attempt, [da], beatmap);
+        var display = new OsuRuleset().GetAdjustedDisplayDifficulty(beatmap.BeatmapInfo, mods);
+        Assert.Equal(10, display.ApproachRate, 3);
+    }
+
+    [Fact]
+    public void DifficultyCalculationDoesNotDependOnCapturedBpmModOrder()
+    {
+        var bpm = new CapturedMod("BPM", """{"target_bpm":240,"scale_map_stats_with_bpm":false}""");
+        var da = new CapturedMod("DA", """{"approach_rate":10,"overall_difficulty":8}""");
+        var first = BeatmapDifficultyCalculator.Calculate(fixturePath(), [bpm, da]);
+        var last = BeatmapDifficultyCalculator.Calculate(fixturePath(), [da, bpm]);
+        Assert.Equal(first.AdjustedStars, last.AdjustedStars, 8);
+    }
+
     private static OsuModBpmAdjust createOnePointFiveMod(bool scaleStats) => new(
         beatmapWithTiming("0,500,4,2,1,60,1,0"),
         new BpmAdjustSettings(180, BpmAdjustAudioMode.PreservePitch, scaleStats));

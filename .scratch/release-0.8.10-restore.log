@@ -1,0 +1,24 @@
+  Determining projects to restore...
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.FarmFinder\Kumori.FarmFinder.csproj (in 129 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Core\Kumori.Core.csproj (in 129 ms).
+  Restored D:\Off Limits Tools\Kumori\tools\Kumori.AutoMapperCompatPatcher\Kumori.AutoMapperCompatPatcher.csproj (in 274 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Tracking.RealmModels\Kumori.Tracking.RealmModels.csproj (in 275 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Skins\Kumori.Skins.csproj (in 275 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.StableFrameBridge\Kumori.StableFrameBridge.csproj (in 275 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.LazerSkins\Kumori.LazerSkins.csproj (in 276 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Tracking\Kumori.Tracking.csproj (in 276 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.Skins.Tests\Kumori.Skins.Tests.csproj (in 283 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.Tracking.Tests\Kumori.Tracking.Tests.csproj (in 284 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\Kumori.Gameplay.csproj (in 368 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.FixtureDiff\Kumori.FixtureDiff.csproj (in 370 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Storage\Kumori.Storage.csproj (in 370 ms).
+  Restored D:\Off Limits Tools\Kumori\tools\Kumori.FarmFinderCachePublisher\Kumori.FarmFinderCachePublisher.csproj (in 370 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Native\Kumori.Native.csproj (in 371 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.Storage.Tests\Kumori.Storage.Tests.csproj (in 370 ms).
+  Restored D:\Off Limits Tools\Kumori\replay_viewer\Kumori.ReplayViewer.csproj (in 385 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.Core.Tests\Kumori.Core.Tests.csproj (in 369 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.App.Tests\Kumori.App.Tests.csproj (in 370 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.ReplayFrameTool\Kumori.ReplayFrameTool.csproj (in 396 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.App\Kumori.App.csproj (in 410 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game\osu.Game.csproj (in 400 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game.Rulesets.Osu\osu.Game.Rulesets.Osu.csproj (in 401 ms).

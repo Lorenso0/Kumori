@@ -1,0 +1,70 @@
+Ensuring osu! 2026.726.0 source is available...
+Using osu! 2026.726.0-lazer (5da71008b082d1a77e4bb301dc98886f1f24b895)
+  Determining projects to restore...
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\Kumori.Gameplay.csproj (in 328 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Native\Kumori.Native.csproj (in 329 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game.Rulesets.Osu\osu.Game.Rulesets.Osu.csproj (in 332 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game\osu.Game.csproj (in 332 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.Storage.Tests\Kumori.Storage.Tests.csproj (in 328 ms).
+  Restored D:\Off Limits Tools\Kumori\replay_viewer\Kumori.ReplayViewer.csproj (in 329 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.ReplayFrameTool\Kumori.ReplayFrameTool.csproj (in 332 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.App.Tests\Kumori.App.Tests.csproj (in 328 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.FixtureDiff\Kumori.FixtureDiff.csproj (in 328 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Storage\Kumori.Storage.csproj (in 328 ms).
+  Restored D:\Off Limits Tools\Kumori\tests\Kumori.Core.Tests\Kumori.Core.Tests.csproj (in 328 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.App\Kumori.App.csproj (in 332 ms).
+  Restored D:\Off Limits Tools\Kumori\tools\Kumori.FarmFinderCachePublisher\Kumori.FarmFinderCachePublisher.csproj (in 328 ms).
+  10 of 23 projects are up-to-date for restore.
+  Determining projects to restore...
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Core\Kumori.Core.csproj (in 156 ms).
+  Restored D:\Off Limits Tools\Kumori\tools\Kumori.AutoMapperCompatPatcher\Kumori.AutoMapperCompatPatcher.csproj (in 165 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\Kumori.Gameplay.csproj (in 218 ms).
+  Restored D:\Off Limits Tools\Kumori\replay_viewer\Kumori.ReplayViewer.csproj (in 218 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game.Rulesets.Osu\osu.Game.Rulesets.Osu.csproj (in 264 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game\osu.Game.csproj (in 264 ms).
+  Kumori.Core -> D:\Off Limits Tools\Kumori\src\Kumori.Core\bin\Release\net10.0\Kumori.Core.dll
+  osu.Game -> D:\Off Limits Tools\Kumori\third_party\osu\osu.Game\bin\Release\net8.0\osu.Game.dll
+  osu.Game.Rulesets.Osu -> D:\Off Limits Tools\Kumori\third_party\osu\osu.Game.Rulesets.Osu\bin\Release\net8.0\osu.Game.Rulesets.Osu.dll
+  Kumori.Gameplay -> D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\bin\Release\net10.0\Kumori.Gameplay.dll
+  Patched 3 AutoMapper constructor call(s): D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\bin\Release\net10.0\osu.Game.dll
+  Kumori.AutoMapperCompatPatcher -> D:\Off Limits Tools\Kumori\tools\Kumori.AutoMapperCompatPatcher\bin\Release\net10.0\Kumori.AutoMapperCompatPatcher.dll
+  Kumori.ReplayViewer -> D:\Off Limits Tools\Kumori\replay_viewer\bin\Release\net10.0\win-x64\Kumori.ReplayViewer.dll
+  Used cached AutoMapper compatibility patch: D:\Off Limits Tools\Kumori\replay_viewer\bin\Release\net10.0\win-x64\osu.Game.dll
+  Used cached AutoMapper compatibility patch: D:\Off Limits Tools\Kumori\artifacts\native-tools-release\osu.Game.dll
+  Kumori.ReplayViewer -> D:\Off Limits Tools\Kumori\artifacts\native-tools-release\
+  Determining projects to restore...
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Skins\Kumori.Skins.csproj (in 228 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Core\Kumori.Core.csproj (in 228 ms).
+  Restored D:\Off Limits Tools\Kumori\tools\Kumori.AutoMapperCompatPatcher\Kumori.AutoMapperCompatPatcher.csproj (in 228 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Tracking.RealmModels\Kumori.Tracking.RealmModels.csproj (in 228 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.FarmFinder\Kumori.FarmFinder.csproj (in 228 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.LazerSkins\Kumori.LazerSkins.csproj (in 228 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Tracking\Kumori.Tracking.csproj (in 228 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\Kumori.Gameplay.csproj (in 291 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Storage\Kumori.Storage.csproj (in 291 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.Native\Kumori.Native.csproj (in 292 ms).
+  Restored D:\Off Limits Tools\Kumori\src\Kumori.App\Kumori.App.csproj (in 292 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game\osu.Game.csproj (in 324 ms).
+  Restored D:\Off Limits Tools\Kumori\third_party\osu\osu.Game.Rulesets.Osu\osu.Game.Rulesets.Osu.csproj (in 324 ms).
+  Kumori.Core -> D:\Off Limits Tools\Kumori\src\Kumori.Core\bin\Release\net10.0\Kumori.Core.dll
+  Kumori.FarmFinder -> D:\Off Limits Tools\Kumori\src\Kumori.FarmFinder\bin\Release\net10.0\Kumori.FarmFinder.dll
+  Kumori.Tracking.RealmModels -> D:\Off Limits Tools\Kumori\src\Kumori.Tracking.RealmModels\bin\Release\net10.0\Kumori.Tracking.RealmModels.dll
+  Kumori.Skins -> D:\Off Limits Tools\Kumori\src\Kumori.Skins\bin\Release\net10.0\Kumori.Skins.dll
+  Kumori.LazerSkins -> D:\Off Limits Tools\Kumori\src\Kumori.LazerSkins\bin\Release\net10.0\Kumori.LazerSkins.dll
+  Kumori.Tracking -> D:\Off Limits Tools\Kumori\src\Kumori.Tracking\bin\Release\net10.0\Kumori.Tracking.dll
+  osu.Game -> D:\Off Limits Tools\Kumori\third_party\osu\osu.Game\bin\Release\net8.0\osu.Game.dll
+  osu.Game.Rulesets.Osu -> D:\Off Limits Tools\Kumori\third_party\osu\osu.Game.Rulesets.Osu\bin\Release\net8.0\osu.Game.Rulesets.Osu.dll
+  Kumori.Gameplay -> D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\bin\Release\net10.0\Kumori.Gameplay.dll
+  Patched 3 AutoMapper constructor call(s): D:\Off Limits Tools\Kumori\src\Kumori.Gameplay\bin\Release\net10.0\osu.Game.dll
+  Kumori.Storage -> D:\Off Limits Tools\Kumori\src\Kumori.Storage\bin\Release\net10.0\Kumori.Storage.dll
+  Used cached AutoMapper compatibility patch: D:\Off Limits Tools\Kumori\src\Kumori.Storage\bin\Release\net10.0\osu.Game.dll
+  Kumori.Native -> D:\Off Limits Tools\Kumori\src\Kumori.Native\bin\Release\net10.0-windows10.0.17763.0\Kumori.Native.dll
+  Used cached AutoMapper compatibility patch: D:\Off Limits Tools\Kumori\src\Kumori.Native\bin\Release\net10.0-windows10.0.17763.0\osu.Game.dll
+  Kumori.AutoMapperCompatPatcher -> D:\Off Limits Tools\Kumori\tools\Kumori.AutoMapperCompatPatcher\bin\Release\net10.0\win-x64\Kumori.AutoMapperCompatPatcher.dll
+  Kumori.App -> D:\Off Limits Tools\Kumori\src\Kumori.App\bin\Release\net10.0-windows10.0.17763.0\win-x64\Kumori.dll
+  Used cached AutoMapper compatibility patch: D:\Off Limits Tools\Kumori\src\Kumori.App\bin\Release\net10.0-windows10.0.17763.0\win-x64\osu.Game.dll
+  Kumori.StableFrameBridge -> D:\Off Limits Tools\Kumori\src\Kumori.StableFrameBridge\bin\Release\net10.0\win-x86\Kumori.StableFrameBridge.dll
+  Kumori.App -> D:\Off Limits Tools\Kumori\artifacts\app-publish\
+
+Published to dist\app\Kumori.exe
+Replay Viewer is embedded in Kumori.exe and extracts atomically when required.
