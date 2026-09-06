@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.8.9",
+    "date": "2026-09-06",
+    "fixes": [
+      "Fixed Tachyon replay recording by loading memory offsets for the installed osu! version",
+      "Added replay recording compatibility with newer osu! screen layouts"
+    ]
+  },
+  {
     "version": "0.8.8",
     "date": "2026-08-28",
     "fixes": [

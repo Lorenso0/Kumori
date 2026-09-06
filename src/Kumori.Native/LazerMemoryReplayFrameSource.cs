@@ -38,6 +38,8 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
     private ProcessMemory? _cachedMemory;
     private LazerReplayFrameMemoryReader? _cachedReader;
     private LazerMemoryOffsets? _cachedReaderOffsets;
+    private Task<LazerMemoryOffsets?>? _clientOffsetsTask;
+    private DateTimeOffset _nextClientOffsetsRetryAt;
     private DateTimeOffset _nextProcessSearchAt;
     private DateTimeOffset _nextTosuGameBaseHintAt;
     private string? _cachedProcessName;
@@ -165,6 +167,9 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
                             offsets,
                             out processChanged,
                             tosuGameBaseHint?.ProcessId);
+                        processAvailable = _cachedProcess is not null;
+                        if (processAvailable && reader is null)
+                            waitingStatus = "Waiting for memory offsets matching the running osu! client.";
                         if (reader is not null)
                         {
                             processAvailable = true;
@@ -437,8 +442,6 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         }
         if (offsets is null)
             return false;
-        if (offsets.PlayerDrawableRuleset < 0 || offsets.DrawableRulesetReplayScore < 0)
-            return false;
 
         lock (_readerGate)
         {
@@ -582,6 +585,8 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
         if (!closeProcess)
             return;
 
+        _clientOffsetsTask = null;
+        _nextClientOffsetsRetryAt = DateTimeOffset.MinValue;
         _cachedMemory?.Dispose();
         _cachedMemory = null;
         _cachedProcess?.Dispose();
@@ -660,8 +665,35 @@ public sealed class LazerMemoryReplayFrameSource : ILazerReplayFrameSource, ILaz
             }
         }
 
+        if (string.IsNullOrWhiteSpace(_offsetsPath) && _cachedProcessPath is { } clientPath)
+        {
+            // Keep file/network I/O off the telemetry callback and reader lock.
+            if (_clientOffsetsTask is null && DateTimeOffset.UtcNow >= _nextClientOffsetsRetryAt)
+                _clientOffsetsTask = Task.Run(() => LazerMemoryOffsets.LoadForClientAsync(
+                    clientPath, cancellationToken: _lifetimeCts.Token));
+            if (_clientOffsetsTask is null || !_clientOffsetsTask.IsCompleted)
+                return null;
+            if (!_clientOffsetsTask.IsCompletedSuccessfully)
+            {
+                var error = _clientOffsetsTask.Exception?.GetBaseException().Message;
+                _status.Update(s =>
+                {
+                    s.State = "lazer_memory_offsets_warming";
+                    s.Detail = "Waiting for memory offsets matching the running osu! client.";
+                    s.LastError = error;
+                });
+                _clientOffsetsTask = null;
+                _nextClientOffsetsRetryAt = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
+                return null;
+            }
+            offsets = _clientOffsetsTask.Result ?? offsets;
+        }
+
         if (_cachedReader is null || _cachedReaderOffsets != offsets)
         {
+            // Inferred locations belong to one memory layout.
+            _lastGameBase = 0;
+            _lastReplayFrameTimeOffset = null;
             _cachedReaderOffsets = offsets;
             _cachedReader = new LazerReplayFrameMemoryReader(
                 _cachedMemory!,

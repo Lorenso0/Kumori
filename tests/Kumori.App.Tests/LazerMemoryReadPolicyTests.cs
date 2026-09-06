@@ -7,6 +7,77 @@ namespace Kumori.App.Tests;
 
 public sealed class LazerMemoryReadPolicyTests
 {
+    [Theory]
+    [InlineData("2026.518.0-tachyon", "2026.518.0")]
+    [InlineData("2026.525.0-lazer", "2026.525.0")]
+    [InlineData("2026.525.0", "2026.525.0")]
+    [InlineData("../invalid", null)]
+    public void ClientOffsetsUseNumericBuildFromDependencies(string release, string? expected)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            libraries = new Dictionary<string, object> { ["osu!/" + release] = new { } },
+        });
+        Assert.Equal(expected, LazerMemoryOffsets.ParseClientVersion(json));
+    }
+
+    [Fact]
+    public async Task ClientLayoutAcceptsScreenStackFieldUsedByNewerBuilds()
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            var expected = Offsets("2026.518.0", 20);
+            var path = Path.Combine(root, "offsets.json");
+            await File.WriteAllTextAsync(path, OffsetJson(expected)
+                .Replace("<ScreenStack>k__BackingField", "ScreenStack"));
+            Assert.Equal(expected, LazerMemoryOffsets.LoadCached(path));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+    [Fact]
+    public async Task TachyonLoadsExactCachedLayoutWithoutDownloadingLatestLazer()
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "osu!.deps.json"),
+                """{"libraries":{"osu!/2026.518.0-tachyon":{}}}""");
+            var expected = Offsets("2026.518.0", 20);
+            await File.WriteAllTextAsync(Path.Combine(root, "2026.518.0.json"), OffsetJson(expected));
+            var actual = await LazerMemoryOffsets.LoadForClientAsync(
+                Path.Combine(root, "osu!.exe"), root,
+                (_, _) => throw new InvalidOperationException("Must use exact cache."));
+            Assert.Equal(expected, actual);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task MissingClientLayoutDownloadsExactBuildAndRejectsMismatchedResponse()
+    {
+        var root = NewTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "osu!.deps.json"),
+                """{"libraries":{"osu!/2026.518.0-tachyon":{}}}""");
+            var expected = Offsets("2026.518.0", 20);
+            await Assert.ThrowsAsync<InvalidDataException>(() => LazerMemoryOffsets.LoadForClientAsync(
+                Path.Combine(root, "osu!.exe"), root,
+                (_, _) => Task.FromResult(OffsetJson(Offsets("2026.525.0", 30)))));
+            Assert.False(File.Exists(Path.Combine(root, "2026.518.0.json")));
+            var actual = await LazerMemoryOffsets.LoadForClientAsync(
+                Path.Combine(root, "osu!.exe"), root,
+                (version, _) =>
+                {
+                    Assert.Equal(expected.OsuVersion, version);
+                    return Task.FromResult(OffsetJson(expected));
+                });
+            Assert.Equal(expected, actual);
+            Assert.Equal(expected, LazerMemoryOffsets.LoadCached(Path.Combine(root, "2026.518.0.json")));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
     [Fact]
     public void OffsetRefreshPolicyAcceptsNewerAndCorrectedButNotOlderDocuments()
     {

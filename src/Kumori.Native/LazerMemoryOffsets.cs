@@ -24,6 +24,53 @@ internal sealed record LazerMemoryOffsets(
         "https://raw.githubusercontent.com/tosuapp/tosu/master/packages/tosu/src/assets/offsets.json";
     private static readonly HttpClient OfficialOffsetsClient = CreateOfficialOffsetsClient();
 
+    internal static string? ParseClientVersion(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("libraries", out var libraries))
+            return null;
+        foreach (var library in libraries.EnumerateObject())
+        {
+            if (!library.Name.StartsWith("osu!/", StringComparison.Ordinal))
+                continue;
+            var version = library.Name[5..].Split('-')[0];
+            return Version.TryParse(version, out _) ? version : null;
+        }
+        return null;
+    }
+
+    internal static async Task<LazerMemoryOffsets?> LoadForClientAsync(
+        string processPath,
+        string? cacheDirectory = null,
+        Func<string, CancellationToken, Task<string>>? downloadJson = null,
+        CancellationToken cancellationToken = default)
+    {
+        var depsPath = Path.Combine(Path.GetDirectoryName(processPath)!, "osu!.deps.json");
+        if (!File.Exists(depsPath))
+            return null;
+        var version = ParseClientVersion(await File.ReadAllTextAsync(depsPath, cancellationToken)
+            .ConfigureAwait(false));
+        if (version is null)
+            return null;
+
+        // Both release streams use numeric builds. A newer layout cannot safely
+        // read an older or Tachyon process; share tosu's exact-version cache.
+        cacheDirectory ??= Path.Combine(AppPaths.TosuDir, ".cache");
+        var path = Path.Combine(cacheDirectory, version + ".json");
+        var cached = LoadCached(path);
+        if (cached?.OsuVersion == version)
+            return cached;
+
+        var json = await (downloadJson ?? ((build, token) =>
+            OfficialOffsetsClient.GetStringAsync($"https://tosu.app/offsets/{build}.json", token)))
+            (version, cancellationToken).ConfigureAwait(false);
+        var offsets = Parse(json);
+        if (offsets.OsuVersion != version)
+            throw new InvalidDataException($"Expected osu! offsets {version}, received {offsets.OsuVersion}.");
+        Directory.CreateDirectory(cacheDirectory);
+        await ReplaceCacheAsync(path, json, cancellationToken).ConfigureAwait(false);
+        return offsets;
+    }
     public static LazerMemoryOffsets Load(string? path, bool refreshOfficialCache = false)
     {
         path ??= EnsureDefaultOffsetsPath(refreshOfficialCache);
@@ -120,7 +167,9 @@ internal sealed record LazerMemoryOffsets(
         return new LazerMemoryOffsets(
             root.TryGetProperty("OsuVersion", out var version) ? version.GetString() ?? "unknown" : "unknown",
             GetInt64(root, "GameBaseVtable"),
-            GetOffset(root, "osu.Game.OsuGame", "<ScreenStack>k__BackingField"),
+            GetOptionalOffset(root, "osu.Game.OsuGame", "ScreenStack") is >= 0 and var screenStack
+                ? screenStack
+                : GetOffset(root, "osu.Game.OsuGame", "<ScreenStack>k__BackingField"),
             GetOffset(root, "osu.Framework.Screens.ScreenStack", "stack"),
             GetOffset(root, "osu.Game.Screens.Play.Player", "<Score>k__BackingField"),
             GetOffset(root, "osu.Game.Online.Chat.ExternalLinkOpener", "<api>k__BackingField"),
